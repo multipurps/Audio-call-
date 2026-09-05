@@ -107,11 +107,24 @@ async function handleTurn(ws, state) {
   const transcript = await transcribe(audio);
   if (!transcript || !transcript.trim()) return;
 
-  state.history.push({ role: 'user', content: transcript });
+  state.history.push({ speaker: 'contact', content: transcript });
+  await pushTranscript(state);
+
+  // Mute check happens right before the AI would speak, not before it
+  // listens/transcribes — muting silences the AI's voice, it doesn't stop
+  // it following the conversation, so un-muting mid-call doesn't lose context.
+  const { data: call } = await supabase.from('calls').select('ai_muted').eq('id', state.callId).maybeSingle();
+  if (call?.ai_muted) return;
+
   const reply = await think(state);
-  state.history.push({ role: 'assistant', content: reply });
+  state.history.push({ speaker: 'ai', content: reply });
+  await pushTranscript(state);
 
   await speak(ws, state, reply);
+}
+
+async function pushTranscript(state) {
+  await supabase.from('calls').update({ transcript: state.history, status: 'in_progress' }).eq('id', state.callId);
 }
 
 async function transcribe(mulawAudio) {
@@ -134,12 +147,19 @@ async function transcribe(mulawAudio) {
 }
 
 async function think(state) {
+  // Our own history uses {speaker:'ai'|'contact'} for storage/UI purposes;
+  // Groq's chat API wants standard user/assistant roles, so translate here
+  // rather than polluting the stored transcript with API-specific labels.
+  const messages = state.history.map((h) => ({
+    role: h.speaker === 'ai' ? 'assistant' : 'user',
+    content: h.content,
+  }));
   const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'system', content: buildSystemPrompt(state) }, ...state.history],
+      messages: [{ role: 'system', content: buildSystemPrompt(state) }, ...messages],
       temperature: 0.6,
       max_tokens: 150,
     }),

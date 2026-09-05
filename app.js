@@ -3,8 +3,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 // Same pattern as Live Call: project URL is public by design, only the
 // anon key ships to the client — every privileged action goes through
 // api/*.js using the service-role key server-side instead.
-const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
-const SUPABASE_ANON_KEY = 'YOUR-ANON-KEY';
+const SUPABASE_URL = 'https://gucblbvfzuraaozswfwd.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1Y2JsYnZmenVyYWFvenN3ZndkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0NzQ0ODQsImV4cCI6MjA5MTA1MDQ4NH0.OCsEC_FfOJmoL5sQWP8zYnw9SmWuy4xggfcpIIxQw-c';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const $ = (id) => document.getElementById(id);
@@ -156,8 +156,88 @@ $('startCallBtn').addEventListener('click', async () => {
   if (!resp.ok) { alert(data.error || 'Could not start call'); return; }
   $('toNumber').value = '';
   $('objective').value = '';
-  document.querySelector('[data-tab="recent"]').click();
+  openCallScreen(data.callId, toNumber);
 });
+
+// ---------- active call screen ----------
+let activeCallChannel = null;
+let callTimerInterval = null;
+let callAiMuted = false;
+
+function openCallScreen(callId, toNumber) {
+  $('callScreen').classList.remove('hidden');
+  $('callContactAvatar').textContent = toNumber.replace(/[^0-9]/g, '').slice(-2) || '?';
+  $('callTitleText').textContent = toNumber;
+  $('transcriptPanel').innerHTML = '';
+  $('waveRow').classList.remove('speaking');
+  callAiMuted = false;
+  $('callMuteBtn').classList.remove('active');
+
+  const startedAt = Date.now();
+  clearInterval(callTimerInterval);
+  callTimerInterval = setInterval(() => {
+    const secs = Math.floor((Date.now() - startedAt) / 1000);
+    const m = String(Math.floor(secs / 60)).padStart(2, '0');
+    const s = String(secs % 60).padStart(2, '0');
+    $('callTimer').textContent = `${m}:${s}`;
+  }, 1000);
+
+  if (activeCallChannel) supabase.removeChannel(activeCallChannel);
+  activeCallChannel = supabase
+    .channel(`call-${callId}`)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'calls', filter: `id=eq.${callId}` }, (payload) => {
+      renderTranscript(payload.new.transcript || []);
+      if (['completed', 'failed', 'no_answer'].includes(payload.new.status)) closeCallScreen();
+    })
+    .subscribe();
+
+  $('callEndBtn').onclick = async () => {
+    await authedFetch('/api/calls-hangup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callId }),
+    });
+    closeCallScreen();
+  };
+
+  $('callMuteBtn').onclick = async () => {
+    callAiMuted = !callAiMuted;
+    $('callMuteBtn').classList.toggle('active', callAiMuted);
+    await authedFetch('/api/calls-mute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callId, muted: callAiMuted }),
+    });
+  };
+
+  // Audio (speaker route) and Keypad (DTMF) aren't wired to anything real
+  // yet — this app doesn't currently pipe live audio to the browser, and
+  // sending in-call DTMF safely alongside the media stream needs more
+  // work. They're here for visual parity with the reference call screen.
+  $('callAudioBtn').onclick = () => $('callAudioBtn').classList.toggle('active');
+  $('callKeypadBtn').onclick = () => alert('Keypad during a live AI call is not wired up yet.');
+}
+
+function closeCallScreen() {
+  clearInterval(callTimerInterval);
+  if (activeCallChannel) { supabase.removeChannel(activeCallChannel); activeCallChannel = null; }
+  $('callScreen').classList.add('hidden');
+  loadCalls();
+}
+
+function renderTranscript(history) {
+  const panel = $('transcriptPanel');
+  panel.innerHTML = '';
+  for (const line of history) {
+    const el = document.createElement('div');
+    el.className = `transcriptLine ${line.speaker}`;
+    el.innerHTML = `<div class="transcriptDot"></div><div class="transcriptBubble">${line.content}</div>`;
+    panel.appendChild(el);
+  }
+  panel.scrollTop = panel.scrollHeight;
+  const last = history[history.length - 1];
+  $('waveRow').classList.toggle('speaking', last?.speaker === 'ai');
+}
 
 // ---------- recent calls ----------
 async function loadCalls() {

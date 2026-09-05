@@ -1,6 +1,6 @@
-# Audio Call
+# Emysa
 
-Android/web AI phone-calling assistant, in the spirit of Mitra/Osmo: tell it
+Emysa — an Android/web AI phone-calling assistant, in the spirit of Mitra/Osmo: tell it
 what you need done, it makes a real call, handles the conversation, and
 reports back.
 

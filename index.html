@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="coffee-emerald">
+<html lang="en" data-theme="ember">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#1e130d">
-<title>Audio Call</title>
+<meta name="theme-color" content="#0a0806">
+<title>Emysa</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="styles.css">
@@ -18,12 +18,12 @@
   <!-- ---------- auth ---------- -->
   <div id="authScreen">
     <div id="authBoot" style="margin:auto;">
-      <div class="authLogo">AC</div>
+      <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
     </div>
 
     <div id="authBox" style="display:none; margin:auto 0;">
-      <div class="authLogo">AC</div>
-      <div class="authTitle">Audio Call</div>
+      <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
+      <div class="authTitle">Emysa</div>
       <div class="authSub">Tell it what to do. It makes the call.</div>
 
       <button class="secondaryBtn" id="googleSignIn">Continue with Google</button>
@@ -37,7 +37,7 @@
     </div>
 
     <div id="pendingBox" style="display:none;">
-      <div class="authLogo">AC</div>
+      <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
       <div class="authTitle">Pending approval</div>
       <p>Your account is created — an admin needs to approve it before you can start calls. Check back soon.</p>
       <button class="secondaryBtn" id="pendingSignOut">Sign out</button>
@@ -48,7 +48,7 @@
   <div id="screens">
 
     <div class="screen active" id="screen-home">
-      <h1 class="pageTitle">Audio Call</h1>
+      <h1 class="pageTitle">Emysa</h1>
 
       <div class="field">
         <label>Your AI callers</label>
@@ -74,7 +74,8 @@
       <div class="field">
         <label>Theme</label>
         <div class="themeRow">
-          <div class="themeSwatch active" data-theme="coffee-emerald" style="background:#1e130d;"></div>
+          <div class="themeSwatch active" data-theme="ember" style="background:linear-gradient(160deg,#0a0806,#6e2200);"></div>
+          <div class="themeSwatch" data-theme="coffee-emerald" style="background:#1e130d;"></div>
           <div class="themeSwatch" data-theme="midnight-cyan" style="background:#0d1420;"></div>
           <div class="themeSwatch" data-theme="forest-gold" style="background:#0c2318;"></div>
         </div>
@@ -94,17 +95,64 @@
   <!-- ---------- bottom tab nav: flush to true screen edge ---------- -->
   <div id="tabBar">
     <button class="tabBtn active" data-tab="home">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path opacity="0.5" d="M2 12.2039C2 9.91549 2 8.77128 2.5192 7.82274C3.0384 6.87421 3.98695 6.28551 5.88403 5.10813L7.88403 3.86687C9.88939 2.62229 10.8921 2 12 2C13.1079 2 14.1106 2.62229 16.116 3.86687L18.116 5.10812C20.0131 6.28551 20.9616 6.87421 21.4808 7.82274C22 8.77128 22 9.91549 22 12.2039V13.725C22 17.6258 22 19.5763 20.8284 20.7881C19.6569 22 17.7712 22 14 22H10C6.22876 22 4.34315 22 3.17157 20.7881C2 19.5763 2 17.6258 2 13.725V12.2039Z" fill="currentColor"/><path d="M11.25 18C11.25 18.4142 11.5858 18.75 12 18.75C12.4142 18.75 12.75 18.4142 12.75 18V15C12.75 14.5858 12.4142 14.25 12 14.25C11.5858 14.25 11.25 14.5858 11.25 15V18Z" fill="currentColor"/></svg>
       Home
     </button>
     <button class="tabBtn" data-tab="recent">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M22 12c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2s10 4.477 10 10zm-4.581 3.324a1 1 0 0 0-.525-1.313L13 12.341V6.5a1 1 0 0 0-2 0v6.17c0 .6.357 1.143.909 1.379l4.197 1.8a1 1 0 0 0 1.313-.525z" fill="currentColor"/></svg>
       Recent
     </button>
     <button class="tabBtn" data-tab="profile">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
+      <svg viewBox="0 0 24 24" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M6.75 6.5C6.75 3.6005 9.1005 1.25 12 1.25C14.8995 1.25 17.25 3.6005 17.25 6.5C17.25 9.3995 14.8995 11.75 12 11.75C9.1005 11.75 6.75 9.3995 6.75 6.5Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M4.25 18.5714C4.25 15.6325 6.63249 13.25 9.57143 13.25H14.4286C17.3675 13.25 19.75 15.6325 19.75 18.5714C19.75 20.8792 17.8792 22.75 15.5714 22.75H8.42857C6.12081 22.75 4.25 20.8792 4.25 18.5714Z" fill="currentColor"/></svg>
       Profile
     </button>
+  </div>
+
+  <!-- ---------- active call screen ---------- -->
+  <div id="callScreen" class="hidden">
+    <div class="callHeader">
+      <div class="callAvatars">
+        <div class="callAvatar ai"><img id="callAiAvatar" src="icon-192.png" alt=""></div>
+        <div class="callAvatar contact" id="callContactAvatar">?</div>
+      </div>
+      <div class="callTitle" id="callTitleText">Emysa</div>
+      <div class="callTimer" id="callTimer">00:00</div>
+    </div>
+
+    <div class="transcriptPanel" id="transcriptPanel"></div>
+
+    <div class="waveRow" id="waveRow"><span></span><span></span><span></span><span></span><span></span></div>
+
+    <div class="callControls">
+      <div class="callControlsRow">
+        <button class="callBtn" id="callAudioBtn">
+          <div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M16 9C16.5 9.5 17 10.5 17 12C17 13.5 16.5 14.5 16 15M19 6C20.5 7.5 21 10 21 12C21 14 20.5 16.5 19 18M13 3L7 8H5C3.89543 8 3 8.89543 3 10V14C3 15.1046 3.89543 16 5 16H7L13 21V3Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          Audio
+        </button>
+        <button class="callBtn" id="callKeypadBtn">
+          <div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM5 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM21 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM7 5a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM19 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM14 19a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM5 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM21 19a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z" fill="currentColor"/></svg></div>
+          Keypad
+        </button>
+        <button class="callBtn" id="callMuteBtn">
+          <div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="currentColor"><path fill="none" d="M0 0h24v24H0z"/><path d="M16.425 17.839A8.941 8.941 0 0 1 13 18.945V23h-2v-4.055A9.004 9.004 0 0 1 3.055 11H5.07a7.002 7.002 0 0 0 9.87 5.354l-1.551-1.55A5 5 0 0 1 7 10V8.414L1.393 2.808l1.415-1.415 19.799 19.8-1.415 1.414-4.767-4.768zm-7.392-7.392l2.52 2.52a3.002 3.002 0 0 1-2.52-2.52zm10.342 4.713l-1.443-1.442c.509-.81.856-1.73.997-2.718h2.016a8.95 8.95 0 0 1-1.57 4.16zm-2.91-2.909l-1.548-1.548c.054-.226.083-.46.083-.703V6a3 3 0 0 0-5.818-1.032L7.686 3.471A5 5 0 0 1 17 6v4a4.98 4.98 0 0 1-.534 2.251z"/></svg></div>
+          Mute
+        </button>
+      </div>
+      <div class="callControlsRow">
+        <button class="callBtn disabled" id="callJoinBtn">
+          <div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.3308 15.9402L15.6608 14.6101C15.8655 14.403 16.1092 14.2384 16.3778 14.1262C16.6465 14.014 16.9347 13.9563 17.2258 13.9563C17.517 13.9563 17.8052 14.014 18.0739 14.1262C18.3425 14.2384 18.5862 14.403 18.7908 14.6101L20.3508 16.1702C20.5579 16.3748 20.7224 16.6183 20.8346 16.887C20.9468 17.1556 21.0046 17.444 21.0046 17.7351C21.0046 18.0263 20.9468 18.3146 20.8346 18.5833C20.7224 18.8519 20.5579 19.0954 20.3508 19.3L19.6408 20.02C19.1516 20.514 18.5189 20.841 17.8329 20.9541C17.1469 21.0672 16.4427 20.9609 15.8208 20.6501C10.4691 17.8952 6.11008 13.5396 3.35083 8.19019C3.03976 7.56761 2.93414 6.86242 3.04914 6.17603C3.16414 5.48963 3.49384 4.85731 3.99085 4.37012L4.70081 3.65015C5.11674 3.23673 5.67937 3.00464 6.26581 3.00464C6.85225 3.00464 7.41488 3.23673 7.83081 3.65015L9.40082 5.22021C9.81424 5.63615 10.0463 6.19871 10.0463 6.78516C10.0463 7.3716 9.81424 7.93416 9.40082 8.3501L8.0708 9.68018C8.95021 10.8697 9.91617 11.9926 10.9608 13.04C11.9994 14.0804 13.116 15.04 14.3008 15.9102L14.3308 15.9402Z" stroke="currentColor" stroke-width="0.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M20.9998 3L15.3398 8.66" stroke="currentColor" stroke-width="0.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M19.5898 8.65991H15.3398V4.40991" stroke="currentColor" stroke-width="0.9" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          Join
+        </button>
+        <button class="callBtn endCall" id="callEndBtn">
+          <div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 13.4782L8 12.8617C8 12.8617 8 11.3963 12 11.3963C16 11.3963 16 12.8617 16 12.8617V13.25C16 14.2064 16.7227 15.0192 17.7004 15.1625L19.7004 15.4556C20.9105 15.6329 22 14.7267 22 13.5429V11.4183C22 10.8313 21.8162 10.2542 21.3703 9.85601C20.2296 8.83732 17.4208 7 12 7C6.25141 7 3.44027 9.58269 2.44083 10.7889C2.1247 11.1704 2 11.6525 2 12.1414L2 14.0643C2 15.3623 3.29561 16.292 4.57997 15.9156L6.57997 15.3295C7.42329 15.0823 8 14.3305 8 13.4782Z" fill="currentColor"/></svg></div>
+          End
+        </button>
+        <button class="callBtn disabled" id="callAddBtn">
+          <div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C9.38 2 7.25 4.13 7.25 6.75C7.25 9.32 9.26 11.4 11.88 11.49C11.96 11.48 12.04 11.48 12.1 11.49C12.12 11.49 12.13 11.49 12.15 11.49C12.16 11.49 12.16 11.49 12.17 11.49C14.73 11.4 16.74 9.32 16.75 6.75C16.75 4.13 14.62 2 12 2Z" fill="currentColor"/><path d="M17.0809 14.1489C14.2909 12.2889 9.74094 12.2889 6.93094 14.1489C5.66094 14.9989 4.96094 16.1489 4.96094 17.3789C4.96094 18.6089 5.66094 19.7489 6.92094 20.5889C8.32094 21.5289 10.1609 21.9989 12.0009 21.9989C13.8409 21.9989 15.6809 21.5289 17.0809 20.5889C18.3409 19.7389 19.0409 18.5989 19.0409 17.3589C19.0309 16.1289 18.3409 14.9889 17.0809 14.1489ZM14.0009 18.1289H12.7509V19.3789C12.7509 19.7889 12.4109 20.1289 12.0009 20.1289C11.5909 20.1289 11.2509 19.7889 11.2509 19.3789V18.1289H10.0009C9.59094 18.1289 9.25094 17.7889 9.25094 17.3789C9.25094 16.9689 9.59094 16.6289 10.0009 16.6289H11.2509V15.3789C11.2509 14.9689 11.5909 14.6289 12.0009 14.6289H12.7509V16.6289H14.0009C14.4109 16.6289 14.7509 16.9689 14.7509 17.3789C14.7509 17.7889 14.4109 18.1289 14.0009 18.1289Z" fill="currentColor"/></svg></div>
+          Add
+        </button>
+      </div>
+    </div>
   </div>
 
 </div>
