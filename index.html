@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="coffee-emerald">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1e130d">
+<title>Audio Call</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ---------- auth ---------- -->
+  <div id="authScreen">
+    <div id="authBoot" style="margin:auto;">
+      <div class="authLogo">AC</div>
+    </div>
+
+    <div id="authBox" style="display:none; margin:auto 0;">
+      <div class="authLogo">AC</div>
+      <div class="authTitle">Audio Call</div>
+      <div class="authSub">Tell it what to do. It makes the call.</div>
+
+      <button class="secondaryBtn" id="googleSignIn">Continue with Google</button>
+      <div class="authDivider">or email</div>
+
+      <div class="field"><label>Email</label><input type="email" id="authEmail" autocomplete="email"></div>
+      <div class="field"><label>Password</label><input type="password" id="authPassword" autocomplete="current-password"></div>
+      <button class="primaryBtn" id="authSubmit">Sign in</button>
+      <div class="authToggle" id="authToggleMode">Need an account? <b>Sign up</b></div>
+      <div class="authHint" id="authHint"></div>
+    </div>
+
+    <div id="pendingBox" style="display:none;">
+      <div class="authLogo">AC</div>
+      <div class="authTitle">Pending approval</div>
+      <p>Your account is created — an admin needs to approve it before you can start calls. Check back soon.</p>
+      <button class="secondaryBtn" id="pendingSignOut">Sign out</button>
+    </div>
+  </div>
+
+  <!-- ---------- main screens ---------- -->
+  <div id="screens">
+
+    <div class="screen active" id="screen-home">
+      <h1 class="pageTitle">Audio Call</h1>
+
+      <div class="field">
+        <label>Your AI callers</label>
+      </div>
+      <div class="callerGrid" id="callerList"></div>
+      <button class="secondaryBtn" id="newCallerBtn" style="margin-bottom:24px;">New AI caller</button>
+
+      <div class="field"><label>Phone number to call</label><input type="tel" id="toNumber" placeholder="+1 555 000 0000"></div>
+      <div class="field"><label>What should it accomplish</label><textarea id="objective" placeholder="Call this restaurant and ask if they have a table for four tomorrow at 8pm."></textarea></div>
+      <button class="primaryBtn" id="startCallBtn">Start call</button>
+    </div>
+
+    <div class="screen" id="screen-recent">
+      <h1 class="pageTitle">Recent</h1>
+      <div id="callsList"></div>
+    </div>
+
+    <div class="screen" id="screen-profile">
+      <h1 class="pageTitle">Profile</h1>
+
+      <div class="field"><label>Your name</label><input type="text" id="profileName"></div>
+
+      <div class="field">
+        <label>Theme</label>
+        <div class="themeRow">
+          <div class="themeSwatch active" data-theme="coffee-emerald" style="background:#1e130d;"></div>
+          <div class="themeSwatch" data-theme="midnight-cyan" style="background:#0d1420;"></div>
+          <div class="themeSwatch" data-theme="forest-gold" style="background:#0c2318;"></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Your voice</label>
+        <button class="recordBtn" id="recordVoiceBtn">Record 10-30s to clone your voice</button>
+        <div class="authHint" id="voiceStatus"></div>
+      </div>
+
+      <button class="secondaryBtn" id="signOutBtn" style="margin-top:20px;">Sign out</button>
+    </div>
+
+  </div>
+
+  <!-- ---------- bottom tab nav: flush to true screen edge ---------- -->
+  <div id="tabBar">
+    <button class="tabBtn active" data-tab="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+      Home
+    </button>
+    <button class="tabBtn" data-tab="recent">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+      Recent
+    </button>
+    <button class="tabBtn" data-tab="profile">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
+      Profile
+    </button>
+  </div>
+
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
