@@ -182,6 +182,7 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .callBtn.disabled{opacity:0.35;}
 
 /* ---------- admin ---------- */
+.hidden{display:none !important;}
 .tabBtn.hidden{display:none;}
 .adminUserRow{display:flex; align-items:center; justify-content:space-between; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px; margin-bottom:10px; gap:10px;}
 .adminUserEmail{font-size:13.5px; font-weight:600; word-break:break-all;}

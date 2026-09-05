@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="ember">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0806">
+<title>Emysa Admin</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="../icon-192.png">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  /* Admin is a single screen, no tab bar / call-screen chrome from the main app. */
+  #adminApp{position:fixed; inset:0; overflow-y:auto; padding:0 18px 40px;}
+  .adminHeader{padding-top:56px; margin-bottom:20px; text-align:center;}
+  .adminHeader img{width:56px; height:56px; border-radius:16px; margin:0 auto 10px;}
+</style>
+</head>
+<body>
+
+<div id="authScreen">
+  <div id="authBoot" style="margin:auto;">
+    <div class="authLogo"><img src="../icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
+  </div>
+
+  <div id="authBox" style="display:none; margin:auto 0;">
+    <div class="authLogo"><img src="../icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
+    <div class="authTitle">Emysa Admin</div>
+    <div class="authSub">Sign in with the admin account.</div>
+
+    <div class="field"><label>Email</label><input type="email" id="authEmail" autocomplete="email"></div>
+    <div class="field"><label>Password</label><input type="password" id="authPassword" autocomplete="current-password"></div>
+    <button class="primaryBtn" id="authSubmit">Sign in</button>
+    <div class="authHint" id="authHint"></div>
+  </div>
+
+  <div id="notAdminBox" style="display:none; margin:auto 0; text-align:center;">
+    <div class="authLogo"><img src="../icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
+    <div class="authTitle">Not an admin account</div>
+    <p style="color:var(--dim); font-size:14.5px; margin:10px 0 24px;">This account isn't set as ADMIN_EMAIL.</p>
+    <button class="secondaryBtn" id="notAdminSignOut">Sign out</button>
+  </div>
+</div>
+
+<div id="adminApp" class="hidden">
+  <div class="adminHeader">
+    <img src="../icon-192.png" alt="">
+    <h1 class="pageTitle" style="padding-top:0;">Emysa Admin</h1>
+  </div>
+
+  <div class="field">
+    <label>Login screen background</label>
+    <button class="secondaryBtn" id="uploadBgBtn">Upload background image</button>
+    <input type="file" id="bgFileInput" accept="image/*" style="display:none;">
+    <div class="authHint" id="bgUploadStatus"></div>
+  </div>
+
+  <div class="field"><label>Users</label></div>
+  <div id="adminUserList"></div>
+
+  <button class="secondaryBtn" id="signOutBtn" style="margin-top:24px;">Sign out</button>
+</div>
+
+<script type="module" src="admin.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {}));
+  }
+</script>
+</body>
+</html>
