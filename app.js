@@ -26,6 +26,7 @@ document.querySelectorAll('.tabBtn').forEach((btn) => {
     target.classList.add('active', 'fadeIn');
     if (btn.dataset.tab === 'recent') loadCalls();
     if (btn.dataset.tab === 'home') loadCallers();
+    if (btn.dataset.tab === 'admin') loadAdminUsers();
   });
 });
 
@@ -80,6 +81,7 @@ async function enterApp(session) {
   $('pendingBox').style.display = 'none';
   authScreen.classList.add('hidden');
   loadCallers();
+  tryRevealAdmin();
 }
 
 supabase.auth.onAuthStateChange((_event, session) => {
@@ -322,3 +324,69 @@ function blobToBase64(blob) {
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
+
+// ---------- admin ----------
+// The tab only appears if the admin-only endpoint actually accepts this
+// user — server-side ADMIN_EMAIL check decides that, not anything in this
+// client code, so this is just about not showing the tab to people it
+// would reject anyway.
+async function tryRevealAdmin() {
+  const resp = await authedFetch('/api/admin-list-users');
+  $('adminTabBtn').classList.toggle('hidden', !resp.ok);
+}
+
+async function loadAdminUsers() {
+  const resp = await authedFetch('/api/admin-list-users');
+  if (!resp.ok) return;
+  const { users } = await resp.json();
+  const list = $('adminUserList');
+  list.innerHTML = '';
+  for (const u of users) {
+    const row = document.createElement('div');
+    row.className = 'adminUserRow';
+    row.innerHTML = `
+      <div>
+        <div class="adminUserEmail">${u.email}</div>
+        <div class="adminUserMeta">${u.minutes_used}/${u.minutes_limit} min used this period</div>
+      </div>
+      <button class="adminApproveBtn ${u.approved ? 'approved' : ''}">${u.approved ? 'Approved' : 'Approve'}</button>`;
+    row.querySelector('button').addEventListener('click', async () => {
+      await authedFetch('/api/admin-set-approval', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetUserId: u.id, approved: !u.approved }),
+      });
+      loadAdminUsers();
+    });
+    list.appendChild(row);
+  }
+}
+
+$('uploadBgBtn').addEventListener('click', () => $('bgFileInput').click());
+$('bgFileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  $('bgUploadStatus').textContent = 'Uploading...';
+  const imageBase64 = await blobToBase64(file);
+  const resp = await authedFetch('/api/admin-upload-background', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageBase64, mimeType: file.type }),
+  });
+  const data = await resp.json();
+  $('bgUploadStatus').textContent = resp.ok ? 'Background updated.' : (data.error || 'Upload failed.');
+  if (resp.ok) applyAuthBackground(data.url);
+});
+
+function applyAuthBackground(url) {
+  authScreen.style.backgroundImage = `linear-gradient(rgba(10,8,6,0.55), rgba(10,8,6,0.85)), url('${url}')`;
+  authScreen.style.backgroundSize = 'cover';
+  authScreen.style.backgroundPosition = 'center';
+}
+
+// Public read (no sign-in needed) so the login screen itself can be
+// themed before anyone has authenticated.
+(async () => {
+  const { data } = await supabase.from('app_settings').select('value').eq('key', 'auth_background_url').maybeSingle();
+  if (data?.value) applyAuthBackground(data.value);
+})();
