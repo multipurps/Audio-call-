@@ -234,7 +234,7 @@ $('startCallBtn').addEventListener('click', async () => {
   if (!toNumber || !objective) return;
   $('startCallBtn').disabled = true;
   $('startCallBtn').textContent = 'Calling...';
-  const resp = await authedFetch('/api/calls-create', {
+  const resp = await authedFetch('/api/calls?action=create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ callerId: window.__selectedCallerId || null, toNumber, objective }),
@@ -281,7 +281,7 @@ function openCallScreen(callId, toNumber) {
     .subscribe();
 
   $('callEndBtn').onclick = async () => {
-    await authedFetch('/api/calls-hangup', {
+    await authedFetch('/api/calls?action=hangup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ callId }),
@@ -292,7 +292,7 @@ function openCallScreen(callId, toNumber) {
   $('callMuteBtn').onclick = async () => {
     callAiMuted = !callAiMuted;
     $('callMuteBtn').classList.toggle('active', callAiMuted);
-    await authedFetch('/api/calls-mute', {
+    await authedFetch('/api/calls?action=mute', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ callId, muted: callAiMuted }),
@@ -331,7 +331,7 @@ function renderTranscript(history) {
 // ---------- recent calls ----------
 async function loadCalls() {
   if (!currentSession) return;
-  const resp = await authedFetch('/api/calls-list');
+  const resp = await authedFetch('/api/calls?action=list');
   if (!resp.ok) return;
   const { calls } = await resp.json();
   const list = $('callsList');

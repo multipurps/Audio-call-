@@ -45,7 +45,7 @@ async function enterAdmin() {
   // The /api/admin-* endpoints already check ADMIN_EMAIL server-side —
   // this call doubles as the gate for this page too, same source of truth,
   // no separate admin check to keep in sync.
-  const resp = await authedFetch('/api/admin-list-users');
+  const resp = await authedFetch('/api/admin?action=list-users');
   $('authBoot').classList.add('hidden');
   $('authBox').classList.add('hidden');
   if (!resp.ok) {
@@ -85,12 +85,12 @@ function renderUsers({ users }) {
       </div>`;
 
     row.querySelector('.adminApproveBtn').addEventListener('click', async () => {
-      await authedFetch('/api/admin-set-approval', {
+      await authedFetch('/api/admin?action=set-approval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targetUserId: u.id, approved: !u.approved }),
       });
-      const resp = await authedFetch('/api/admin-list-users');
+      const resp = await authedFetch('/api/admin?action=list-users');
       if (resp.ok) renderUsers(await resp.json());
     });
 
@@ -99,7 +99,7 @@ function renderUsers({ users }) {
       const val = Number(input.value);
       if (!Number.isFinite(val) || val < 0) return;
       e.target.textContent = 'Saving...';
-      await authedFetch('/api/admin-set-approval', {
+      await authedFetch('/api/admin?action=set-approval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targetUserId: u.id, monthlyMinuteLimit: val }),
@@ -128,10 +128,10 @@ async function loadBackgrounds() {
   grid.querySelectorAll('button[data-id]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       btn.disabled = true;
-      const resp = await authedFetch('/api/admin-upload-background', {
+      const resp = await authedFetch('/api/admin?action=delete-background', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'delete', id: btn.dataset.id }),
+        body: JSON.stringify({ id: btn.dataset.id }),
       });
       const data = await resp.json();
       if (!resp.ok) { $('bgUploadStatus').textContent = data.error || 'Delete failed.'; btn.disabled = false; return; }
@@ -146,7 +146,7 @@ $('bgFileInput').addEventListener('change', async (e) => {
   if (!file) return;
   $('bgUploadStatus').textContent = 'Uploading...';
   const imageBase64 = await blobToBase64(file);
-  const resp = await authedFetch('/api/admin-upload-background', {
+  const resp = await authedFetch('/api/admin?action=upload-background', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ imageBase64, mimeType: file.type }),
@@ -172,7 +172,7 @@ $('announceSendBtn').addEventListener('click', async () => {
   const body = $('announceBody').value.trim();
   if (!title || !body) { $('announceHint').textContent = 'Fill in both fields.'; return; }
   $('announceHint').textContent = 'Sending…';
-  const resp = await authedFetch('/api/send-announcement', {
+  const resp = await authedFetch('/api/admin?action=send-announcement', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, body }),
@@ -188,7 +188,7 @@ $('announceSendBtn').addEventListener('click', async () => {
 async function loadUsage() {
   const list = $('adminUsageList');
   list.innerHTML = '<div class="authHint">Loading…</div>';
-  const resp = await authedFetch('/api/admin-analytics');
+  const resp = await authedFetch('/api/admin?action=analytics');
   const data = await resp.json();
   if (!resp.ok) { list.innerHTML = `<div class="authHint">${data.error || 'Could not load usage.'}</div>`; return; }
   if (!data.users.length) { list.innerHTML = '<div class="authHint">No call activity yet.</div>'; return; }
