@@ -197,10 +197,15 @@ async function enterApp(session) {
   // This Supabase project may be shared with other apps of yours — mark this
   // user as belonging to Audio Call so the admin's user list can filter to
   // just this app instead of showing every account on the shared project.
-  await supabase.from('profiles').upsert(
-    { user_id: currentUser.id },
-    { onConflict: 'user_id', ignoreDuplicates: true }
-  );
+  // Best-effort only: this must never block the boot sequence below.
+  try {
+    await supabase.from('profiles').upsert(
+      { user_id: currentUser.id },
+      { onConflict: 'user_id', ignoreDuplicates: true }
+    );
+  } catch (err) {
+    console.error('profile tagging failed (non-fatal):', err);
+  }
   const approved = await checkApproval(currentUser.id);
   $('authBoot').style.display = 'none';
   document.querySelectorAll('.authPanel').forEach((p) => p.classList.remove('active'));
@@ -252,6 +257,25 @@ supabase.auth.onAuthStateChange((_event, session) => {
     startAuthFlow();
   }
 });
+
+// Don't rely solely on onAuthStateChange to ever fire — check the current
+// session directly on load too, so the splash screen can't get stuck
+// forever if that event is slow, doesn't arrive, or something above throws.
+supabase.auth.getSession()
+  .then(({ data }) => {
+    if (data.session?.user && !currentUser) enterApp(data.session);
+    else if (!data.session && $('authBoot').style.display !== 'none') {
+      $('authBoot').style.display = 'none';
+      authScreen.classList.remove('hidden');
+      startAuthFlow();
+    }
+  })
+  .catch((err) => {
+    console.error('getSession failed:', err);
+    $('authBoot').style.display = 'none';
+    authScreen.classList.remove('hidden');
+    startAuthFlow();
+  });
 
 // ---------- AI callers ----------
 async function loadCallers() {
