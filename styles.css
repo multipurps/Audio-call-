@@ -318,3 +318,49 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .plainInput::placeholder{color:var(--dim); font-weight:500;}
 .profileCard.signOutCard{justify-content:flex-start;}
 .profileCard.signOutCard .cValue{color:#ff6b6b;}
+.profileCard.linkCard{cursor:pointer;}
+.profileCard .cChevron{flex:none; color:var(--dim); opacity:0.7;}
+.profileCard .cChevron svg{width:16px; height:16px;}
+
+/* ---------- avatar upload ---------- */
+.avatarWrap{position:relative; width:88px; height:88px; margin:8px auto 14px;}
+.avatarWrap .avatarCircle{margin:0; width:100%; height:100%; overflow:hidden;}
+.avatarWrap .avatarCircle img{width:100%; height:100%; object-fit:cover; border-radius:50%;}
+.avatarEditBtn{
+  position:absolute; right:-2px; bottom:-2px; width:30px; height:30px; border-radius:50%;
+  background:var(--accent); border:3px solid var(--coffee); display:flex; align-items:center;
+  justify-content:center; cursor:pointer; color:#fff;
+}
+.avatarEditBtn svg{width:14px; height:14px;}
+
+/* ---------- toggle switch ---------- */
+.toggleSwitch{
+  position:relative; flex:none; width:46px; height:27px; border-radius:14px;
+  background:rgba(255,255,255,0.14); cursor:pointer; transition:background .2s ease;
+}
+.toggleSwitch::after{
+  content:""; position:absolute; top:2px; left:2px; width:23px; height:23px; border-radius:50%;
+  background:#fff; transition:transform .2s ease;
+}
+.toggleSwitch.on{background:var(--accent);}
+.toggleSwitch.on::after{transform:translateX(19px);}
+
+/* ---------- legal / help full-screen sheet ---------- */
+.sheetScreen{position:fixed; inset:0; z-index:150; background:var(--coffee); display:flex; flex-direction:column;}
+.sheetScreen.hidden{display:none;}
+.sheetHeader{display:flex; align-items:center; gap:14px; padding:calc(env(safe-area-inset-top, 0px) + 18px) 20px 14px;}
+.sheetBack{
+  width:34px; height:34px; border-radius:50%; background:var(--glass-bg); backdrop-filter:blur(16px);
+  -webkit-backdrop-filter:blur(16px); border:1px solid var(--glass-border); display:flex;
+  align-items:center; justify-content:center; color:#fff; flex:none; cursor:pointer;
+}
+.sheetBack svg{width:16px; height:16px;}
+.sheetTitle{font-size:18px; font-weight:700;}
+.sheetBody{flex:1; overflow-y:auto; padding:4px 22px 40px; -webkit-overflow-scrolling:touch;}
+.sheetBody h2{font-size:15px; font-weight:700; margin:22px 0 8px;}
+.sheetBody h2:first-child{margin-top:4px;}
+.sheetBody p, .sheetBody li{font-size:13.5px; line-height:1.6; color:var(--dim); margin-bottom:8px;}
+.sheetBody ul{padding-left:18px;}
+.sheetBody .legalMeta{font-size:12px; color:var(--dim); opacity:0.7; margin-bottom:18px;}
+.socialRow{display:flex; gap:10px;}
+.socialRow .profileCard{flex:1; justify-content:center; margin-bottom:0;}

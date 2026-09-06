@@ -189,11 +189,24 @@ async function enterApp(session) {
   moveTabGlider('home');
 }
 
-function renderProfileHeader() {
+function renderAvatar(url) {
+  const el = $('profileAvatarCircle');
+  const email = currentUser?.email || '';
+  if (url) {
+    el.innerHTML = `<img src="${url}" alt="">`;
+  } else {
+    el.textContent = email ? email[0].toUpperCase() : '?';
+  }
+}
+
+async function renderProfileHeader() {
   if (!currentUser) return;
   const email = currentUser.email || '';
   $('profileEmailDisplay').textContent = email;
-  $('profileAvatarCircle').textContent = email ? email[0].toUpperCase() : '?';
+  renderAvatar(null);
+  const { data } = await supabase.from('profiles').select('avatar_url, name').eq('user_id', currentUser.id).maybeSingle();
+  if (data?.avatar_url) renderAvatar(data.avatar_url);
+  if (data?.name && !$('profileName').value) $('profileName').value = data.name;
 }
 
 supabase.auth.onAuthStateChange((_event, session) => {
@@ -398,6 +411,135 @@ async function loadCalls() {
     list.appendChild(el);
   }
 }
+
+// ---------- name (persist on blur) ----------
+$('profileName').addEventListener('blur', async () => {
+  if (!currentUser) return;
+  const name = $('profileName').value.trim();
+  await supabase.from('profiles').upsert({ user_id: currentUser.id, name }, { onConflict: 'user_id' });
+});
+
+// ---------- profile picture upload ----------
+$('avatarEditBtn').addEventListener('click', () => $('avatarFileInput').click());
+$('avatarFileInput').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file || !currentUser) return;
+  if (!file.type.startsWith('image/')) {
+    $('avatarStatus').textContent = 'Please choose an image file.';
+    return;
+  }
+  if (file.size > 8 * 1024 * 1024) {
+    $('avatarStatus').textContent = 'Image is too large (max 8MB).';
+    return;
+  }
+  $('avatarStatus').textContent = 'Uploading...';
+  try {
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const path = `${currentUser.id}/avatar.${ext}`;
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(path, file, { upsert: true, contentType: file.type });
+    if (uploadError) throw uploadError;
+    const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
+    // Cache-bust so the new photo shows immediately even though the URL path is unchanged.
+    const url = `${pub.publicUrl}?v=${Date.now()}`;
+    const { error: dbError } = await supabase
+      .from('profiles')
+      .upsert({ user_id: currentUser.id, avatar_url: url }, { onConflict: 'user_id' });
+    if (dbError) throw dbError;
+    renderAvatar(url);
+    $('avatarStatus').textContent = 'Profile picture updated.';
+  } catch (err) {
+    console.error('avatar upload failed:', err);
+    $('avatarStatus').textContent = 'Could not upload photo — try a smaller image.';
+  }
+});
+
+// ---------- notifications & haptics toggles ----------
+const HAPTICS_KEY = 'emysa_haptics_enabled';
+
+function setToggle(el, on) {
+  el.classList.toggle('on', !!on);
+}
+
+function haptic() {
+  if (localStorage.getItem(HAPTICS_KEY) !== '0' && navigator.vibrate) navigator.vibrate(8);
+}
+
+async function refreshNotificationsToggle() {
+  const supported = 'Notification' in window;
+  const granted = supported && Notification.permission === 'granted';
+  setToggle($('notificationsToggle'), granted);
+  $('notificationsStatus').textContent = !supported
+    ? 'Notifications aren\'t supported in this browser.'
+    : Notification.permission === 'denied'
+      ? 'Blocked at the browser/OS level — enable in system settings to turn this back on.'
+      : '';
+}
+
+$('notificationsToggle').addEventListener('click', async () => {
+  haptic();
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'granted') {
+    $('notificationsStatus').textContent = 'To turn notifications off, disable them for this app in your browser or OS settings.';
+    return;
+  }
+  if (Notification.permission === 'denied') {
+    $('notificationsStatus').textContent = 'Blocked at the browser/OS level — enable in system settings to turn this back on.';
+    return;
+  }
+  await ensureNotificationsEnabled();
+  await refreshNotificationsToggle();
+});
+
+setToggle($('hapticToggle'), localStorage.getItem(HAPTICS_KEY) !== '0');
+$('hapticToggle').addEventListener('click', () => {
+  const nowOn = localStorage.getItem(HAPTICS_KEY) === '0'; // was off, turning on
+  localStorage.setItem(HAPTICS_KEY, nowOn ? '1' : '0');
+  setToggle($('hapticToggle'), nowOn);
+  if (nowOn) haptic();
+});
+
+refreshNotificationsToggle();
+
+// ---------- legal / help / data-controls sheets ----------
+const SUPPORT_EMAIL = 'support@emysa.app'; // update to your real support inbox
+document.querySelectorAll('#termsContactEmail, #privacyContactEmail, #helpContactEmail').forEach((el) => { el.textContent = SUPPORT_EMAIL; });
+
+const todayLabel = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+$('termsUpdatedDate').textContent = todayLabel;
+$('privacyUpdatedDate').textContent = todayLabel;
+
+function openSheet(id) {
+  haptic();
+  document.querySelectorAll('.sheetScreen').forEach((s) => s.classList.add('hidden'));
+  $(id).classList.remove('hidden');
+}
+function closeSheets() {
+  document.querySelectorAll('.sheetScreen').forEach((s) => s.classList.add('hidden'));
+}
+document.querySelectorAll('[data-close-sheet]').forEach((btn) => btn.addEventListener('click', closeSheets));
+
+$('termsBtn').addEventListener('click', () => openSheet('sheet-terms'));
+$('privacyBtn').addEventListener('click', () => openSheet('sheet-privacy'));
+$('helpFaqBtn').addEventListener('click', () => openSheet('sheet-help'));
+$('dataControlsBtn').addEventListener('click', () => openSheet('sheet-data'));
+$('dataToPrivacyLink').addEventListener('click', () => openSheet('sheet-privacy'));
+
+function mailtoSupport(subject, body) {
+  const email = currentUser?.email ? ` (account: ${currentUser.email})` : '';
+  window.location.href = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body + email)}`;
+}
+$('exportDataBtn').addEventListener('click', () => mailtoSupport('Data export request', 'Please send me a copy of the personal data associated with my account.'));
+$('deleteVoiceBtn').addEventListener('click', () => {
+  if (!confirm('Delete your cloned voice? You can record a new one any time.')) return;
+  mailtoSupport('Delete my cloned voice', 'Please delete the voice model associated with my account.');
+});
+$('deleteAccountBtn').addEventListener('click', () => {
+  if (!confirm('This permanently deletes your account and all associated data. Continue?')) return;
+  mailtoSupport('Delete my account', 'Please permanently delete my account and all associated data.');
+});
 
 // ---------- theme ----------
 document.querySelectorAll('.themeSwatch').forEach((sw) => {
