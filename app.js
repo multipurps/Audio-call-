@@ -67,8 +67,8 @@ document.querySelectorAll('.tabBtn').forEach((btn) => {
     moveTabGlider(btn.dataset.tab);
     $('homeInputBar').classList.toggle('visible', btn.dataset.tab === 'home');
     if (btn.dataset.tab === 'recent') loadCalls();
-    if (btn.dataset.tab === 'home') loadCallers();
     if (btn.dataset.tab === 'profile') renderProfileHeader();
+    if (btn.dataset.tab === 'home') startMessagePolling(); else stopMessagePolling();
   });
 });
 window.addEventListener('resize', () => {
@@ -213,9 +213,9 @@ async function enterApp(session) {
   stopPendingPoll();
   $('pendingBox').style.display = 'none';
   authScreen.classList.add('hidden');
-  loadCallers();
   ensureNotificationsEnabled();
   renderProfileHeader();
+  initHomeChat();
   moveTabGlider('home');
 }
 
@@ -245,6 +245,7 @@ supabase.auth.onAuthStateChange((_event, session) => {
   } else {
     currentUser = null;
     currentSession = null;
+    stopMessagePolling();
     $('authBoot').style.display = 'none';
     $('pendingBox').style.display = 'none';
     authScreen.classList.remove('hidden');
@@ -295,37 +296,142 @@ $('newCallerBtn').addEventListener('click', async () => {
   if (resp.ok) loadCallers();
 });
 
-// ---------- start a call: single chat-style composer, parse the number out ----------
-const PHONE_RE = /(\+?\d[\d\s().-]{6,}\d)/;
+// ---------- Home: chat with the assistant (Mitra-style) ----------
+// Replaces the old "type a raw phone number" composer: you talk to the
+// assistant in plain language, it looks up who you mean in your saved
+// Contacts, places the call itself, and status updates (busy, no answer,
+// finished) get posted back into this same thread asynchronously by the
+// Twilio status webhook (api/calls-status.js) — see api/assistant.js for
+// the actual orchestration.
+let homeMessageIds = new Set();
+let pollTimer = null;
 
-function extractCallRequest(text) {
-  const match = text.match(PHONE_RE);
-  if (!match) return null;
-  const toNumber = match[1].replace(/[^\d+]/g, '');
-  const objective = (text.slice(0, match.index) + ' ' + text.slice(match.index + match[0].length)).trim();
-  return { toNumber, objective: objective || text.trim() };
+function greetingForNow(name) {
+  const h = new Date().getHours();
+  const time = h < 5 ? 'night' : h < 12 ? 'morning' : h < 17 ? 'afternoon' : h < 21 ? 'evening' : 'night';
+  const who = name ? `, ${name}` : '';
+  return `Good ${time}${who}, what can I help you with today?`;
+}
+
+async function initHomeChat() {
+  if (!currentUser) return;
+  const { data } = await supabase.from('profiles').select('name').eq('user_id', currentUser.id).maybeSingle();
+  const displayName = data?.name || (currentUser.email || '').split('@')[0];
+  $('homeIdleGreeting').textContent = greetingForNow(displayName);
+
+  const resp = await authedFetch('/api/assistant?action=messages');
+  if (resp.ok) {
+    const { messages } = await resp.json();
+    renderHomeMessages(messages || [], true);
+  }
+  startMessagePolling();
+}
+
+function setHomeChatActive(active) {
+  $('homeIdle').classList.toggle('hidden', active);
+  $('homeChat').classList.toggle('hidden', !active);
+  $('homeHeaderLogo').classList.toggle('hidden', !active);
+}
+
+function renderHomeMessages(messages, replaceAll) {
+  if (replaceAll) {
+    $('homeChat').innerHTML = '';
+    homeMessageIds.clear();
+  }
+  let added = false;
+  let lastDay = replaceAll ? null : dayKey(lastRenderedAt());
+  for (const m of messages) {
+    if (homeMessageIds.has(m.id)) continue;
+    homeMessageIds.add(m.id);
+    added = true;
+    const day = dayKey(m.created_at);
+    if (day !== lastDay) {
+      const div = document.createElement('div');
+      div.className = 'chatDayDivider';
+      div.textContent = formatDayLabel(m.created_at);
+      $('homeChat').appendChild(div);
+      lastDay = day;
+    }
+    appendChatBubble(m);
+  }
+  if (added) setHomeChatActive(true);
+  if (added || replaceAll) {
+    if (messages.length === 0) setHomeChatActive(false);
+    $('homeChat').scrollTop = $('homeChat').scrollHeight;
+  }
+}
+
+function lastRenderedAt() {
+  const nodes = $('homeChat').querySelectorAll('[data-created]');
+  return nodes.length ? nodes[nodes.length - 1].dataset.created : null;
+}
+
+function dayKey(iso) {
+  if (!iso) return null;
+  return new Date(iso).toDateString();
+}
+
+function formatDayLabel(iso) {
+  const d = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function appendChatBubble(m) {
+  const el = document.createElement('div');
+  el.className = `chatMsg ${m.role === 'user' ? 'chatMsgUser' : 'chatMsgAssistant'}`;
+  el.dataset.created = m.created_at;
+  el.textContent = m.content;
+  if (m.call_id) {
+    el.classList.add('chatMsgTappable');
+    el.addEventListener('click', () => openCallFromMessage(m.call_id));
+  }
+  $('homeChat').appendChild(el);
+}
+
+async function openCallFromMessage(callId) {
+  const resp = await authedFetch('/api/calls?action=list');
+  if (!resp.ok) return;
+  const { calls } = await resp.json();
+  const call = (calls || []).find((c) => c.id === callId);
+  if (!call || !['queued', 'ringing', 'in_progress'].includes(call.status)) return; // call's over, nothing live to show
+  openCallScreen(call.id, call.to_number);
+}
+
+async function sendChatMessage(text) {
+  appendChatBubble({ id: `local-${Date.now()}`, role: 'user', content: text, created_at: new Date().toISOString() });
+  setHomeChatActive(true);
+  $('homeChat').scrollTop = $('homeChat').scrollHeight;
+
+  const resp = await authedFetch('/api/assistant?action=send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, callerId: window.__selectedCallerId || null }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) {
+    appendChatBubble({ id: `err-${Date.now()}`, role: 'assistant', content: data.error || 'Something went wrong.', created_at: new Date().toISOString() });
+    return;
+  }
+  // The optimistic user bubble above already shows this turn; mark the
+  // server's saved copy of it as seen (without re-rendering) so the next
+  // poll doesn't draw a second, duplicate copy of the same user message.
+  const savedUserMsg = (data.messages || []).find((m) => m.role === 'user');
+  if (savedUserMsg) homeMessageIds.add(savedUserMsg.id);
+  renderHomeMessages((data.messages || []).filter((m) => m.role !== 'user'), false);
 }
 
 async function sendBrief() {
   const text = $('briefInput').value.trim();
   if (!text) return;
-  const parsed = extractCallRequest(text);
-  if (!parsed) {
-    alert('Include a phone number in the message — e.g. "Call +1 555 000 0000 and ask about a table for four."');
-    return;
-  }
   $('sendBtn').disabled = true;
-  const resp = await authedFetch('/api/calls?action=create', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ callerId: window.__selectedCallerId || null, toNumber: parsed.toNumber, objective: parsed.objective }),
-  });
-  const data = await resp.json();
-  $('sendBtn').disabled = false;
-  if (!resp.ok) { alert(data.error || 'Could not start call'); return; }
   $('briefInput').value = '';
   $('briefInput').style.height = 'auto';
-  openCallScreen(data.callId, parsed.toNumber);
+  await sendChatMessage(text);
+  $('sendBtn').disabled = false;
 }
 
 $('sendBtn').addEventListener('click', sendBrief);
@@ -336,6 +442,125 @@ $('briefInput').addEventListener('input', () => {
   const el = $('briefInput');
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+});
+
+function startMessagePolling() {
+  if (pollTimer || !currentUser) return;
+  pollTimer = setInterval(async () => {
+    const resp = await authedFetch('/api/assistant?action=messages');
+    if (!resp.ok) return;
+    const { messages } = await resp.json();
+    renderHomeMessages(messages || [], false);
+  }, 5000);
+}
+function stopMessagePolling() {
+  clearInterval(pollTimer);
+  pollTimer = null;
+}
+
+// ---------- Home header: hamburger menu + wave (voice input) ----------
+$('homeMenuBtn').addEventListener('click', () => openSheet('sheet-home-menu'));
+$('menuCallersBtn').addEventListener('click', () => { loadCallers(); openSheet('sheet-callers'); });
+$('menuContactsBtn').addEventListener('click', () => { loadContacts(); openSheet('sheet-contacts'); });
+$('menuClearBtn').addEventListener('click', async () => {
+  if (!confirm('Clear the whole conversation with Mitra? This can\'t be undone.')) return;
+  await authedFetch('/api/assistant?action=clear', { method: 'POST' });
+  $('homeChat').innerHTML = '';
+  homeMessageIds.clear();
+  setHomeChatActive(false);
+  closeSheets();
+});
+
+let waveRecorder = null;
+let waveChunks = [];
+$('homeWaveBtn').addEventListener('click', async () => {
+  if (waveRecorder && waveRecorder.state === 'recording') {
+    waveRecorder.stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    waveChunks = [];
+    waveRecorder = new MediaRecorder(stream);
+    waveRecorder.ondataavailable = (e) => waveChunks.push(e.data);
+    waveRecorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      $('homeWaveBtn').classList.remove('recording');
+      const blob = new Blob(waveChunks, { type: 'audio/webm' });
+      const base64 = await blobToBase64(blob);
+      $('briefInput').placeholder = 'Transcribing…';
+      const resp = await authedFetch('/api/assistant?action=transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioBase64: base64, mimeType: 'audio/webm' }),
+      });
+      $('briefInput').placeholder = 'Message';
+      const data = await resp.json();
+      if (resp.ok && data.text?.trim()) sendChatMessage(data.text.trim());
+      else if (!resp.ok) alert(data.error || 'Could not transcribe — try typing instead.');
+    };
+    waveRecorder.start();
+    $('homeWaveBtn').classList.add('recording');
+  } catch (err) {
+    alert('Microphone access is needed to talk to Mitra by voice.');
+  }
+});
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+// ---------- Contacts (so the assistant can call people by name) ----------
+async function loadContacts() {
+  const resp = await authedFetch('/api/contacts');
+  if (!resp.ok) return;
+  const { contacts } = await resp.json();
+  const list = $('contactsList');
+  list.innerHTML = '';
+  if (!contacts?.length) {
+    list.innerHTML = `<div class="authHint" style="text-align:left;">No contacts saved yet.</div>`;
+    return;
+  }
+  for (const c of contacts) {
+    const el = document.createElement('div');
+    el.className = 'profileCard';
+    el.innerHTML = `
+      <div class="cIcon">${(c.name || '?')[0].toUpperCase()}</div>
+      <div class="cBody"><div class="cValue">${c.name}</div><div class="cLabel">${c.phone_number}</div></div>`;
+    const del = document.createElement('button');
+    del.className = 'plainInput';
+    del.style.cssText = 'width:auto; padding:8px 12px; cursor:pointer; color:#ff6b6b;';
+    del.textContent = 'Remove';
+    del.addEventListener('click', async () => {
+      await authedFetch('/api/contacts', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id }) });
+      loadContacts();
+    });
+    el.appendChild(del);
+    list.appendChild(el);
+  }
+}
+
+$('addContactBtn').addEventListener('click', async () => {
+  const name = $('newContactName').value.trim();
+  const phoneNumber = $('newContactPhone').value.trim();
+  if (!name || !phoneNumber) { $('contactStatus').textContent = 'Name and phone number are both required.'; return; }
+  $('contactStatus').textContent = 'Saving…';
+  const resp = await authedFetch('/api/contacts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, phoneNumber }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) { $('contactStatus').textContent = data.error || 'Could not save contact.'; return; }
+  $('newContactName').value = '';
+  $('newContactPhone').value = '';
+  $('contactStatus').textContent = 'Contact added.';
+  loadContacts();
 });
 
 // ---------- active call screen ----------

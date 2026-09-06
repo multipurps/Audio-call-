@@ -141,13 +141,21 @@
   <div id="screens">
 
     <div class="screen active" id="screen-home">
-      <h1 class="pageTitle">Emysa</h1>
-
-      <div class="field">
-        <label>Your AI callers</label>
+      <div class="homeHeader">
+        <button class="homeHeaderBtn" id="homeMenuBtn" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+        <div class="homeHeaderTitle">
+          <img class="homeHeaderLogo hidden" id="homeHeaderLogo" src="icon-192.png" alt="">
+          <span>Emysa</span>
+        </div>
+        <button class="homeHeaderBtn" id="homeWaveBtn" aria-label="Talk to Mitra"><svg viewBox="0 0 24 24" fill="none"><path d="M3 12h2M7 8v8M11 5v14M15 8v8M19 10v4M21 12h0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
       </div>
-      <div class="callerGrid" id="callerList"></div>
-      <button class="secondaryBtn" id="newCallerBtn" style="margin-bottom:24px;">New AI caller</button>
+
+      <div class="homeIdle" id="homeIdle">
+        <img class="homeIdleLogo" src="icon-192.png" alt="">
+        <div class="homeIdleGreeting" id="homeIdleGreeting">Hi, what can I help you with today?</div>
+      </div>
+
+      <div class="homeChat hidden" id="homeChat"></div>
     </div>
 
     <div class="screen" id="screen-recent">
@@ -301,7 +309,7 @@
   </div>
 
   <div id="homeInputBar" class="visible">
-    <textarea id="briefInput" rows="1" placeholder="Call +1 555 000 0000 and ask about a table for four…" enterkeyhint="go"></textarea>
+    <textarea id="briefInput" rows="1" placeholder="Message" enterkeyhint="go"></textarea>
     <button id="sendBtn" aria-label="Send">
       <svg viewBox="0 0 24 24" fill="none"><path d="M3 11L21 3L13 21L11 13L3 11Z" fill="white"/></svg>
     </button>
@@ -677,7 +685,21 @@
     <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="sheetTitle">Contacts</div>
   </div>
-  <div class="sheetBody"><p>Importing contacts isn't available yet — check back soon.</p></div>
+  <div class="sheetBody">
+    <p>Save people here so you can just say "call Juicy Jay" instead of typing a number.</p>
+    <div class="profileCard">
+      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M20 21c0-3.87-3.58-7-8-7s-8 3.13-8 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="1.8"/></svg></div>
+      <div class="cBody"><input class="plainInput" id="newContactName" type="text" autocomplete="off" placeholder="Name"></div>
+    </div>
+    <div class="profileCard">
+      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M6.6 10.8c1.2 2.4 3.2 4.4 5.6 5.6l1.9-1.9c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.5.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.5.1.4 0 .8-.2 1l-1.9 1.9z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+      <div class="cBody"><input class="plainInput" id="newContactPhone" type="tel" autocomplete="off" placeholder="Phone number"></div>
+    </div>
+    <button class="secondaryBtn" id="addContactBtn" style="margin-bottom:18px;">Add contact</button>
+    <div class="authHint" id="contactStatus" style="margin:-10px 0 14px 4px;"></div>
+    <div class="sectionLabel">Saved contacts</div>
+    <div id="contactsList"></div>
+  </div>
 </div>
 <div class="sheetScreen hidden" id="sheet-archive">
   <div class="sheetHeader">
@@ -719,6 +741,44 @@
   </div>
 </div>
 
+<div class="sheetScreen hidden" id="sheet-callers">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">AI Callers</div>
+  </div>
+  <div class="sheetBody">
+    <div class="field">
+      <label>Your AI callers</label>
+    </div>
+    <div class="callerGrid" id="callerList"></div>
+    <button class="secondaryBtn" id="newCallerBtn" style="margin-bottom:24px;">New AI caller</button>
+  </div>
+</div>
+
+<div class="sheetScreen hidden" id="sheet-home-menu">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">Menu</div>
+  </div>
+  <div class="sheetBody">
+    <div class="profileCard linkCard" id="menuCallersBtn">
+      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M16 2 8 22M2 16l6 4M22 8l-6-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="cBody"><div class="cValue">AI Callers</div></div>
+      <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    </div>
+    <div class="profileCard linkCard" id="menuContactsBtn">
+      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3.2" stroke="currentColor" stroke-width="1.6"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3.2 3.2 0 0 1 0 6.4M20 20c0-2.8-1.8-5.1-4.3-5.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+      <div class="cBody"><div class="cValue">Contacts</div></div>
+      <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    </div>
+    <div class="profileCard linkCard signOutCard" id="menuClearBtn">
+      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="cBody"><div class="cValue">Clear conversation</div></div>
+    </div>
+  </div>
+</div>
+
 <script type="module" src="app.js"></script>
+
 </body>
 </html>

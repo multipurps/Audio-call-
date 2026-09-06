@@ -68,3 +68,17 @@ skeleton with the full Twilio <-> Groq <-> Fish Audio loop wired up. Not yet
 tuned against real calls: silence-detection timing in the relay, mulaw/WAV
 framing for Whisper, and the IVR/hold-music handling from the original spec
 still need real-call testing before this is production-ready.
+
+Home screen is now a chat with the assistant ("Mitra"-style), not a raw
+number composer: `contacts` (name -> phone number, managed from Profile ->
+Contacts) let you say "call Juicy Jay" instead of typing digits; `POST
+/api/assistant?action=send` runs one Groq call to decide call vs. retry vs.
+plain reply, then places the call itself; `api/calls-status.js` posts a
+follow-up message (busy / no answer / finished) back into the same thread
+once Twilio's status webhook fires, so the chat updates on its own while
+you keep using the app. Voice input (the wave icon) records with
+`MediaRecorder` and transcribes via Groq Whisper — same model the relay
+already uses. All of this needs `GROQ_API_KEY` set in the Vercel project
+(added to `.env.example`) and `sql/007_assistant.sql` run against Supabase
+before it'll do anything; until then `api/assistant.js` replies with an
+explicit "not configured yet" message instead of failing silently.

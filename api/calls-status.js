@@ -20,7 +20,7 @@ export default async function handler(req, res) {
   };
   const status = statusMap[CallStatus] || CallStatus;
 
-  const { data: call } = await supabase.from('calls').select('user_id').eq('id', callId).maybeSingle();
+  const { data: call } = await supabase.from('calls').select('user_id, contact_id, status').eq('id', callId).maybeSingle();
 
   const update = { status };
   if (RecordingUrl) update.recording_url = RecordingUrl;
@@ -44,5 +44,44 @@ export default async function handler(req, res) {
     });
   }
 
+  // Only calls placed through the Mitra-style home chat carry a contact_id
+  // (see api/assistant.js) — calls started from the older manual "type a
+  // number" composer have none, so we don't post noise into a thread that
+  // was never talking about them. When a terminal status comes in for one
+  // of these, post a natural-language follow-up back into that same thread
+  // so the chat updates asynchronously, exactly like the real call does.
+  if (call?.user_id && call?.contact_id && ['no_answer', 'completed', 'failed'].includes(status) && status !== call.status) {
+    await postAssistantFollowUp(supabase, call.user_id, call.contact_id, callId, status, CallDuration);
+  }
+
   return res.status(200).send('ok');
+}
+
+async function postAssistantFollowUp(supabase, userId, contactId, callId, status, callDuration) {
+  const { data: contact } = await supabase.from('contacts').select('name').eq('id', contactId).maybeSingle();
+  const name = contact?.name || 'them';
+
+  // Roughly how many times we've already tried this contact today, so a
+  // repeated busy signal reads as "still busy" rather than resetting each time.
+  const since = new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString();
+  const { count } = await supabase
+    .from('calls')
+    .select('id', { count: 'exact', head: true })
+    .eq('contact_id', contactId)
+    .gte('created_at', since);
+  const attempts = count || 1;
+
+  let content;
+  if (status === 'no_answer') {
+    content = attempts > 1
+      ? `${name}'s line is still busy. Would you like me to try again in a little while?`
+      : `I tried calling ${name}, but the line was busy.`;
+  } else if (status === 'failed') {
+    content = `I couldn't reach ${name} — the call failed to connect.`;
+  } else {
+    const mins = callDuration ? Math.max(1, Math.round(parseInt(callDuration, 10) / 60)) : null;
+    content = mins ? `Finished the call with ${name} (about ${mins} min).` : `Finished the call with ${name}.`;
+  }
+
+  await supabase.from('assistant_messages').insert({ user_id: userId, role: 'assistant', content, call_id: callId });
 }
