@@ -24,6 +24,17 @@ $('authSubmit').addEventListener('click', async () => {
 $('signOutBtn').addEventListener('click', () => supabase.auth.signOut());
 $('notAdminSignOut').addEventListener('click', () => supabase.auth.signOut());
 
+// Locked to whichever Google account's email matches ADMIN_EMAIL — the
+// server-side check in requireAdmin() (used by every /api/admin-* route,
+// and by enterAdmin() below to gate this page) is the real enforcement.
+// Any other Google account just lands on the "Not an admin account" screen.
+$('googleSignIn').addEventListener('click', () => {
+  supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: window.location.origin + window.location.pathname },
+  });
+});
+
 supabase.auth.onAuthStateChange((_event, session) => {
   currentSession = session;
   if (session?.user) enterAdmin();
