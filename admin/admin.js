@@ -166,6 +166,24 @@ function blobToBase64(blob) {
   });
 }
 
+// ---------- announcements ----------
+$('announceSendBtn').addEventListener('click', async () => {
+  const title = $('announceTitle').value.trim();
+  const body = $('announceBody').value.trim();
+  if (!title || !body) { $('announceHint').textContent = 'Fill in both fields.'; return; }
+  $('announceHint').textContent = 'Sending…';
+  const resp = await authedFetch('/api/send-announcement', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, body }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) { $('announceHint').textContent = data.error || 'Send failed.'; return; }
+  $('announceHint').textContent = `Sent to ${data.sent} of ${data.total} subscribed users.`;
+  $('announceTitle').value = '';
+  $('announceBody').value = '';
+});
+
 // ---------- usage ----------
 async function loadUsage() {
   const list = $('adminUsageList');

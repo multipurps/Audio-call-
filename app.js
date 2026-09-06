@@ -94,6 +94,36 @@ $('signOutBtn').addEventListener('click', () => supabase.auth.signOut());
 $('pendingSignOut').addEventListener('click', () => supabase.auth.signOut());
 $('pendingRecheck').addEventListener('click', () => { if (currentSession) enterApp(currentSession); });
 
+// ---------- push notifications ----------
+const VAPID_PUBLIC_KEY = 'BERe9PaZxK_8m5HY4fqmzJrDcjXd5jDrcgrV8GTiiWC_HXWVKXM-li-jHId_oJ9CE73EYlxTQPhlAOlG_4NdgHw';
+
+function urlBase64ToUint8Array(base64String) {
+  const padded = (base64String + '='.repeat((4 - (base64String.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(padded);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+async function ensureNotificationsEnabled() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    if (await reg.pushManager.getSubscription()) return;
+    if (Notification.permission === 'denied') return;
+    if ((await Notification.requestPermission()) !== 'granted') return;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+    await fetch('/api/save-push-subscription', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentSession?.access_token || ''}` },
+      body: JSON.stringify({ subscription: sub.toJSON() }),
+    });
+  } catch (err) {
+    console.error('ensureNotificationsEnabled failed:', err);
+  }
+}
+
 async function checkApproval(userId) {
   const { data } = await supabase.from('user_approvals').select('approved').eq('user_id', userId).maybeSingle();
   return !!data?.approved;
@@ -118,6 +148,13 @@ function startPendingPoll() {
 async function enterApp(session) {
   currentSession = session;
   currentUser = session.user;
+  // This Supabase project may be shared with other apps of yours — mark this
+  // user as belonging to Audio Call so the admin's user list can filter to
+  // just this app instead of showing every account on the shared project.
+  await supabase.from('profiles').upsert(
+    { user_id: currentUser.id },
+    { onConflict: 'user_id', ignoreDuplicates: true }
+  );
   const approved = await checkApproval(currentUser.id);
   $('authBoot').style.display = 'none';
   document.querySelectorAll('.authPanel').forEach((p) => p.classList.remove('active'));
@@ -131,6 +168,7 @@ async function enterApp(session) {
   $('pendingBox').style.display = 'none';
   authScreen.classList.add('hidden');
   loadCallers();
+  ensureNotificationsEnabled();
 }
 
 supabase.auth.onAuthStateChange((_event, session) => {
