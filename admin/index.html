@@ -99,6 +99,14 @@
       boot.innerHTML = `<div style="text-align:center; padding:0 24px; color:#ffb199; font-size:13px;">Script error: ${e.message}</div>`;
     }
   });
+  // Async errors (a rejected promise with no .catch) don't fire 'error' —
+  // this is what was actually causing the silent stuck splash screen.
+  window.addEventListener('unhandledrejection', (e) => {
+    const boot = document.getElementById('authBoot');
+    if (boot && !boot.classList.contains('hidden')) {
+      boot.innerHTML = `<div style="text-align:center; padding:0 24px; color:#ffb199; font-size:13px;">${(e.reason && e.reason.message) || e.reason}</div>`;
+    }
+  });
 </script>
 <script type="module" src="admin.js"></script>
 <script>

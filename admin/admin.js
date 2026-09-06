@@ -42,23 +42,30 @@ supabase.auth.onAuthStateChange((_event, session) => {
 });
 
 async function enterAdmin() {
-  // The /api/admin-* endpoints already check ADMIN_EMAIL server-side —
-  // this call doubles as the gate for this page too, same source of truth,
-  // no separate admin check to keep in sync.
-  const resp = await authedFetch('/api/admin?action=list-users');
-  $('authBoot').classList.add('hidden');
-  $('authBox').classList.add('hidden');
-  if (!resp.ok) {
-    $('notAdminBox').classList.remove('hidden');
-    $('adminApp').classList.add('hidden');
-    return;
+  try {
+    // The /api/admin-* endpoints already check ADMIN_EMAIL server-side —
+    // this call doubles as the gate for this page too, same source of truth,
+    // no separate admin check to keep in sync.
+    const resp = await authedFetch('/api/admin?action=list-users');
+    $('authBoot').classList.add('hidden');
+    $('authBox').classList.add('hidden');
+    if (!resp.ok) {
+      $('notAdminBox').classList.remove('hidden');
+      $('adminApp').classList.add('hidden');
+      return;
+    }
+    $('notAdminBox').classList.add('hidden');
+    document.getElementById('authScreen').classList.add('hidden');
+    $('adminApp').classList.remove('hidden');
+    renderUsers(await resp.json());
+    loadBackgrounds();
+    loadUsage();
+  } catch (err) {
+    // A thrown error in here used to leave the splash screen stuck forever
+    // with zero feedback — any network hiccup on the first fetch, and
+    // nothing after that line ever ran. Now it surfaces instead of hanging.
+    showBootError(err);
   }
-  $('notAdminBox').classList.add('hidden');
-  document.getElementById('authScreen').classList.add('hidden');
-  $('adminApp').classList.remove('hidden');
-  renderUsers(await resp.json());
-  loadBackgrounds();
-  loadUsage();
 }
 
 // ---------- users: approve + per-user minute limit ----------

@@ -148,10 +148,6 @@
       </div>
       <div class="callerGrid" id="callerList"></div>
       <button class="secondaryBtn" id="newCallerBtn" style="margin-bottom:24px;">New AI caller</button>
-
-      <div class="field"><label>Phone number to call</label><input type="tel" id="toNumber" placeholder="+1 555 000 0000"></div>
-      <div class="field"><label>What should it accomplish</label><textarea id="objective" placeholder="Call this restaurant and ask if they have a table for four tomorrow at 8pm."></textarea></div>
-      <button class="primaryBtn" id="startCallBtn">Start call</button>
     </div>
 
     <div class="screen" id="screen-recent">
@@ -160,12 +156,37 @@
     </div>
 
     <div class="screen" id="screen-profile">
-      <h1 class="pageTitle">Profile</h1>
+      <div class="profileHeaderRow">
+        <h1 class="pageTitle" style="margin:0;">Profile</h1>
+      </div>
 
-      <div class="field"><label>Your name</label><input type="text" id="profileName"></div>
+      <div class="profileCardCenter">
+        <div class="avatarCircle" id="profileAvatarCircle">?</div>
+        <div class="profileName" id="profileEmailDisplay" style="text-align:center; margin-bottom:4px;">Emysa</div>
+        <div class="profileSub">Your account</div>
+      </div>
 
+      <div class="sectionLabel">Profile</div>
+      <div class="profileCard">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M20 21c0-3.87-3.58-7-8-7s-8 3.13-8 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="1.8"/></svg></div>
+        <div class="cBody">
+          <div class="cLabel">Your name</div>
+          <input class="plainInput" id="profileName" type="text" autocomplete="off" placeholder="What should we call you?">
+        </div>
+      </div>
+
+      <div class="sectionLabel">Voice</div>
+      <div class="profileCard">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z" stroke="currentColor" stroke-width="1.7"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
+        <div class="cBody">
+          <div class="cLabel">Your cloned voice</div>
+          <button class="plainInput recordBtn" id="recordVoiceBtn" style="text-align:left; cursor:pointer;">Record 10-30s to clone your voice</button>
+        </div>
+      </div>
+      <div class="authHint" id="voiceStatus" style="margin:-4px 0 8px 4px;"></div>
+
+      <div class="sectionLabel">Appearance</div>
       <div class="field">
-        <label>Theme</label>
         <div class="themeRow">
           <div class="themeSwatch active" data-theme="ss2" style="background:linear-gradient(160deg,#0d0714,#5b1a8f);"></div>
           <div class="themeSwatch" data-theme="coffee-emerald" style="background:#1e130d;"></div>
@@ -175,30 +196,35 @@
         </div>
       </div>
 
-      <div class="field">
-        <label>Your voice</label>
-        <button class="recordBtn" id="recordVoiceBtn">Record 10-30s to clone your voice</button>
-        <div class="authHint" id="voiceStatus"></div>
+      <div class="sectionLabel">App</div>
+      <div class="profileCard signOutCard" id="signOutBtn" style="cursor:pointer;">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="cBody"><div class="cValue">Sign out</div></div>
       </div>
-
-      <button class="secondaryBtn" id="signOutBtn" style="margin-top:20px;">Sign out</button>
     </div>
 
   </div>
 
+  <div id="homeInputBar" class="visible">
+    <textarea id="briefInput" rows="1" placeholder="Call +1 555 000 0000 and ask about a table for four…" enterkeyhint="go"></textarea>
+    <button id="sendBtn" aria-label="Send">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M3 11L21 3L13 21L11 13L3 11Z" fill="white"/></svg>
+    </button>
+  </div>
+
   <!-- ---------- bottom tab nav: flush to true screen edge ---------- -->
   <div id="tabBar">
+    <div id="tabGlider"></div>
     <button class="tabBtn active" data-tab="home">
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path opacity="0.5" d="M2 12.2039C2 9.91549 2 8.77128 2.5192 7.82274C3.0384 6.87421 3.98695 6.28551 5.88403 5.10813L7.88403 3.86687C9.88939 2.62229 10.8921 2 12 2C13.1079 2 14.1106 2.62229 16.116 3.86687L18.116 5.10812C20.0131 6.28551 20.9616 6.87421 21.4808 7.82274C22 8.77128 22 9.91549 22 12.2039V13.725C22 17.6258 22 19.5763 20.8284 20.7881C19.6569 22 17.7712 22 14 22H10C6.22876 22 4.34315 22 3.17157 20.7881C2 19.5763 2 17.6258 2 13.725V12.2039Z" fill="currentColor"/><path d="M11.25 18C11.25 18.4142 11.5858 18.75 12 18.75C12.4142 18.75 12.75 18.4142 12.75 18V15C12.75 14.5858 12.4142 14.25 12 14.25C11.5858 14.25 11.25 14.5858 11.25 15V18Z" fill="currentColor"/></svg>
-      Home
     </button>
     <button class="tabBtn" data-tab="recent">
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M22 12c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2s10 4.477 10 10zm-4.581 3.324a1 1 0 0 0-.525-1.313L13 12.341V6.5a1 1 0 0 0-2 0v6.17c0 .6.357 1.143.909 1.379l4.197 1.8a1 1 0 0 0 1.313-.525z" fill="currentColor"/></svg>
-      Recent
     </button>
     <button class="tabBtn" data-tab="profile">
-      <svg viewBox="0 0 24 24" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M6.75 6.5C6.75 3.6005 9.1005 1.25 12 1.25C14.8995 1.25 17.25 3.6005 17.25 6.5C17.25 9.3995 14.8995 11.75 12 11.75C9.1005 11.75 6.75 9.3995 6.75 6.5Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M4.25 18.5714C4.25 15.6325 6.63249 13.25 9.57143 13.25H14.4286C17.3675 13.25 19.75 15.6325 19.75 18.5714C19.75 20.8792 17.8792 22.75 15.5714 22.75H8.42857C6.12081 22.75 4.25 20.8792 4.25 18.5714Z" fill="currentColor"/></svg>
-      Profile
+      <span class="tabAvatarRing">
+        <svg viewBox="0 0 24 24" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M6.75 6.5C6.75 3.6005 9.1005 1.25 12 1.25C14.8995 1.25 17.25 3.6005 17.25 6.5C17.25 9.3995 14.8995 11.75 12 11.75C9.1005 11.75 6.75 9.3995 6.75 6.5Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M4.25 18.5714C4.25 15.6325 6.63249 13.25 9.57143 13.25H14.4286C17.3675 13.25 19.75 15.6325 19.75 18.5714C19.75 20.8792 17.8792 22.75 15.5714 22.75H8.42857C6.12081 22.75 4.25 20.8792 4.25 18.5714Z" fill="currentColor"/></svg>
+      </span>
     </button>
   </div>
 

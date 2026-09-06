@@ -17,6 +17,16 @@ async function authedFetch(url, options = {}) {
 }
 
 // ---------- tabs ----------
+function moveTabGlider(name) {
+  const glider = $('tabGlider');
+  const btn = document.querySelector(`#tabBar .tabBtn[data-tab="${name}"]`);
+  if (!glider || !btn) return;
+  const barRect = $('tabBar').getBoundingClientRect();
+  const btnRect = btn.getBoundingClientRect();
+  if (btnRect.width === 0) return;
+  glider.style.transform = `translateX(${btnRect.left - barRect.left - 6}px)`;
+}
+
 document.querySelectorAll('.tabBtn').forEach((btn) => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tabBtn').forEach((b) => b.classList.remove('active'));
@@ -24,9 +34,15 @@ document.querySelectorAll('.tabBtn').forEach((btn) => {
     document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active', 'fadeIn'));
     const target = $(`screen-${btn.dataset.tab}`);
     target.classList.add('active', 'fadeIn');
+    moveTabGlider(btn.dataset.tab);
+    $('homeInputBar').classList.toggle('visible', btn.dataset.tab === 'home');
     if (btn.dataset.tab === 'recent') loadCalls();
     if (btn.dataset.tab === 'home') loadCallers();
+    if (btn.dataset.tab === 'profile') renderProfileHeader();
   });
+});
+window.addEventListener('resize', () => {
+  moveTabGlider(document.querySelector('#tabBar .tabBtn.active')?.dataset.tab || 'home');
 });
 
 // ---------- auth ----------
@@ -169,6 +185,15 @@ async function enterApp(session) {
   authScreen.classList.add('hidden');
   loadCallers();
   ensureNotificationsEnabled();
+  renderProfileHeader();
+  moveTabGlider('home');
+}
+
+function renderProfileHeader() {
+  if (!currentUser) return;
+  const email = currentUser.email || '';
+  $('profileEmailDisplay').textContent = email;
+  $('profileAvatarCircle').textContent = email ? email[0].toUpperCase() : '?';
 }
 
 supabase.auth.onAuthStateChange((_event, session) => {
@@ -227,25 +252,47 @@ $('newCallerBtn').addEventListener('click', async () => {
   if (resp.ok) loadCallers();
 });
 
-// ---------- start a call ----------
-$('startCallBtn').addEventListener('click', async () => {
-  const toNumber = $('toNumber').value.trim();
-  const objective = $('objective').value.trim();
-  if (!toNumber || !objective) return;
-  $('startCallBtn').disabled = true;
-  $('startCallBtn').textContent = 'Calling...';
+// ---------- start a call: single chat-style composer, parse the number out ----------
+const PHONE_RE = /(\+?\d[\d\s().-]{6,}\d)/;
+
+function extractCallRequest(text) {
+  const match = text.match(PHONE_RE);
+  if (!match) return null;
+  const toNumber = match[1].replace(/[^\d+]/g, '');
+  const objective = (text.slice(0, match.index) + ' ' + text.slice(match.index + match[0].length)).trim();
+  return { toNumber, objective: objective || text.trim() };
+}
+
+async function sendBrief() {
+  const text = $('briefInput').value.trim();
+  if (!text) return;
+  const parsed = extractCallRequest(text);
+  if (!parsed) {
+    alert('Include a phone number in the message — e.g. "Call +1 555 000 0000 and ask about a table for four."');
+    return;
+  }
+  $('sendBtn').disabled = true;
   const resp = await authedFetch('/api/calls?action=create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ callerId: window.__selectedCallerId || null, toNumber, objective }),
+    body: JSON.stringify({ callerId: window.__selectedCallerId || null, toNumber: parsed.toNumber, objective: parsed.objective }),
   });
   const data = await resp.json();
-  $('startCallBtn').disabled = false;
-  $('startCallBtn').textContent = 'Start call';
+  $('sendBtn').disabled = false;
   if (!resp.ok) { alert(data.error || 'Could not start call'); return; }
-  $('toNumber').value = '';
-  $('objective').value = '';
-  openCallScreen(data.callId, toNumber);
+  $('briefInput').value = '';
+  $('briefInput').style.height = 'auto';
+  openCallScreen(data.callId, parsed.toNumber);
+}
+
+$('sendBtn').addEventListener('click', sendBrief);
+$('briefInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBrief(); }
+});
+$('briefInput').addEventListener('input', () => {
+  const el = $('briefInput');
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
 });
 
 // ---------- active call screen ----------
