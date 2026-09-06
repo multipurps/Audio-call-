@@ -92,10 +92,27 @@ $('signupApple').addEventListener('click', () => supabase.auth.signInWithOAuth({
 
 $('signOutBtn').addEventListener('click', () => supabase.auth.signOut());
 $('pendingSignOut').addEventListener('click', () => supabase.auth.signOut());
+$('pendingRecheck').addEventListener('click', () => { if (currentSession) enterApp(currentSession); });
 
 async function checkApproval(userId) {
   const { data } = await supabase.from('user_approvals').select('approved').eq('user_id', userId).maybeSingle();
   return !!data?.approved;
+}
+
+// A user stuck on the pending screen had no way to find out they'd been
+// approved short of signing out and back in — poll while pending so
+// approval takes effect on its own.
+let pendingPollTimer = null;
+function stopPendingPoll() {
+  if (pendingPollTimer) { clearInterval(pendingPollTimer); pendingPollTimer = null; }
+}
+function startPendingPoll() {
+  stopPendingPoll();
+  pendingPollTimer = setInterval(async () => {
+    if (!currentUser) { stopPendingPoll(); return; }
+    const approved = await checkApproval(currentUser.id);
+    if (approved) { stopPendingPoll(); enterApp(currentSession); }
+  }, 15000);
 }
 
 async function enterApp(session) {
@@ -107,8 +124,10 @@ async function enterApp(session) {
   if (!approved) {
     authScreen.classList.remove('hidden');
     $('pendingBox').style.display = 'block';
+    startPendingPoll();
     return;
   }
+  stopPendingPoll();
   $('pendingBox').style.display = 'none';
   authScreen.classList.add('hidden');
   loadCallers();
@@ -360,16 +379,31 @@ if ('serviceWorker' in navigator) {
 // user — server-side ADMIN_EMAIL check decides that, not anything in this
 // client code, so this is just about not showing the tab to people it
 // would reject anyway.
-// ---------- login background (set by the admin app, shown here) ----------
-function applyAuthBackground(url) {
-  authScreen.style.backgroundImage = `linear-gradient(rgba(10,8,6,0.55), rgba(10,8,6,0.85)), url('${url}')`;
-  authScreen.style.backgroundSize = 'cover';
-  authScreen.style.backgroundPosition = 'center';
+// ---------- welcome/login/signup backgrounds (gallery set by the admin app, auto-rotates here) ----------
+const authBgLayers = [$('authBgA'), $('authBgB')];
+let authBgUrls = [];
+let authBgIndex = 0;
+let authBgActiveLayer = 0;
+
+function showAuthBg(url) {
+  const nextLayer = authBgActiveLayer === 0 ? 1 : 0;
+  authBgLayers[nextLayer].style.backgroundImage = `url('${url}')`;
+  authBgLayers[nextLayer].style.opacity = '1';
+  authBgLayers[authBgActiveLayer].style.opacity = '0';
+  authBgActiveLayer = nextLayer;
 }
 
-// Public read (no sign-in needed) so the login screen itself can be
+// Public read (no sign-in needed) so the welcome/login screens can be
 // themed before anyone has authenticated.
 (async () => {
-  const { data } = await supabase.from('app_settings').select('value').eq('key', 'auth_background_url').maybeSingle();
-  if (data?.value) applyAuthBackground(data.value);
+  const { data } = await supabase.from('auth_backgrounds').select('url').order('created_at', { ascending: true });
+  authBgUrls = (data || []).map((r) => r.url);
+  if (!authBgUrls.length) return;
+  showAuthBg(authBgUrls[0]);
+  if (authBgUrls.length > 1) {
+    setInterval(() => {
+      authBgIndex = (authBgIndex + 1) % authBgUrls.length;
+      showAuthBg(authBgUrls[authBgIndex]);
+    }, 6000);
+  }
 })();

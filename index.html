@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="ember">
+<html lang="en" data-theme="ss2">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#0a0806">
+<meta name="theme-color" content="#0d0714">
 <title>Emysa</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -17,29 +17,24 @@
 
   <!-- ---------- auth ---------- -->
   <div id="authScreen">
+    <div class="authBgLayer" id="authBgA"></div>
+    <div class="authBgLayer" id="authBgB"></div>
+    <div class="authBgOverlay"></div>
+
     <div id="authBoot" style="margin:auto;">
       <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
     </div>
 
-    <div id="panelGetStarted" class="authPanel">
-      <div class="gsHero">
-        <svg viewBox="0 0 96 96" fill="none">
-          <circle cx="48" cy="40" r="30" fill="currentColor" opacity="0.12"/>
-          <path d="M32 34c0-4 3-7 7-7h2l4 9-4 4c2 6 6 10 12 12l4-4 9 4v2c0 4-3 7-7 7-14 0-27-13-27-27z" fill="currentColor"/>
-          <g stroke="currentColor" stroke-width="3" stroke-linecap="round">
-            <line x1="24" y1="70" x2="24" y2="80"/>
-            <line x1="36" y1="64" x2="36" y2="84"/>
-            <line x1="48" y1="58" x2="48" y2="88"/>
-            <line x1="60" y1="64" x2="60" y2="84"/>
-            <line x1="72" y1="70" x2="72" y2="80"/>
-          </g>
-        </svg>
-      </div>
+    <div id="panelGetStarted" class="authPanel gsPanel">
+      <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
       <div class="authTitle authTitleLg">Get Started!</div>
       <div class="authSub">Tell it what to do. It makes the call.</div>
-      <div class="gsDots"><span class="active"></span><span></span><span></span></div>
-      <button class="primaryBtn" id="gsSignUp">Sign Up</button>
-      <button class="secondaryBtn" id="gsLogIn" style="margin-top:10px;">Log In</button>
+      <div class="gsSpacer"></div>
+      <div class="gsButtons">
+        <div class="gsDots"><span class="active"></span><span></span><span></span></div>
+        <button class="primaryBtn" id="gsSignUp">Sign Up</button>
+        <button class="secondaryBtn" id="gsLogIn" style="margin-top:10px;">Log In</button>
+      </div>
     </div>
 
     <div id="panelLogin" class="authPanel">
@@ -88,7 +83,8 @@
       <button class="authBack" id="signupBack" aria-label="Back">
         <svg viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <div class="authTitle authTitleLg" style="margin-top:44px;">Create Your Account</div>
+      <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
+      <div class="authTitle authTitleLg">Create Your Account</div>
       <div class="authSub">Tell it what to do. It makes the call.</div>
 
       <div class="field">
@@ -135,7 +131,8 @@
     <div id="pendingBox" style="display:none;">
       <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
       <div class="authTitle">Pending approval</div>
-      <p>Your account is created — an admin needs to approve it before you can start calls. Check back soon.</p>
+      <p>Your account is created — an admin needs to approve it before you can start calls. This checks automatically, or tap below.</p>
+      <button class="secondaryBtn" id="pendingRecheck" style="margin-bottom:10px;">Check again</button>
       <button class="secondaryBtn" id="pendingSignOut">Sign out</button>
     </div>
   </div>
@@ -170,10 +167,11 @@
       <div class="field">
         <label>Theme</label>
         <div class="themeRow">
-          <div class="themeSwatch active" data-theme="ember" style="background:linear-gradient(160deg,#0a0806,#6e2200);"></div>
+          <div class="themeSwatch active" data-theme="ss2" style="background:linear-gradient(160deg,#0d0714,#5b1a8f);"></div>
           <div class="themeSwatch" data-theme="coffee-emerald" style="background:#1e130d;"></div>
           <div class="themeSwatch" data-theme="midnight-cyan" style="background:#0d1420;"></div>
           <div class="themeSwatch" data-theme="forest-gold" style="background:#0c2318;"></div>
+          <div class="themeSwatch" data-theme="ember" style="background:linear-gradient(160deg,#0a0806,#6e2200);"></div>
         </div>
       </div>
 

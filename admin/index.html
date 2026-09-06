@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="ember">
+<html lang="en" data-theme="ss2">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#0a0806">
+<meta name="theme-color" content="#0d0714">
 <title>Emysa Admin</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="../icon-192.png">
@@ -15,6 +15,17 @@
   #adminApp{position:fixed; inset:0; overflow-y:auto; padding:0 18px 40px;}
   .adminHeader{padding-top:56px; margin-bottom:20px; text-align:center;}
   .adminHeader img{width:56px; height:56px; border-radius:16px; margin:0 auto 10px;}
+  .bgGrid{display:grid; grid-template-columns:repeat(3,1fr); gap:8px;}
+  .bgCard{position:relative; border-radius:12px; overflow:hidden; border:1px solid var(--line); aspect-ratio:9/16; background:var(--panel);}
+  .bgCard img{width:100%; height:100%; object-fit:cover; display:block;}
+  .bgCard button{position:absolute; top:5px; right:5px; width:22px; height:22px; border-radius:50%; background:rgba(0,0,0,0.6); color:#fff; font-size:12px; display:flex; align-items:center; justify-content:center;}
+  .minuteLimitRow{display:flex; align-items:center; gap:6px; margin-top:8px;}
+  .minuteLimitRow input{width:64px; background:var(--panel); border:1px solid var(--line); border-radius:8px; color:#fff; font-size:13px; padding:6px 8px; text-align:center;}
+  .minuteLimitRow button{font-size:11.5px; font-weight:650; padding:6px 10px; border-radius:8px; background:rgba(255,255,255,0.12); color:#fff;}
+  .statRow{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; gap:12px;}
+  .statRow .email{font-size:13.5px; font-weight:600; word-break:break-all;}
+  .statRow .sub{font-size:11.5px; color:var(--dim); margin-top:2px;}
+  .statRow .total{font-size:16px; font-weight:800; color:var(--accent); flex:none; text-align:right;}
 </style>
 </head>
 <body>
@@ -50,14 +61,19 @@
   </div>
 
   <div class="field">
-    <label>Welcome &amp; login background</label>
-    <button class="secondaryBtn" id="uploadBgBtn">Upload background image</button>
+    <label>Welcome, login &amp; signup backgrounds</label>
+    <div style="font-size:12.5px; color:var(--dim); margin-bottom:10px;">Upload as many as you like — the app fades between them automatically.</div>
+    <div class="bgGrid" id="bgGrid"></div>
+    <button class="secondaryBtn" id="uploadBgBtn" style="margin-top:10px;">Add image</button>
     <input type="file" id="bgFileInput" accept="image/*" style="display:none;">
     <div class="authHint" id="bgUploadStatus"></div>
   </div>
 
   <div class="field"><label>Users</label></div>
   <div id="adminUserList"></div>
+
+  <div class="field" style="margin-top:24px;"><label>Usage</label></div>
+  <div id="adminUsageList"><div class="authHint">Loading…</div></div>
 
   <button class="secondaryBtn" id="signOutBtn" style="margin-top:24px;">Sign out</button>
 </div>

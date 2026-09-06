@@ -46,21 +46,34 @@ async function enterAdmin() {
   document.getElementById('authScreen').classList.add('hidden');
   $('adminApp').classList.remove('hidden');
   renderUsers(await resp.json());
+  loadBackgrounds();
+  loadUsage();
 }
 
+// ---------- users: approve + per-user minute limit ----------
 function renderUsers({ users }) {
   const list = $('adminUserList');
   list.innerHTML = '';
   for (const u of users) {
     const row = document.createElement('div');
     row.className = 'adminUserRow';
+    row.style.flexDirection = 'column';
+    row.style.alignItems = 'stretch';
     row.innerHTML = `
-      <div>
-        <div class="adminUserEmail">${u.email}</div>
-        <div class="adminUserMeta">${u.minutes_used}/${u.minutes_limit} min used this period</div>
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+        <div>
+          <div class="adminUserEmail">${u.email}</div>
+          <div class="adminUserMeta">${u.minutes_used}/${u.minutes_limit} min used this period</div>
+        </div>
+        <button class="adminApproveBtn ${u.approved ? 'approved' : ''}">${u.approved ? 'Approved' : 'Approve'}</button>
       </div>
-      <button class="adminApproveBtn ${u.approved ? 'approved' : ''}">${u.approved ? 'Approved' : 'Approve'}</button>`;
-    row.querySelector('button').addEventListener('click', async () => {
+      <div class="minuteLimitRow">
+        <span style="font-size:11.5px; color:var(--dim);">Monthly limit</span>
+        <input type="number" min="0" step="10" value="${u.minutes_limit}" class="minuteLimitInput">
+        <button class="minuteLimitSave">Save</button>
+      </div>`;
+
+    row.querySelector('.adminApproveBtn').addEventListener('click', async () => {
       await authedFetch('/api/admin-set-approval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -69,8 +82,51 @@ function renderUsers({ users }) {
       const resp = await authedFetch('/api/admin-list-users');
       if (resp.ok) renderUsers(await resp.json());
     });
+
+    row.querySelector('.minuteLimitSave').addEventListener('click', async (e) => {
+      const input = row.querySelector('.minuteLimitInput');
+      const val = Number(input.value);
+      if (!Number.isFinite(val) || val < 0) return;
+      e.target.textContent = 'Saving...';
+      await authedFetch('/api/admin-set-approval', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetUserId: u.id, monthlyMinuteLimit: val }),
+      });
+      e.target.textContent = 'Saved';
+      setTimeout(() => { e.target.textContent = 'Save'; }, 1200);
+      const meta = row.querySelector('.adminUserMeta');
+      meta.textContent = `${u.minutes_used}/${val} min used this period`;
+    });
+
     list.appendChild(row);
   }
+}
+
+// ---------- welcome/login/signup background gallery ----------
+async function loadBackgrounds() {
+  const { data } = await supabase.from('auth_backgrounds').select('id,url').order('created_at', { ascending: false });
+  const grid = $('bgGrid');
+  grid.innerHTML = (data || []).map((row) => `
+    <div class="bgCard">
+      <img src="${row.url}" alt="">
+      <button data-id="${row.id}" title="Remove">✕</button>
+    </div>
+  `).join('') || '<div class="authHint" style="grid-column:1/-1;">No images yet.</div>';
+
+  grid.querySelectorAll('button[data-id]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const resp = await authedFetch('/api/admin-upload-background', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', id: btn.dataset.id }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) { $('bgUploadStatus').textContent = data.error || 'Delete failed.'; btn.disabled = false; return; }
+      loadBackgrounds();
+    });
+  });
 }
 
 $('uploadBgBtn').addEventListener('click', () => $('bgFileInput').click());
@@ -85,7 +141,9 @@ $('bgFileInput').addEventListener('change', async (e) => {
     body: JSON.stringify({ imageBase64, mimeType: file.type }),
   });
   const data = await resp.json();
-  $('bgUploadStatus').textContent = resp.ok ? 'Background updated — it will show on the main app\'s welcome, login and sign-up screens.' : (data.error || 'Upload failed.');
+  $('bgFileInput').value = '';
+  $('bgUploadStatus').textContent = resp.ok ? 'Added — the app fades between all uploaded images on the welcome, login and sign-up screens.' : (data.error || 'Upload failed.');
+  if (resp.ok) loadBackgrounds();
 });
 
 function blobToBase64(blob) {
@@ -95,6 +153,25 @@ function blobToBase64(blob) {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+}
+
+// ---------- usage ----------
+async function loadUsage() {
+  const list = $('adminUsageList');
+  list.innerHTML = '<div class="authHint">Loading…</div>';
+  const resp = await authedFetch('/api/admin-analytics');
+  const data = await resp.json();
+  if (!resp.ok) { list.innerHTML = `<div class="authHint">${data.error || 'Could not load usage.'}</div>`; return; }
+  if (!data.users.length) { list.innerHTML = '<div class="authHint">No call activity yet.</div>'; return; }
+  list.innerHTML = data.users.map((u) => `
+    <div class="statRow">
+      <div style="flex:1; min-width:0;">
+        <div class="email">${u.email}</div>
+        <div class="sub">${u.calls} call${u.calls === 1 ? '' : 's'}${u.lastActive ? ' · last active ' + new Date(u.lastActive).toLocaleDateString() : ''}</div>
+      </div>
+      <div class="total">${u.minutes}m</div>
+    </div>
+  `).join('');
 }
 
 // Don't rely solely on onAuthStateChange to ever fire — check the current
