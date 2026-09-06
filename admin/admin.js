@@ -26,15 +26,8 @@ $('notAdminSignOut').addEventListener('click', () => supabase.auth.signOut());
 
 supabase.auth.onAuthStateChange((_event, session) => {
   currentSession = session;
-  if (session?.user) {
-    enterAdmin();
-  } else {
-    $('authBoot').classList.add('hidden');
-    $('authBox').classList.remove('hidden');
-    $('notAdminBox').classList.add('hidden');
-    $('adminApp').classList.add('hidden');
-    document.getElementById('authScreen').classList.remove('hidden');
-  }
+  if (session?.user) enterAdmin();
+  else showSignInForm();
 });
 
 async function enterAdmin() {
@@ -102,4 +95,27 @@ function blobToBase64(blob) {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+}
+
+// Don't rely solely on onAuthStateChange to ever fire — check the current
+// session directly on load so the boot screen can't get stuck forever if
+// that event is slow or doesn't arrive.
+supabase.auth.getSession()
+  .then(({ data }) => {
+    currentSession = data.session;
+    if (data.session?.user) enterAdmin();
+    else showSignInForm();
+  })
+  .catch((err) => showBootError(err));
+
+function showSignInForm() {
+  $('authBoot').classList.add('hidden');
+  $('authBox').classList.remove('hidden');
+  $('notAdminBox').classList.add('hidden');
+  $('adminApp').classList.add('hidden');
+  document.getElementById('authScreen').classList.remove('hidden');
+}
+
+function showBootError(err) {
+  $('authBoot').innerHTML = `<div style="text-align:center; padding:0 24px; color:var(--dim); font-size:13.5px;">Couldn't reach Supabase.<br>${(err && err.message) || String(err)}</div>`;
 }
