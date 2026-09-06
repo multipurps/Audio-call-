@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient } from './vendor/supabase.js';
 
 // Same pattern as Live Call: project URL is public by design, only the
 // anon key ships to the client — every privileged action goes through

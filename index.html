@@ -25,6 +25,32 @@
       <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
     </div>
 
+    <script>
+      // Runs as a plain (non-module) inline script, so it executes
+      // regardless of whether app.js's module — or its dependencies —
+      // ever load. Without this, a script error or a rejected promise
+      // with no .catch (e.g. the Supabase CDN import failing on a flaky
+      // connection) leaves the splash screen stuck with zero feedback.
+      function showBootError(message) {
+        var boot = document.getElementById('authBoot');
+        if (boot && boot.style.display !== 'none') {
+          boot.innerHTML =
+            '<div style="text-align:center; padding:0 24px;">' +
+            '<div style="color:#ffb199; font-size:13px; margin-bottom:14px;">' + message + '</div>' +
+            '<button class="secondaryBtn" onclick="location.reload()" style="width:auto; padding:10px 20px; margin:0 auto;">Retry</button>' +
+            '</div>';
+        }
+      }
+      window.addEventListener('error', function (e) { showBootError('Script error: ' + e.message); });
+      window.addEventListener('unhandledrejection', function (e) {
+        showBootError((e.reason && e.reason.message) || String(e.reason));
+      });
+      setTimeout(function () {
+        var boot = document.getElementById('authBoot');
+        if (boot && boot.style.display !== 'none') showBootError('This is taking longer than usual. Check your connection.');
+      }, 7000);
+    </script>
+
     <div id="panelGetStarted" class="authPanel gsPanel">
       <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
       <div class="authTitle authTitleLg">Get Started!</div>
