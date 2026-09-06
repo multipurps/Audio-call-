@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 
 const SUPABASE_URL = 'https://gucblbvfzuraaozswfwd.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1Y2JsYnZmenVyYWFvenN3ZndkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0NzQ0ODQsImV4cCI6MjA5MTA1MDQ4NH0.OCsEC_FfOJmoL5sQWP8zYnw9SmWuy4xggfcpIIxQw-c';
@@ -46,7 +46,7 @@ async function enterAdmin() {
     // The /api/admin-* endpoints already check ADMIN_EMAIL server-side —
     // this call doubles as the gate for this page too, same source of truth,
     // no separate admin check to keep in sync.
-    const resp = await authedFetch('/api/admin?action=list-users');
+    const resp = await withTimeout(authedFetch('/api/admin?action=list-users'), 10000);
     $('authBoot').classList.add('hidden');
     $('authBox').classList.add('hidden');
     if (!resp.ok) {
@@ -64,7 +64,11 @@ async function enterAdmin() {
     // A thrown error in here used to leave the splash screen stuck forever
     // with zero feedback — any network hiccup on the first fetch, and
     // nothing after that line ever ran. Now it surfaces instead of hanging.
-    showBootError(err);
+    if (err?.message === 'TIMEOUT') {
+      showBootError(new Error('The admin check timed out.'), true);
+    } else {
+      showBootError(err);
+    }
   }
 }
 
@@ -213,13 +217,34 @@ async function loadUsage() {
 // Don't rely solely on onAuthStateChange to ever fire — check the current
 // session directly on load so the boot screen can't get stuck forever if
 // that event is slow or doesn't arrive.
-supabase.auth.getSession()
+//
+// Belt-and-suspenders on top of that: supabase-js's own getSession() can
+// itself hang indefinitely (a known issue upstream — it takes an internal
+// lock to refresh the token, and a stale/corrupted session in localStorage,
+// or a previous tab that crashed mid-refresh, can leave that lock stuck).
+// That's the failure mode that produces a *silent* stuck splash with no
+// error at all, since a promise that never settles never throws. Race it
+// against a timeout so the splash always resolves to something actionable.
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), ms)),
+  ]);
+}
+
+withTimeout(supabase.auth.getSession(), 8000)
   .then(({ data }) => {
     currentSession = data.session;
     if (data.session?.user) enterAdmin();
     else showSignInForm();
   })
-  .catch((err) => showBootError(err));
+  .catch((err) => {
+    if (err?.message === 'TIMEOUT') {
+      showBootError(new Error('Timed out talking to Supabase.'), true);
+    } else {
+      showBootError(err);
+    }
+  });
 
 function showSignInForm() {
   $('authBoot').classList.add('hidden');
@@ -229,6 +254,15 @@ function showSignInForm() {
   document.getElementById('authScreen').classList.remove('hidden');
 }
 
-function showBootError(err) {
-  $('authBoot').innerHTML = `<div style="text-align:center; padding:0 24px; color:var(--dim); font-size:13.5px;">Couldn't reach Supabase.<br>${(err && err.message) || String(err)}</div>`;
+function showBootError(err, offerReset = false) {
+  const resetBtn = offerReset
+    ? `<button id="bootResetBtn" style="margin-top:14px; font-size:12.5px; padding:8px 14px; border-radius:10px; background:rgba(255,255,255,0.12); color:#fff;">Clear session & retry</button>`
+    : '';
+  $('authBoot').innerHTML = `<div style="text-align:center; padding:0 24px; color:var(--dim); font-size:13.5px;">Couldn't reach Supabase.<br>${(err && err.message) || String(err)}${resetBtn}</div>`;
+  document.getElementById('bootResetBtn')?.addEventListener('click', () => {
+    // Nuke whatever supabase-js has persisted locally — this is what's
+    // stuck if getSession() itself never resolved — then reload clean.
+    Object.keys(localStorage).filter((k) => k.startsWith('sb-')).forEach((k) => localStorage.removeItem(k));
+    location.reload();
+  });
 }
