@@ -74,12 +74,21 @@ html{height:100%; background:var(--coffee);}
 body{
   background:var(--coffee); overflow:hidden; color:#fff;
   font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  /* position:relative (not fixed) on purpose: body is the containing block
+     for every absolutely-positioned full-bleed screen below. Its real height
+     is set in JS via window.screen.height — see setAppHeight() in app.js —
+     because iOS PWA standalone mode caps position:fixed elements against a
+     shrunk internal layout viewport no matter what CSS height you throw at
+     them (100dvh, -webkit-fill-available, JS-measured innerHeight all hit
+     the same ceiling). position:absolute has no such cap, so once body has
+     the true height, absolutely-positioned children can reach the real
+     bottom edge, home indicator included. */
   position:relative; width:100vw; height:100dvh; height:-webkit-fill-available;
 }
 button{-webkit-appearance:none; appearance:none; border:0; cursor:pointer; font-family:inherit; color:#fff; background:none;}
 img{display:block; max-width:100%;}
 
-#app{position:fixed; inset:0;}
+#app{position:absolute; inset:0;}
 #screens{position:absolute; inset:0;}
 .screen{
   position:absolute; inset:0; overflow-y:auto;
@@ -92,7 +101,7 @@ img{display:block; max-width:100%;}
 
 /* ---------- bottom tab nav: flush to the true screen edge, no padding ---------- */
 #tabBar{
-  position:fixed; left:50%; bottom:16px; transform:translateX(-50%); z-index:10;
+  position:absolute; left:50%; bottom:16px; transform:translateX(-50%); z-index:10;
   display:flex; align-items:center; gap:2px; padding:6px; border-radius:22px;
   background:var(--glass-bg);
   backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%);
@@ -137,7 +146,7 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .statusPill.in_progress, .statusPill.ringing, .statusPill.queued{background:rgba(230,180,60,0.2); color:#f0c766;}
 
 /* ---------- auth ---------- */
-#authScreen{position:fixed; inset:0; z-index:100; background:var(--coffee); overflow:hidden; display:flex; flex-direction:column; padding:0 24px;}
+#authScreen{position:absolute; inset:0; z-index:100; background:var(--coffee); overflow:hidden; display:flex; flex-direction:column; padding:0 24px;}
 #authScreen.hidden{display:none;}
 .authLogo{width:72px; height:72px; border-radius:20px; margin:0 auto 14px; background:var(--glass-bg); backdrop-filter:blur(16px) saturate(160%); -webkit-backdrop-filter:blur(16px) saturate(160%); border:1px solid var(--glass-border); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:26px;}
 .authTitle{text-align:center; font-size:24px; font-weight:750; margin-bottom:6px;}
@@ -196,7 +205,7 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .recordBtn.recording{background:rgba(220,80,80,0.25); color:#ff8b8b;}
 
 /* ---------- call screen (edge to edge, no safe-area padding) ---------- */
-#callScreen{position:fixed; inset:0; z-index:200; background:var(--coffee); display:flex; flex-direction:column;}
+#callScreen{position:absolute; inset:0; z-index:200; background:var(--coffee); display:flex; flex-direction:column;}
 #callScreen.hidden{display:none;}
 #callScreen [data-theme="ember"]{background:none;}
 .callHeader{padding-top:56px; text-align:center; flex:none;}
@@ -266,7 +275,7 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 
 /* ---------- home composer bar: floats free above the tab nav ---------- */
 #homeInputBar{
-  position:fixed; left:18px; right:18px; bottom:calc(var(--tabbar-h, 76px) + 14px); z-index:9;
+  position:absolute; left:18px; right:18px; bottom:calc(var(--tabbar-h, 76px) + 14px); z-index:9;
   background:var(--coffee-light); border:1px solid var(--line); border-radius:20px;
   box-shadow:0 8px 24px rgba(0,0,0,0.45);
   padding:11px 11px 11px 16px;
@@ -321,6 +330,13 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .profileCard.linkCard{cursor:pointer;}
 .profileCard .cChevron{flex:none; color:var(--dim); opacity:0.7;}
 .profileCard .cChevron svg{width:16px; height:16px;}
+.profileCard.upgradeBanner{
+  background:linear-gradient(135deg, var(--accent) 0%, var(--panel) 100%);
+  margin-bottom:18px;
+}
+.profileCard.upgradeBanner .cIcon{background:rgba(255,255,255,0.18); color:#fff;}
+.profileCard.upgradeBanner .cValue{color:#fff;}
+.profileCard.upgradeBanner .cChevron{color:#fff; opacity:0.85;}
 
 /* ---------- avatar upload ---------- */
 .avatarWrap{position:relative; width:88px; height:88px; margin:8px auto 14px;}
@@ -346,7 +362,7 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .toggleSwitch.on::after{transform:translateX(19px);}
 
 /* ---------- legal / help full-screen sheet ---------- */
-.sheetScreen{position:fixed; inset:0; z-index:150; background:var(--coffee); display:flex; flex-direction:column;}
+.sheetScreen{position:absolute; inset:0; z-index:150; background:var(--coffee); display:flex; flex-direction:column;}
 .sheetScreen.hidden{display:none;}
 .sheetHeader{display:flex; align-items:center; gap:14px; padding:calc(env(safe-area-inset-top, 0px) + 18px) 20px 14px;}
 .sheetBack{

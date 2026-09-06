@@ -174,53 +174,86 @@
 
       <div class="authHint" id="avatarStatus" style="text-align:center; margin:-14px 0 14px;"></div>
 
-      <div class="sectionLabel">Profile</div>
-      <div class="profileCard">
-        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M20 21c0-3.87-3.58-7-8-7s-8 3.13-8 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="1.8"/></svg></div>
-        <div class="cBody">
-          <div class="cLabel">Your name</div>
-          <input class="plainInput" id="profileName" type="text" autocomplete="off" placeholder="What should we call you?">
-        </div>
+      <div class="profileCard upgradeBanner linkCard" id="upgradeBtn">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3l1.8 4.6L18 9l-4.2 1.4L12 15l-1.8-4.6L6 9l4.2-1.4L12 3z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M18.5 14l.9 2.3L21.5 17l-2.1.7-.9 2.3-.9-2.3-2.1-.7 2.1-.7.9-2.3z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></div>
+        <div class="cBody"><div class="cValue">Upgrade to Pro</div></div>
+        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
       </div>
 
-      <div class="sectionLabel">Notifications & feedback</div>
+      <div class="sectionLabel">Account</div>
+      <div class="profileCard linkCard" id="accountBtn">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M20 21c0-3.87-3.58-7-8-7s-8 3.13-8 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="1.8"/></svg></div>
+        <div class="cBody"><div class="cValue">Account</div></div>
+        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="profileCard linkCard" id="referralsBtn">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M20 12v8H4v-8M2 8h20v4H2V8zm10 0v12M12 8s-1-5-4.5-5S5 6 5 6.5 6 8 8 8h4zm0 0s1-5 4.5-5S19 6 19 6.5 18 8 16 8h-4z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+        <div class="cBody"><div class="cValue">Referrals</div></div>
+        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="profileCard linkCard" id="callAnsweringBtn">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M16 2 8 22M2 16l6 4M22 8l-6-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="cBody"><div class="cValue">Call Answering</div></div>
+        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="profileCard linkCard" id="memoriesBtn">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-4.35-9.5-8.5C.7 9 2 5.5 5.5 4.7 8 4.1 10 5.3 12 7.5c2-2.2 4-3.4 6.5-2.8C22 5.5 23.3 9 21.5 12.5 19 16.65 12 21 12 21z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+        <div class="cBody"><div class="cValue">Memories</div></div>
+        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="profileCard linkCard" id="voiceBtn">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z" stroke="currentColor" stroke-width="1.7"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
+        <div class="cBody"><div class="cValue">Voice</div></div>
+        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+
+      <div class="sectionLabel">Settings</div>
+      <div class="profileCard linkCard" id="callSettingsBtn">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M15 8a3 3 0 0 1-3 3M6 8a6 6 0 0 0 12 0M12 11v7m-3 0h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="cBody"><div class="cValue">Call Settings</div></div>
+        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="profileCard linkCard" id="permissionsBtn">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><circle cx="7" cy="7" r="2.2" stroke="currentColor" stroke-width="1.6"/><path d="M9.2 7H21M3 7h1.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="17" cy="17" r="2.2" stroke="currentColor" stroke-width="1.6"/><path d="M14.8 17H3M21 17h-1.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+        <div class="cBody"><div class="cValue">Permissions</div></div>
+        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="profileCard linkCard" id="contactsBtn">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3.2" stroke="currentColor" stroke-width="1.6"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3.2 3.2 0 0 1 0 6.4M20 20c0-2.8-1.8-5.1-4.3-5.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+        <div class="cBody"><div class="cValue">Contacts</div></div>
+        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
       <div class="profileCard">
         <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.73 21a2 2 0 0 1-3.46 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
         <div class="cBody"><div class="cValue">Notifications</div></div>
         <div class="toggleSwitch" id="notificationsToggle"></div>
+      </div>
+      <div class="authHint" id="notificationsStatus" style="margin:-4px 0 8px 4px;"></div>
+      <div class="profileCard linkCard" id="themeBtn">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 3v18" stroke="currentColor" stroke-width="1.7"/></svg></div>
+        <div class="cBody"><div class="cValue">Theme & App Icon</div></div>
+        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="profileCard linkCard" id="dataControlsBtn">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2 3 6v6c0 5 3.8 8.7 9 10 5.2-1.3 9-5 9-10V6l-9-4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></div>
+        <div class="cBody"><div class="cValue">Data controls</div></div>
+        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="profileCard linkCard" id="archiveBtn">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M5 9v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+        <div class="cBody"><div class="cValue">Archive</div></div>
+        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
       </div>
       <div class="profileCard">
         <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><rect x="7" y="2" width="10" height="20" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M11 18h2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
         <div class="cBody"><div class="cValue">Haptic feedback</div></div>
         <div class="toggleSwitch" id="hapticToggle"></div>
       </div>
-      <div class="authHint" id="notificationsStatus" style="margin:-4px 0 8px 4px;"></div>
 
-      <div class="sectionLabel">Voice</div>
-      <div class="profileCard">
-        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z" stroke="currentColor" stroke-width="1.7"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
-        <div class="cBody">
-          <div class="cLabel">Your cloned voice</div>
-          <button class="plainInput recordBtn" id="recordVoiceBtn" style="text-align:left; cursor:pointer;">Record 10-30s to clone your voice</button>
-        </div>
-      </div>
-      <div class="authHint" id="voiceStatus" style="margin:-4px 0 8px 4px;"></div>
-
-      <div class="sectionLabel">Appearance</div>
-      <div class="field">
-        <div class="themeRow">
-          <div class="themeSwatch active" data-theme="ss2" style="background:linear-gradient(160deg,#0d0714,#5b1a8f);"></div>
-          <div class="themeSwatch" data-theme="coffee-emerald" style="background:#1e130d;"></div>
-          <div class="themeSwatch" data-theme="midnight-cyan" style="background:#0d1420;"></div>
-          <div class="themeSwatch" data-theme="forest-gold" style="background:#0c2318;"></div>
-          <div class="themeSwatch" data-theme="ember" style="background:linear-gradient(160deg,#0a0806,#6e2200);"></div>
-        </div>
-      </div>
-
-      <div class="sectionLabel">Data & legal</div>
-      <div class="profileCard linkCard" id="dataControlsBtn">
-        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2 3 6v6c0 5 3.8 8.7 9 10 5.2-1.3 9-5 9-10V6l-9-4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></div>
-        <div class="cBody"><div class="cValue">Data controls</div></div>
+      <div class="sectionLabel">Support</div>
+      <div class="profileCard linkCard" id="getStartedBtn">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="cBody"><div class="cValue">Get Started</div></div>
         <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
       </div>
       <div class="profileCard linkCard" id="helpFaqBtn">
@@ -535,6 +568,154 @@
     </div>
 
     <p style="margin-top:18px;">You can review what's collected and why in the <span class="cChevron" style="display:inline; color:var(--accent); cursor:pointer;" id="dataToPrivacyLink">Privacy Policy</span>.</p>
+  </div>
+</div>
+
+<!-- ---------- Account ---------- -->
+<div class="sheetScreen hidden" id="sheet-account">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">Account</div>
+  </div>
+  <div class="sheetBody">
+    <div class="sectionLabel">Email</div>
+    <div class="profileCard">
+      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16v12H4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m4 7 8 6 8-6" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></div>
+      <div class="cBody"><div class="cValue" id="accountEmailDisplay">–</div></div>
+    </div>
+    <div class="sectionLabel">Name</div>
+    <div class="profileCard">
+      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M20 21c0-3.87-3.58-7-8-7s-8 3.13-8 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="1.8"/></svg></div>
+      <div class="cBody">
+        <div class="cLabel">Your name</div>
+        <input class="plainInput" id="profileName" type="text" autocomplete="off" placeholder="What should we call you?">
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- Voice ---------- -->
+<div class="sheetScreen hidden" id="sheet-voice">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">Voice</div>
+  </div>
+  <div class="sheetBody">
+    <div class="sectionLabel">Your cloned voice</div>
+    <div class="profileCard">
+      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z" stroke="currentColor" stroke-width="1.7"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
+      <div class="cBody">
+        <div class="cLabel">Your cloned voice</div>
+        <button class="plainInput recordBtn" id="recordVoiceBtn" style="text-align:left; cursor:pointer;">Record 10-30s to clone your voice</button>
+      </div>
+    </div>
+    <div class="authHint" id="voiceStatus" style="margin:8px 0 8px 4px;"></div>
+    <p>This recording is used only to let the AI caller speak in a voice that sounds like yours. You can delete it any time from Profile → Data controls.</p>
+  </div>
+</div>
+
+<!-- ---------- Theme & App Icon ---------- -->
+<div class="sheetScreen hidden" id="sheet-theme">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">Theme & App Icon</div>
+  </div>
+  <div class="sheetBody">
+    <div class="sectionLabel">Theme</div>
+    <div class="field">
+      <div class="themeRow">
+        <div class="themeSwatch active" data-theme="ss2" style="background:linear-gradient(160deg,#0d0714,#5b1a8f);"></div>
+        <div class="themeSwatch" data-theme="coffee-emerald" style="background:#1e130d;"></div>
+        <div class="themeSwatch" data-theme="midnight-cyan" style="background:#0d1420;"></div>
+        <div class="themeSwatch" data-theme="forest-gold" style="background:#0c2318;"></div>
+        <div class="themeSwatch" data-theme="ember" style="background:linear-gradient(160deg,#0a0806,#6e2200);"></div>
+      </div>
+    </div>
+    <div class="sectionLabel">App Icon</div>
+    <p>The home-screen icon is set when the app is installed and can't be changed from inside the app itself — to use a different icon, update it in the install/manifest settings and reinstall.</p>
+  </div>
+</div>
+
+<!-- ---------- Placeholder / coming-soon sheets ---------- -->
+<div class="sheetScreen hidden" id="sheet-upgrade">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">Upgrade to Pro</div>
+  </div>
+  <div class="sheetBody"><p>Pro plans aren't available yet — check back soon.</p></div>
+</div>
+<div class="sheetScreen hidden" id="sheet-referrals">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">Referrals</div>
+  </div>
+  <div class="sheetBody"><p>Referrals aren't set up yet — check back soon.</p></div>
+</div>
+<div class="sheetScreen hidden" id="sheet-call-answering">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">Call Answering</div>
+  </div>
+  <div class="sheetBody"><p>Automatic call-answering settings aren't available yet — check back soon.</p></div>
+</div>
+<div class="sheetScreen hidden" id="sheet-memories">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">Memories</div>
+  </div>
+  <div class="sheetBody"><p>Memories aren't available yet — check back soon.</p></div>
+</div>
+<div class="sheetScreen hidden" id="sheet-call-settings">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">Call Settings</div>
+  </div>
+  <div class="sheetBody"><p>Call settings aren't available yet — check back soon.</p></div>
+</div>
+<div class="sheetScreen hidden" id="sheet-contacts">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">Contacts</div>
+  </div>
+  <div class="sheetBody"><p>Importing contacts isn't available yet — check back soon.</p></div>
+</div>
+<div class="sheetScreen hidden" id="sheet-archive">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">Archive</div>
+  </div>
+  <div class="sheetBody"><p>Archived calls will show up here once this is built — check back soon.</p></div>
+</div>
+
+<!-- ---------- Permissions ---------- -->
+<div class="sheetScreen hidden" id="sheet-permissions">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">Permissions</div>
+  </div>
+  <div class="sheetBody">
+    <div class="profileCard">
+      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.73 21a2 2 0 0 1-3.46 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
+      <div class="cBody"><div class="cValue">Notifications</div><div class="cLabel" id="permissionsNotifStatus">Checking…</div></div>
+      <button class="plainInput recordBtn" id="permissionsNotifBtn" style="width:auto; padding:8px 14px; cursor:pointer;">Enable</button>
+    </div>
+    <p style="margin-top:14px;">Microphone access is requested by your browser only when you start a call — there's nothing to pre-approve here.</p>
+  </div>
+</div>
+
+<!-- ---------- Get Started ---------- -->
+<div class="sheetScreen hidden" id="sheet-get-started">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">Get Started</div>
+  </div>
+  <div class="sheetBody">
+    <h2>1. Add a caller</h2>
+    <p>From the Home tab, tell the AI who to call and what to say — like "call this number and ask about a table for four."</p>
+    <h2>2. Clone your voice (optional)</h2>
+    <p>Go to Profile → Voice and record 10–30 seconds so the AI caller can sound like you instead of a generic voice.</p>
+    <h2>3. Check the outcome</h2>
+    <p>Once the call ends, open the Recent tab to see what happened and read back what was said.</p>
   </div>
 </div>
 

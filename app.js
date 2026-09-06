@@ -11,6 +11,36 @@ const $ = (id) => document.getElementById(id);
 let currentUser = null;
 let currentSession = null;
 
+// ---------- iOS PWA true-height fix ----------
+// In standalone (home-screen installed) mode, iOS Safari sizes anything
+// using position:fixed against a shrunk internal "layout viewport" that's
+// shorter than the real screen — no CSS height (100dvh, -webkit-fill-available,
+// even a JS-measured innerHeight) can see past that cap, so fixed full-bleed
+// screens end up with a gap above the home indicator no matter what number
+// you feed them.
+//
+// The fix is to stop relying on position:fixed for full-bleed layout at all:
+// body stays position:relative (set in CSS) and gets its height set here
+// directly from window.screen.height, which reports the true physical
+// screen size rather than the shrunk one. Every full-bleed screen
+// (#app, #authScreen, #callScreen, .sheetScreen, #tabBar, #homeInputBar) is
+// position:absolute anchored inside that correctly-sized body, and absolute
+// positioning isn't subject to the same iOS cap — it just fills whatever
+// box it's given.
+function isStandalonePWA() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+
+function setAppHeight() {
+  if (!isStandalonePWA()) return; // normal browser tabs are fine with the dvh/fill-available CSS fallback
+  const h = window.screen.height;
+  if (h) document.body.style.height = `${h}px`;
+}
+
+setAppHeight();
+window.addEventListener('resize', setAppHeight);
+window.addEventListener('orientationchange', setAppHeight);
+
 async function authedFetch(url, options = {}) {
   const headers = { ...(options.headers || {}), Authorization: `Bearer ${currentSession?.access_token || ''}` };
   return fetch(url, { ...options, headers });
@@ -452,7 +482,20 @@ $('avatarFileInput').addEventListener('change', async (e) => {
     $('avatarStatus').textContent = 'Profile picture updated.';
   } catch (err) {
     console.error('avatar upload failed:', err);
-    $('avatarStatus').textContent = 'Could not upload photo — try a smaller image.';
+    // Surface the real reason instead of a generic message: "bucket not found"
+    // means the 'avatars' storage bucket + policies in sql/006_avatars.sql
+    // haven't been applied to this Supabase project yet, which is a distinct
+    // fix from "your file is too big" and shouldn't be masked as the same thing.
+    const reason = (err?.message || err?.error_description || '').toLowerCase();
+    if (reason.includes('bucket not found')) {
+      $('avatarStatus').textContent = 'Storage isn\'t set up yet (avatars bucket missing) — run sql/006_avatars.sql against this project, then try again.';
+    } else if (reason.includes('row-level security') || reason.includes('permission') || reason.includes('policy')) {
+      $('avatarStatus').textContent = 'Not allowed to upload (storage policy). Check sql/006_avatars.sql has been applied.';
+    } else if (err?.message) {
+      $('avatarStatus').textContent = `Could not upload photo: ${err.message}`;
+    } else {
+      $('avatarStatus').textContent = 'Could not upload photo — try a smaller image.';
+    }
   }
 });
 
@@ -526,6 +569,39 @@ $('privacyBtn').addEventListener('click', () => openSheet('sheet-privacy'));
 $('helpFaqBtn').addEventListener('click', () => openSheet('sheet-help'));
 $('dataControlsBtn').addEventListener('click', () => openSheet('sheet-data'));
 $('dataToPrivacyLink').addEventListener('click', () => openSheet('sheet-privacy'));
+
+// ---------- new profile rows (Account, Voice, Theme, Permissions, Get Started,
+// plus placeholders for features that don't exist yet) ----------
+$('accountBtn').addEventListener('click', () => {
+  $('accountEmailDisplay').textContent = currentUser?.email || '–';
+  openSheet('sheet-account');
+});
+$('voiceBtn').addEventListener('click', () => openSheet('sheet-voice'));
+$('themeBtn').addEventListener('click', () => openSheet('sheet-theme'));
+$('upgradeBtn').addEventListener('click', () => openSheet('sheet-upgrade'));
+$('referralsBtn').addEventListener('click', () => openSheet('sheet-referrals'));
+$('callAnsweringBtn').addEventListener('click', () => openSheet('sheet-call-answering'));
+$('memoriesBtn').addEventListener('click', () => openSheet('sheet-memories'));
+$('callSettingsBtn').addEventListener('click', () => openSheet('sheet-call-settings'));
+$('contactsBtn').addEventListener('click', () => openSheet('sheet-contacts'));
+$('archiveBtn').addEventListener('click', () => openSheet('sheet-archive'));
+$('getStartedBtn').addEventListener('click', () => openSheet('sheet-get-started'));
+
+$('permissionsBtn').addEventListener('click', () => {
+  refreshPermissionsSheet();
+  openSheet('sheet-permissions');
+});
+function refreshPermissionsSheet() {
+  const perm = ('Notification' in window) ? Notification.permission : 'unsupported';
+  const label = { granted: 'Allowed', denied: 'Blocked — enable in your device Settings', default: 'Not yet requested', unsupported: 'Not supported on this browser' }[perm];
+  $('permissionsNotifStatus').textContent = label;
+  $('permissionsNotifBtn').style.display = perm === 'default' ? '' : 'none';
+}
+$('permissionsNotifBtn').addEventListener('click', async () => {
+  if (!('Notification' in window)) return;
+  await Notification.requestPermission();
+  refreshPermissionsSheet();
+});
 
 function mailtoSupport(subject, body) {
   const email = currentUser?.email ? ` (account: ${currentUser.email})` : '';
