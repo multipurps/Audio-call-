@@ -161,18 +161,10 @@
       </div>
 
       <div class="profileCardCenter">
-        <div class="avatarWrap">
-          <div class="avatarCircle" id="profileAvatarCircle">?</div>
-          <div class="avatarEditBtn" id="avatarEditBtn" aria-label="Change profile picture">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h2.5l1-2h9l1 2H20a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="currentColor" stroke-width="1.8"/></svg>
-          </div>
-          <input type="file" id="avatarFileInput" accept="image/*" style="display:none;">
-        </div>
+        <div class="avatarCircle" id="profileAvatarCircle">?</div>
         <div class="profileName" id="profileEmailDisplay" style="text-align:center; margin-bottom:4px;">Emysa</div>
         <div class="profileSub">Your account</div>
       </div>
-
-      <div class="authHint" id="avatarStatus" style="text-align:center; margin:-14px 0 14px;"></div>
 
       <div class="sectionLabel">Profile</div>
       <div class="profileCard">
@@ -182,19 +174,6 @@
           <input class="plainInput" id="profileName" type="text" autocomplete="off" placeholder="What should we call you?">
         </div>
       </div>
-
-      <div class="sectionLabel">Notifications & feedback</div>
-      <div class="profileCard">
-        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.73 21a2 2 0 0 1-3.46 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
-        <div class="cBody"><div class="cValue">Notifications</div></div>
-        <div class="toggleSwitch" id="notificationsToggle"></div>
-      </div>
-      <div class="profileCard">
-        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><rect x="7" y="2" width="10" height="20" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M11 18h2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
-        <div class="cBody"><div class="cValue">Haptic feedback</div></div>
-        <div class="toggleSwitch" id="hapticToggle"></div>
-      </div>
-      <div class="authHint" id="notificationsStatus" style="margin:-4px 0 8px 4px;"></div>
 
       <div class="sectionLabel">Voice</div>
       <div class="profileCard">
@@ -217,52 +196,11 @@
         </div>
       </div>
 
-      <div class="sectionLabel">Data & legal</div>
-      <div class="profileCard linkCard" id="dataControlsBtn">
-        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2 3 6v6c0 5 3.8 8.7 9 10 5.2-1.3 9-5 9-10V6l-9-4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></div>
-        <div class="cBody"><div class="cValue">Data controls</div></div>
-        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-      </div>
-      <div class="profileCard linkCard" id="helpFaqBtn">
-        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M9.5 9.2a2.5 2.5 0 1 1 3.7 2.2c-.8.5-1.2.9-1.2 1.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="17" r="0.9" fill="currentColor"/></svg></div>
-        <div class="cBody"><div class="cValue">Help & FAQ</div></div>
-        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-      </div>
-      <div class="profileCard linkCard" id="termsBtn">
-        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M7 3h8l4 4v14H7z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 12h6M9 16h6M9 8h2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
-        <div class="cBody"><div class="cValue">Terms of Use</div></div>
-        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-      </div>
-      <div class="profileCard linkCard" id="privacyBtn">
-        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2 3 6v6c0 5 3.8 8.7 9 10 5.2-1.3 9-5 9-10V6l-9-4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9.5 12.2l1.8 1.8 3.2-3.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-        <div class="cBody"><div class="cValue">Privacy Policy</div></div>
-        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-      </div>
-
-      <div class="sectionLabel">Community</div>
-      <div class="socialRow">
-        <a class="profileCard linkCard" href="https://x.com/" target="_blank" rel="noopener" id="socialX">
-          <div class="cIcon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.9 2H22l-7.6 8.7L23 22h-6.9l-5.4-6.7L4.5 22H1.4l8.1-9.3L1 2h7l4.9 6.1L18.9 2Zm-1.2 18h1.9L7.4 4H5.4l12.3 16Z"/></svg></div>
-          <div class="cBody"><div class="cValue">X</div></div>
-        </a>
-      </div>
-      <div class="socialRow" style="margin-top:8px;">
-        <a class="profileCard linkCard" href="https://instagram.com/" target="_blank" rel="noopener" id="socialInstagram">
-          <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.7"/><circle cx="17.2" cy="6.8" r="1" fill="currentColor"/></svg></div>
-          <div class="cBody"><div class="cValue">Instagram</div></div>
-        </a>
-        <a class="profileCard linkCard" href="https://discord.com/" target="_blank" rel="noopener" id="socialDiscord">
-          <div class="cIcon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 5.5A17 17 0 0 0 15.7 4l-.3.6a13 13 0 0 1 3.3 1.2 15 15 0 0 0-13.4 0A13 13 0 0 1 8.6 4.6L8.3 4A17 17 0 0 0 4 5.5C1.8 9 1.2 12.4 1.4 15.8A17 17 0 0 0 6.6 18.4l.8-1.3a10 10 0 0 1-1.7-.8l.4-.3a12 12 0 0 0 10.8 0l.4.3a10 10 0 0 1-1.7.8l.8 1.3a17 17 0 0 0 5.2-2.6c.3-4-.7-7.3-2.6-10.4ZM9 14.4c-.9 0-1.6-.9-1.6-1.9s.7-1.9 1.6-1.9 1.6.9 1.6 1.9-.7 1.9-1.6 1.9Zm6 0c-.9 0-1.6-.9-1.6-1.9s.7-1.9 1.6-1.9 1.6.9 1.6 1.9-.7 1.9-1.6 1.9Z"/></svg></div>
-          <div class="cBody"><div class="cValue">Discord</div></div>
-        </a>
-      </div>
-
       <div class="sectionLabel">App</div>
       <div class="profileCard signOutCard" id="signOutBtn" style="cursor:pointer;">
         <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
         <div class="cBody"><div class="cValue">Sign out</div></div>
       </div>
-      <div class="profileSub" id="appVersionLabel" style="text-align:center; margin:16px 0 4px;">Version 1.0.0</div>
     </div>
 
   </div>
@@ -337,205 +275,6 @@
     </div>
   </div>
 
-</div>
-
-<!-- ---------- legal / help sheets ---------- -->
-<div class="sheetScreen hidden" id="sheet-terms">
-  <div class="sheetHeader">
-    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-    <div class="sheetTitle">Terms of Use</div>
-  </div>
-  <div class="sheetBody">
-    <div class="legalMeta">Last updated: <span id="termsUpdatedDate"></span></div>
-
-    <h2>1. Agreement to these Terms</h2>
-    <p>These Terms of Use ("Terms") are a binding agreement between you and Emysa ("Emysa," "we," "us," or "our") governing your access to and use of the Emysa mobile and web application, including any feature that places, receives, records, or transcribes phone calls on your behalf, clones or synthesizes a voice, or otherwise processes audio, text, or account data (collectively, the "Service"). By creating an account or otherwise using the Service, you agree to be bound by these Terms. If you do not agree, do not use the Service.</p>
-
-    <h2>2. Description of the Service</h2>
-    <p>Emysa lets you describe a task in natural language (for example, "call this restaurant and ask about a table for four"), and an AI system places a real telephone call using our telephony infrastructure, carries on the conversation on your behalf, and reports back a summary and, where available, a transcript or recording. You can optionally record a short sample of your own voice so the AI caller sounds like you.</p>
-
-    <h2>3. Eligibility & Account Registration</h2>
-    <p>You must be at least 18 years old, or the age of majority in your jurisdiction, to use the Service. You are responsible for maintaining the confidentiality of your account credentials and for all activity that occurs under your account. You agree to provide accurate information and to keep it up to date.</p>
-
-    <h2>4. Acceptable Use</h2>
-    <p>You agree that you will not use the Service to:</p>
-    <ul>
-      <li>Place calls for the purpose of harassment, threats, fraud, deception, or impersonation of a real person or organization without their knowledge and consent;</li>
-      <li>Clone or synthesize the voice of anyone other than yourself, or of yourself without disclosing that an AI system may be speaking on your behalf when disclosure is legally required;</li>
-      <li>Violate any applicable telemarketing, robocall, or autodialer law, including but not limited to the U.S. Telephone Consumer Protection Act (TCPA), Do-Not-Call regulations, or equivalent laws in your country;</li>
-      <li>Record or transmit a call in violation of any applicable wiretapping, call-recording, or two-party consent law;</li>
-      <li>Attempt to reverse-engineer, scrape, or interfere with the Service, or use it to build a competing product;</li>
-      <li>Upload, generate, or transmit unlawful, defamatory, or infringing content.</li>
-    </ul>
-
-    <h2>5. Voice Cloning & Call Recording — Your Responsibilities</h2>
-    <p>When you record a sample of your voice, you represent that it is your own voice and that you have the right to use it for cloning within the Service. Laws about recording phone calls vary by state and country — some jurisdictions require the consent of every party on a call before it can be recorded. You are solely responsible for knowing and complying with the law that applies to each call you make through the Service, including obtaining any consent required before a call is recorded or an AI voice is used.</p>
-
-    <h2>6. Third-Party Services</h2>
-    <p>The Service relies on third-party infrastructure to function, including telephony carriers, speech-to-text and language-model providers, and text-to-speech providers. Your calls, recordings, and transcripts are processed by these providers strictly to deliver the Service to you, under contractual terms that restrict their use of your data. We do not control, and are not responsible for, outages or errors originating from these third parties.</p>
-
-    <h2>7. Usage Limits & Fees</h2>
-    <p>Your account may be subject to a monthly limit on call minutes or other usage. We may offer paid plans that increase these limits or unlock additional features; pricing and billing terms for any paid plan will be presented to you before you are charged, and are incorporated into these Terms by reference.</p>
-
-    <h2>8. Intellectual Property</h2>
-    <p>The Service, including its software, design, and branding, is owned by Emysa and protected by intellectual property laws. You retain ownership of the content you submit (such as your voice sample and call objectives), and you grant us a limited license to process that content solely to provide the Service to you.</p>
-
-    <h2>9. Disclaimers</h2>
-    <p>The Service is provided "as is" and "as available." AI-generated conversations can misunderstand context, make mistakes, or fail to complete a task as intended. We do not guarantee that any call will succeed, that any outcome summary is accurate, or that the Service will be uninterrupted or error-free.</p>
-
-    <h2>10. Limitation of Liability</h2>
-    <p>To the maximum extent permitted by law, Emysa and its officers, employees, and service providers will not be liable for any indirect, incidental, special, consequential, or punitive damages, or any loss of profits or data, arising from your use of the Service, even if advised of the possibility of such damages.</p>
-
-    <h2>11. Indemnification</h2>
-    <p>You agree to indemnify and hold Emysa harmless from any claim, loss, or demand, including reasonable legal fees, made by any third party arising out of your use of the Service, your violation of these Terms, or your violation of any law or the rights of a third party.</p>
-
-    <h2>12. Termination</h2>
-    <p>We may suspend or terminate your access to the Service at any time if we reasonably believe you have violated these Terms. You may stop using the Service and delete your account at any time from Profile → Data controls.</p>
-
-    <h2>13. Changes to these Terms</h2>
-    <p>We may update these Terms from time to time. If we make material changes, we will notify you through the Service or by other reasonable means before the changes take effect. Continued use of the Service after changes take effect constitutes acceptance of the revised Terms.</p>
-
-    <h2>14. Governing Law</h2>
-    <p>These Terms are governed by the laws of [your governing jurisdiction], without regard to its conflict-of-laws principles, unless otherwise required by applicable local law.</p>
-
-    <h2>15. Contact</h2>
-    <p>Questions about these Terms can be sent to <span id="termsContactEmail">support@emysa.app</span>.</p>
-
-    <p style="margin-top:24px; opacity:0.6;">This document is a general-purpose template provided for convenience and does not constitute legal advice. Because this Service places real phone calls, records audio, and clones voices, we strongly recommend having a lawyer review and localize this document — especially the call-recording consent and telemarketing sections — before you rely on it in production.</p>
-  </div>
-</div>
-
-<div class="sheetScreen hidden" id="sheet-privacy">
-  <div class="sheetHeader">
-    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-    <div class="sheetTitle">Privacy Policy</div>
-  </div>
-  <div class="sheetBody">
-    <div class="legalMeta">Last updated: <span id="privacyUpdatedDate"></span></div>
-
-    <h2>1. Overview</h2>
-    <p>This Privacy Policy explains what information Emysa collects, how we use it, and the choices you have. Because Emysa places phone calls and can clone your voice, it necessarily handles some sensitive categories of data — we've tried to be specific below rather than vague.</p>
-
-    <h2>2. Information We Collect</h2>
-    <p><strong>Account information:</strong> your name, email address, and authentication data when you sign up.</p>
-    <p><strong>Profile data:</strong> your display name, theme preference, and a profile picture you choose to upload.</p>
-    <p><strong>Voice data:</strong> if you record a sample to clone your voice, we store that audio sample and the synthetic voice model derived from it.</p>
-    <p><strong>Call data:</strong> the phone number you ask us to call, your stated objective for the call, the call's audio recording (where recording is enabled), an automated transcript, an AI-generated outcome summary, and call metadata such as duration and status.</p>
-    <p><strong>Device & usage data:</strong> push-notification subscription details (if you enable notifications), app version, and basic usage logs needed to operate and secure the Service.</p>
-
-    <h2>3. How We Use Your Information</h2>
-    <ul>
-      <li>To place, conduct, transcribe, and summarize the calls you request;</li>
-      <li>To generate and store your cloned voice so the AI caller can speak as you;</li>
-      <li>To operate your account, enforce usage limits, and provide customer support;</li>
-      <li>To send you notifications about call status and other account activity you've opted into;</li>
-      <li>To maintain the security, integrity, and reliability of the Service;</li>
-      <li>To comply with legal obligations.</li>
-    </ul>
-    <p>We do not use your voice sample, call recordings, or transcripts to train general-purpose AI models, and we do not sell your personal information to third parties.</p>
-
-    <h2>4. Voice Data & Biometric Information</h2>
-    <p>A cloned voice can be considered biometric or sensitive personal information under laws such as Illinois' Biometric Information Privacy Act (BIPA) and similar state, national, or regional laws. We collect and store your voice sample and derived voice model only with your affirmative action (recording it yourself), retain it only as long as your account is active or as long as needed to provide the Service, and delete it upon account deletion or upon your request through Profile → Data controls.</p>
-
-    <h2>5. Call Recordings & Transcripts</h2>
-    <p>Where a call is recorded, the recording and its transcript are stored so you can review the outcome of that call. You are responsible for complying with any law that requires you to notify or obtain consent from the other party on a call before it is recorded — see the Terms of Use for more detail.</p>
-
-    <h2>6. Third-Party Service Providers</h2>
-    <p>We share the minimum data necessary with the following categories of service providers, solely to deliver the Service:</p>
-    <ul>
-      <li><strong>Telephony carrier</strong> — to place and connect your calls;</li>
-      <li><strong>Speech-to-text / language-model provider</strong> — to understand and respond during your call in real time;</li>
-      <li><strong>Text-to-speech provider</strong> — to generate the AI caller's speech, including your cloned voice where used;</li>
-      <li><strong>Database & storage provider</strong> — to store your account, profile, and call data securely.</li>
-    </ul>
-    <p>These providers are contractually restricted from using your data for any purpose other than providing their service to us.</p>
-
-    <h2>7. Data Retention</h2>
-    <p>We retain your account and call data for as long as your account is active. You can request deletion of your voice model, individual call recordings, or your entire account and associated data at any time via Profile → Data controls; we will delete it within a reasonable period, except where we're required to retain certain records by law.</p>
-
-    <h2>8. Data Sharing & Disclosure</h2>
-    <p>We do not sell your personal information. We may disclose information if required by law, subpoena, or valid legal process, to protect the rights, property, or safety of Emysa, our users, or the public, or in connection with a merger, acquisition, or sale of assets, subject to this Policy continuing to apply to your data.</p>
-
-    <h2>9. Data Security</h2>
-    <p>We use industry-standard measures — including encryption in transit, access controls, and row-level security on our database — to protect your data. No method of transmission or storage is 100% secure, and we cannot guarantee absolute security.</p>
-
-    <h2>10. Your Rights & Choices</h2>
-    <ul>
-      <li><strong>Access & export:</strong> request a copy of the personal data we hold about you;</li>
-      <li><strong>Deletion:</strong> delete your voice model, call history, or entire account at any time;</li>
-      <li><strong>Notifications:</strong> enable or disable push notifications from Profile;</li>
-      <li><strong>Correction:</strong> update your name and profile picture at any time from Profile.</li>
-    </ul>
-    <p>Depending on where you live, you may have additional rights under laws such as the GDPR or CCPA/CPRA. Contact us using the details below to exercise any of these rights.</p>
-
-    <h2>11. Children's Privacy</h2>
-    <p>The Service is not directed to children under 18, and we do not knowingly collect personal information from them. If you believe a child has provided us with personal information, contact us and we will delete it.</p>
-
-    <h2>12. International Data Transfers</h2>
-    <p>Your information may be processed in a country other than the one where you live. Where required, we rely on appropriate safeguards to protect information transferred internationally.</p>
-
-    <h2>13. Changes to this Policy</h2>
-    <p>We may update this Privacy Policy from time to time. If we make material changes, we'll notify you through the Service before they take effect.</p>
-
-    <h2>14. Contact Us</h2>
-    <p>For any privacy question or to exercise your rights, contact <span id="privacyContactEmail">support@emysa.app</span>.</p>
-
-    <p style="margin-top:24px; opacity:0.6;">This document is a general-purpose template provided for convenience and does not constitute legal advice. Given the voice-cloning and call-recording features described above, we strongly recommend a lawyer review this policy — particularly the biometric-data and call-recording sections — and localize it for every jurisdiction you operate in before relying on it in production.</p>
-  </div>
-</div>
-
-<div class="sheetScreen hidden" id="sheet-help">
-  <div class="sheetHeader">
-    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-    <div class="sheetTitle">Help & FAQ</div>
-  </div>
-  <div class="sheetBody">
-    <h2>How does Emysa make a call?</h2>
-    <p>Type what you need done in plain language — like "call this number and ask if they have a table for four tonight" — and Emysa places a real phone call, has the conversation for you, and reports back what happened.</p>
-
-    <h2>What is voice cloning for?</h2>
-    <p>Recording a short 10–30 second sample lets the AI caller speak in a voice that sounds like yours instead of a generic voice. It's entirely optional — the AI caller can also use a library voice.</p>
-
-    <h2>Is my call recorded?</h2>
-    <p>Recording and transcription may be enabled to let you review what happened on a call. You're responsible for following your local law on notifying anyone you call that the conversation may be recorded — see the Privacy Policy for details.</p>
-
-    <h2>Do I have a limit on how many calls I can make?</h2>
-    <p>Your account has a monthly minute allowance shown in the app. Once you're close to the limit you'll be notified before any call that would put you over it.</p>
-
-    <h2>How do I change my profile picture?</h2>
-    <p>Open Profile and tap the small camera icon on your avatar to choose a photo from your library.</p>
-
-    <h2>How do I delete my voice, my call history, or my whole account?</h2>
-    <p>Go to Profile → Data controls. You can request deletion of any of these at any time.</p>
-
-    <h2>Something isn't working — how do I reach support?</h2>
-    <p>Email <span id="helpContactEmail">support@emysa.app</span> with a description of the issue and, if it's about a specific call, roughly when it happened.</p>
-  </div>
-</div>
-
-<div class="sheetScreen hidden" id="sheet-data">
-  <div class="sheetHeader">
-    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-    <div class="sheetTitle">Data controls</div>
-  </div>
-  <div class="sheetBody">
-    <p>These actions are handled by our support team to make sure the right account is affected. Emailing from your account's email address speeds things up.</p>
-
-    <div class="profileCard linkCard" id="exportDataBtn" style="margin-top:14px;">
-      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0-4-4m4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-      <div class="cBody"><div class="cValue">Request a copy of my data</div></div>
-    </div>
-    <div class="profileCard linkCard" id="deleteVoiceBtn">
-      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z" stroke="currentColor" stroke-width="1.7"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
-      <div class="cBody"><div class="cValue">Delete my cloned voice</div></div>
-    </div>
-    <div class="profileCard linkCard signOutCard" id="deleteAccountBtn">
-      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-      <div class="cBody"><div class="cValue">Delete my account & all data</div></div>
-    </div>
-
-    <p style="margin-top:18px;">You can review what's collected and why in the <span class="cChevron" style="display:inline; color:var(--accent); cursor:pointer;" id="dataToPrivacyLink">Privacy Policy</span>.</p>
-  </div>
 </div>
 
 <script type="module" src="app.js"></script>
