@@ -85,7 +85,7 @@ $('bgFileInput').addEventListener('change', async (e) => {
     body: JSON.stringify({ imageBase64, mimeType: file.type }),
   });
   const data = await resp.json();
-  $('bgUploadStatus').textContent = resp.ok ? 'Background updated — it will show on the main app\'s login screen.' : (data.error || 'Upload failed.');
+  $('bgUploadStatus').textContent = resp.ok ? 'Background updated — it will show on the main app\'s welcome, login and sign-up screens.' : (data.error || 'Upload failed.');
 });
 
 function blobToBase64(blob) {

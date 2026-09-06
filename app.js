@@ -31,30 +31,64 @@ document.querySelectorAll('.tabBtn').forEach((btn) => {
 
 // ---------- auth ----------
 const authScreen = $('authScreen');
-let authMode = 'signin';
+const ONBOARD_KEY = 'emysa_seen_onboarding';
 
-$('authToggleMode').addEventListener('click', () => {
-  authMode = authMode === 'signin' ? 'signup' : 'signin';
-  $('authSubmit').textContent = authMode === 'signin' ? 'Sign in' : 'Sign up';
-  $('authToggleMode').innerHTML = authMode === 'signin' ? 'Need an account? <b>Sign up</b>' : 'Have an account? <b>Sign in</b>';
-  $('authHint').textContent = '';
+function showAuthPanel(name) {
+  document.querySelectorAll('.authPanel').forEach((p) => p.classList.remove('active'));
+  $(`panel${name}`).classList.add('active');
+}
+
+function startAuthFlow() {
+  showAuthPanel(localStorage.getItem(ONBOARD_KEY) ? 'Login' : 'GetStarted');
+}
+
+$('gsSignUp').addEventListener('click', () => { localStorage.setItem(ONBOARD_KEY, '1'); showAuthPanel('Signup'); });
+$('gsLogIn').addEventListener('click', () => { localStorage.setItem(ONBOARD_KEY, '1'); showAuthPanel('Login'); });
+$('loginBack').addEventListener('click', () => showAuthPanel('GetStarted'));
+$('signupBack').addEventListener('click', () => showAuthPanel('GetStarted'));
+$('loginToSignup').addEventListener('click', () => showAuthPanel('Signup'));
+$('signupToLogin').addEventListener('click', () => showAuthPanel('Login'));
+
+const EYE_OPEN = `<svg viewBox="0 0 24 24" fill="none"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/></svg>`;
+const EYE_OFF = `<svg viewBox="0 0 24 24" fill="none"><path d="M3 3l18 18M10.6 10.6a3 3 0 0 0 4.24 4.24M6.6 6.7C4.5 8.1 3 12 3 12s3.5 7 10 7c1.7 0 3.15-.47 4.36-1.13M9.9 4.24C10.58 4.09 11.28 4 12 4c6.5 0 10 7 10 7-.35.7-1.08 1.9-2.16 3.13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
+
+function wireEyeToggle(inputId, btnId) {
+  const input = $(inputId), btn = $(btnId);
+  btn.innerHTML = EYE_OPEN;
+  btn.addEventListener('click', () => {
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    btn.innerHTML = showing ? EYE_OPEN : EYE_OFF;
+  });
+}
+wireEyeToggle('loginPassword', 'loginEyeBtn');
+wireEyeToggle('signupPassword', 'signupEyeBtn');
+
+$('loginSubmit').addEventListener('click', async () => {
+  const email = $('loginEmail').value.trim();
+  const password = $('loginPassword').value;
+  if (!email || !password) { $('loginHint').textContent = 'Enter your email and password.'; return; }
+  $('loginHint').textContent = 'Working...';
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) $('loginHint').textContent = error.message;
 });
 
-$('authSubmit').addEventListener('click', async () => {
-  const email = $('authEmail').value.trim();
-  const password = $('authPassword').value;
-  if (!email || !password) { $('authHint').textContent = 'Enter an email and password.'; return; }
-  $('authHint').textContent = 'Working...';
-  const { error } = authMode === 'signin'
-    ? await supabase.auth.signInWithPassword({ email, password })
-    : await supabase.auth.signUp({ email, password });
-  if (error) { $('authHint').textContent = error.message; return; }
-  if (authMode === 'signup') $('authHint').textContent = 'Check your email to confirm, then wait for approval.';
+$('signupSubmit').addEventListener('click', async () => {
+  const fullName = $('signupName').value.trim();
+  const email = $('signupEmail').value.trim();
+  const password = $('signupPassword').value;
+  if (!fullName || !email || !password) { $('signupHint').textContent = 'Fill in your name, email and password.'; return; }
+  $('signupHint').textContent = 'Working...';
+  const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } });
+  if (error) { $('signupHint').textContent = error.message; return; }
+  $('signupHint').textContent = 'Check your email to confirm, then wait for approval.';
 });
 
-$('googleSignIn').addEventListener('click', async () => {
-  await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
-});
+$('loginGoogle').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } }));
+$('signupGoogle').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } }));
+// Apple sign-in needs the Apple provider enabled in Supabase Auth settings to actually work.
+$('loginApple').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'apple', options: { redirectTo: window.location.origin } }));
+$('signupApple').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'apple', options: { redirectTo: window.location.origin } }));
 
 $('signOutBtn').addEventListener('click', () => supabase.auth.signOut());
 $('pendingSignOut').addEventListener('click', () => supabase.auth.signOut());
@@ -68,15 +102,13 @@ async function enterApp(session) {
   currentSession = session;
   currentUser = session.user;
   const approved = await checkApproval(currentUser.id);
+  $('authBoot').style.display = 'none';
+  document.querySelectorAll('.authPanel').forEach((p) => p.classList.remove('active'));
   if (!approved) {
     authScreen.classList.remove('hidden');
-    $('authBoot').style.display = 'none';
-    $('authBox').style.display = 'none';
     $('pendingBox').style.display = 'block';
     return;
   }
-  $('authBoot').style.display = 'none';
-  $('authBox').style.display = 'none';
   $('pendingBox').style.display = 'none';
   authScreen.classList.add('hidden');
   loadCallers();
@@ -89,9 +121,9 @@ supabase.auth.onAuthStateChange((_event, session) => {
     currentUser = null;
     currentSession = null;
     $('authBoot').style.display = 'none';
-    $('authBox').style.display = '';
     $('pendingBox').style.display = 'none';
     authScreen.classList.remove('hidden');
+    startAuthFlow();
   }
 });
 
