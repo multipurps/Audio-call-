@@ -115,7 +115,7 @@ img{display:block; max-width:100%;}
 .tabBtn.active{background:rgba(255,255,255,0.1);}
 .tabBtn svg{width:20px; height:20px;}
 
-h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-top:20px; margin-bottom:16px;}
+h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-top:max(env(safe-area-inset-top),50px); margin-bottom:16px;}
 
 .field{margin-bottom:16px;}
 .field label{display:block; font-size:12px; font-weight:600; color:var(--dim); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.04em;}
@@ -408,3 +408,31 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .sheetBody .legalMeta{font-size:12px; color:var(--dim); opacity:0.7; margin-bottom:18px;}
 .socialRow{display:flex; gap:10px;}
 .socialRow .profileCard{flex:1; justify-content:center; margin-bottom:0;}
+
+/* ---------- ss3 theme: peach-to-black gradient with a drifting glow, from Mitra's onboarding screen ---------- */
+[data-theme="ss3"]{
+  --accent:#e8b7a0;
+  --panel:#241c1c;
+  --line: rgba(255,220,200,0.14);
+  --dim: rgba(255,225,210,0.6);
+  --coffee:#0d0907;
+  --coffee-light:#1c1512;
+  --coffee-light-rgb:28,21,18;
+  --icon-color:#f3d9c8;
+}
+[data-theme="ss3"] body{
+  background:
+    linear-gradient(180deg, #f6dccb 0%, #e7a98d 20%, #8a5551 40%, #2a1a1c 58%, #0d0907 80%);
+  background-attachment:fixed;
+}
+[data-theme="ss3"] body::before{
+  content:'';
+  position:fixed; left:0; right:0; top:38%; bottom:0;
+  background:radial-gradient(60% 55% at 50% 0%, rgba(255,185,145,0.32), transparent 72%);
+  animation: ss3Wave 9s ease-in-out infinite;
+  pointer-events:none;
+}
+@keyframes ss3Wave{
+  0%,100%{ transform:translateY(0) scale(1); opacity:0.75; }
+  50%{ transform:translateY(22px) scale(1.06); opacity:1; }
+}

@@ -47,6 +47,7 @@ async function authedFetch(url, options = {}) {
 }
 
 // ---------- tabs ----------
+let gliderReady = false;
 function moveTabGlider(name) {
   const glider = $('tabGlider');
   const btn = document.querySelector(`#tabBar .tabBtn[data-tab="${name}"]`);
@@ -54,6 +55,14 @@ function moveTabGlider(name) {
   const barRect = $('tabBar').getBoundingClientRect();
   const btnRect = btn.getBoundingClientRect();
   if (btnRect.width === 0) return;
+  if (!gliderReady) {
+    // Suppress the transition for the very first placement so the glider
+    // doesn't visibly slide in from a default position on load — that's
+    // what was reading as the app "moving around" on open.
+    glider.style.transition = 'none';
+    gliderReady = true;
+    requestAnimationFrame(() => { glider.style.transition = ''; });
+  }
   glider.style.transform = `translateX(${btnRect.left - barRect.left - 6}px)`;
 }
 
