@@ -1,5 +1,28 @@
 import { createClient } from './vendor/supabase.js';
 
+// Installed PWAs (especially iOS "Add to Home Screen") can keep showing a
+// stale build after a new deploy, since there's no browser reload gesture
+// to trigger a re-fetch. Check a small version marker on every open; if it
+// doesn't match what we last saw, force one reload to pick up the new code.
+// The sessionStorage guard stops a reload loop if the check itself is
+// flaky offline.
+(async () => {
+  try {
+    const resp = await fetch('/version.json', { cache: 'no-store' });
+    const { version } = await resp.json();
+    const seen = localStorage.getItem('appVersion');
+    if (seen && seen !== version && !sessionStorage.getItem('reloadedForVersion')) {
+      sessionStorage.setItem('reloadedForVersion', '1');
+      localStorage.setItem('appVersion', version);
+      location.reload();
+      return;
+    }
+    localStorage.setItem('appVersion', version);
+  } catch {
+    // offline or blocked — just continue with whatever's already loaded
+  }
+})();
+
 // Same pattern as Live Call: project URL is public by design, only the
 // anon key ships to the client — every privileged action goes through
 // api/*.js using the service-role key server-side instead.
@@ -543,24 +566,29 @@ $('homeWaveBtn').addEventListener('click', async () => {
     waveRecorder.onstop = async () => {
       stream.getTracks().forEach((t) => t.stop());
       $('homeWaveBtn').classList.remove('recording');
+      $('listenLabel').textContent = 'Thinking…';
       const blob = new Blob(waveChunks, { type: 'audio/webm' });
       const base64 = await blobToBase64(blob);
-      $('briefInput').placeholder = 'Transcribing…';
       const resp = await authedFetch('/api/assistant?action=transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audioBase64: base64, mimeType: 'audio/webm' }),
       });
-      $('briefInput').placeholder = 'Message';
+      $('listenScreen').classList.add('hidden');
+      $('listenLabel').textContent = 'Listening…';
       const data = await resp.json();
       if (resp.ok && data.text?.trim()) sendChatMessage(data.text.trim());
       else if (!resp.ok) alert(data.error || 'Could not transcribe — try typing instead.');
     };
     waveRecorder.start();
     $('homeWaveBtn').classList.add('recording');
+    $('listenScreen').classList.remove('hidden');
   } catch (err) {
     alert('Microphone access is needed to talk to Mitra by voice.');
   }
+});
+$('listenStopBtn').addEventListener('click', () => {
+  if (waveRecorder && waveRecorder.state === 'recording') waveRecorder.stop();
 });
 
 function blobToBase64(blob) {

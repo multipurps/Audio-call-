@@ -70,9 +70,9 @@
 /* No safe-area insets anywhere in this file, on purpose: the app fills the
    true screen edge to edge, including under the notch/home-indicator area.
    Accepted tradeoff: the very top/bottom few px sit in the gesture zone. */
-html{height:100%; background:var(--coffee);}
+html{height:100%; background:var(--coffee); overscroll-behavior:none;}
 body{
-  background:var(--coffee); overflow:hidden; color:#fff;
+  background:var(--coffee); overflow:hidden; color:#fff; overscroll-behavior:none;
   font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
   /* position:relative (not fixed) on purpose: body is the containing block
      for every absolutely-positioned full-bleed screen below. Its real height
@@ -91,7 +91,7 @@ img{display:block; max-width:100%;}
 #app{position:absolute; inset:0;}
 #screens{position:absolute; inset:0;}
 .screen{
-  position:absolute; inset:0; overflow-y:auto;
+  position:absolute; inset:0; overflow-y:auto; overscroll-behavior-y:contain;
   padding:0 18px 110px;
   display:none;
 }
@@ -210,7 +210,7 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .homeIdleLogo{width:96px; height:96px; border-radius:50%; object-fit:cover; box-shadow:0 8px 30px rgba(0,0,0,0.4);}
 .homeIdleGreeting{font-size:20px; font-weight:600; line-height:1.4; color:#fff;}
 
-.homeChat{
+.homeChat{ overscroll-behavior-y:contain;
   flex:1; overflow-y:auto; padding:16px 18px 130px; display:flex; flex-direction:column; gap:14px;
 }
 .chatMsg{max-width:82%; font-size:15px; line-height:1.45;}
@@ -245,7 +245,7 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .callTitle{font-size:19px; font-weight:700;}
 .callTimer{font-size:13px; color:var(--dim); margin-top:4px;}
 
-.transcriptPanel{flex:1; overflow-y:auto; padding:20px 18px 10px; display:flex; flex-direction:column; gap:12px;}
+.transcriptPanel{flex:1; overflow-y:auto; overscroll-behavior-y:contain; padding:20px 18px 10px; display:flex; flex-direction:column; gap:12px;}
 .transcriptLine{max-width:88%; display:flex; align-items:flex-start; gap:8px;}
 .transcriptLine.ai{align-self:flex-start;}
 .transcriptLine.contact{align-self:flex-end; flex-direction:row-reverse;}
@@ -482,3 +482,29 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
   0%,100%{ transform:translateY(0) scale(1); opacity:0.75; }
   50%{ transform:translateY(22px) scale(1.06); opacity:1; }
 }
+
+/* ---------- voice-input overlay (talk to the assistant, not a phone call) ---------- */
+#listenScreen{
+  position:fixed; inset:0; z-index:150; background:rgba(6,4,4,0.86);
+  backdrop-filter:blur(18px) saturate(140%); -webkit-backdrop-filter:blur(18px) saturate(140%);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:28px;
+}
+#listenScreen.hidden{display:none;}
+.listenOrb{
+  width:120px; height:120px; border-radius:50%;
+  background:radial-gradient(circle at 35% 30%, var(--accent), var(--panel) 75%);
+  display:flex; align-items:center; justify-content:center; gap:5px;
+  box-shadow:0 0 60px -10px var(--accent);
+}
+.listenOrb span{width:4px; border-radius:3px; background:#fff; height:14px; opacity:0.85; animation:listenBounce 1s ease-in-out infinite;}
+.listenOrb span:nth-child(2){animation-delay:0.1s;}
+.listenOrb span:nth-child(3){animation-delay:0.2s;}
+.listenOrb span:nth-child(4){animation-delay:0.3s;}
+.listenOrb span:nth-child(5){animation-delay:0.4s;}
+@keyframes listenBounce{0%,100%{height:10px;} 50%{height:38px;}}
+.listenLabel{font-size:15px; font-weight:600; color:var(--dim);}
+.listenStopBtn{
+  width:56px; height:56px; border-radius:50%; background:#e0433d;
+  display:flex; align-items:center; justify-content:center; color:#fff;
+}
+.listenStopBtn svg{width:22px; height:22px;}
