@@ -309,7 +309,7 @@ supabase.auth.getSession()
     startAuthFlow();
   });
 
-// ---------- Home: chat with the assistant (Mitra-style) ----------
+// ---------- Home: chat with the assistant (Emysa) ----------
 // Replaces the old "type a raw phone number" composer: you talk to the
 // assistant in plain language, it looks up who you mean in your saved
 // Contacts, places the call itself, and status updates (busy, no answer,
@@ -584,7 +584,7 @@ $('homeWaveBtn').addEventListener('click', async () => {
     $('homeWaveBtn').classList.add('recording');
     $('listenScreen').classList.remove('hidden');
   } catch (err) {
-    alert('Microphone access is needed to talk to Mitra by voice.');
+    alert('Microphone access is needed to talk to Emysa by voice.');
   }
 });
 $('listenStopBtn').addEventListener('click', () => {

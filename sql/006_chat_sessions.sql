@@ -10,6 +10,7 @@ alter table assistant_messages add column if not exists session_id uuid referenc
 alter table calls add column if not exists session_id uuid references chat_sessions(id) on delete set null;
 
 alter table chat_sessions enable row level security;
+drop policy if exists "read own chat sessions" on chat_sessions;
 create policy "read own chat sessions" on chat_sessions for select using (auth.uid() = user_id);
 -- No insert/update/delete policy on purpose: writes only ever happen via
 -- api/assistant.js using the service-role key.

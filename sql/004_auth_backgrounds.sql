@@ -10,6 +10,7 @@ create table if not exists auth_backgrounds (
 );
 
 alter table auth_backgrounds enable row level security;
+drop policy if exists "public read auth backgrounds" on auth_backgrounds;
 create policy "public read auth backgrounds" on auth_backgrounds for select using (true);
 -- No insert/update/delete policy on purpose: writes only ever happen via
 -- api/admin-upload-background.js using the service-role key.

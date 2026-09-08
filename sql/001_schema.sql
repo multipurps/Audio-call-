@@ -71,11 +71,19 @@ alter table user_usage enable row level security;
 -- Users can read their own rows; all writes to approvals/usage happen via
 -- the service-role key in api/*.js (same pattern as Live Call), never
 -- directly from the client.
+drop policy if exists "read own approval" on user_approvals;
 create policy "read own approval" on user_approvals for select using (auth.uid() = user_id);
+drop policy if exists "read own profile" on profiles;
 create policy "read own profile" on profiles for select using (auth.uid() = user_id);
+drop policy if exists "write own profile" on profiles;
 create policy "write own profile" on profiles for all using (auth.uid() = user_id);
+drop policy if exists "read own voice" on voice_profiles;
 create policy "read own voice" on voice_profiles for select using (auth.uid() = user_id);
+drop policy if exists "read own callers" on ai_callers;
 create policy "read own callers" on ai_callers for select using (auth.uid() = user_id);
+drop policy if exists "write own callers" on ai_callers;
 create policy "write own callers" on ai_callers for all using (auth.uid() = user_id);
+drop policy if exists "read own calls" on calls;
 create policy "read own calls" on calls for select using (auth.uid() = user_id);
+drop policy if exists "read own usage" on user_usage;
 create policy "read own usage" on user_usage for select using (auth.uid() = user_id);

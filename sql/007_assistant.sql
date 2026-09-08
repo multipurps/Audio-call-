@@ -30,6 +30,9 @@ alter table assistant_messages enable row level security;
 -- round trip through an api/*.js poll-only endpoint); all writes go through
 -- api/contacts.js and api/assistant.js using the service-role key, same
 -- pattern as the rest of this app.
+drop policy if exists "read own contacts" on contacts;
 create policy "read own contacts" on contacts for select using (auth.uid() = user_id);
+drop policy if exists "write own contacts" on contacts;
 create policy "write own contacts" on contacts for all using (auth.uid() = user_id);
+drop policy if exists "read own assistant messages" on assistant_messages;
 create policy "read own assistant messages" on assistant_messages for select using (auth.uid() = user_id);

@@ -44,7 +44,7 @@ export default async function handler(req, res) {
     });
   }
 
-  // Only calls placed through the Mitra-style home chat carry a contact_id
+  // Only calls placed through the Emysa's home chat carry a contact_id
   // (see api/assistant.js) — calls started from the older manual "type a
   // number" composer have none, so we don't post noise into a thread that
   // was never talking about them. When a terminal status comes in for one

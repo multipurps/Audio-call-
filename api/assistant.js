@@ -4,7 +4,7 @@ const LANGUAGE_NAMES = { en: 'English', es: 'Spanish', fr: 'French', pt: 'Portug
 
 // Home-screen "talk to the assistant" chat. Separate from the live in-call
 // relay (server/relay.js) — this is the request/response layer where the
-// user tells Mitra what they want done, Mitra decides whether that means
+// user tells Emysa what they want done, Emysa decides whether that means
 // placing a call to a saved contact, and the actual call outcome (busy, no
 // answer, completed) gets posted back into the same thread later by the
 // Twilio status webhook (see api/calls-status.js).
@@ -163,7 +163,7 @@ async function sendMessage(req, res, supabase, userId) {
 
   const contactsList = (contacts || []).map((c) => `- ${c.name}`).join('\n') || '(no contacts saved yet)';
   const systemPrompt = [
-    'You are Mitra, the in-app assistant for a phone-calling app. The user can ask you to call people by name from their saved contacts, and you place the call for them.',
+    'You are Emysa, the in-app assistant for a phone-calling app. The user can ask you to call people by name from their saved contacts, and you place the call for them.',
     'Known contacts:',
     contactsList,
     '',

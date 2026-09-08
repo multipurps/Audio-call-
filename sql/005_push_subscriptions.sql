@@ -17,7 +17,9 @@ create table if not exists announcements (
 alter table push_subscriptions enable row level security;
 alter table announcements enable row level security;
 
+drop policy if exists "write own push subscription" on push_subscriptions;
 create policy "write own push subscription" on push_subscriptions for all using (auth.uid() = user_id);
+drop policy if exists "read announcements" on announcements;
 create policy "read announcements" on announcements for select using (true);
 -- No insert/update/delete policy on announcements on purpose: writes only
 -- ever happen via api/send-announcement.js using the service-role key.
