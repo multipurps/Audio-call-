@@ -169,15 +169,15 @@ async function sendMessage(req, res, supabase, userId) {
 
   const contactsList = (contacts || []).map((c) => `- ${c.name}`).join('\n') || '(no contacts saved yet)';
   const systemPrompt = [
-    'You are Emysa, the in-app assistant for a phone-calling app. The user can ask you to call people by name from their saved contacts, and you place the call for them.',
+    'You are Emysa, the in-app assistant for a phone-calling app. The user tells you who to call and what to say, and you place the call for them. They can give you either a phone number directly, or a name from their saved contacts below:',
     'Known contacts:',
     contactsList,
     '',
     'Reply with ONLY a JSON object, no other text, matching this shape:',
-    '{"action":"call"|"retry"|"reply","contactName":string|null,"objective":string|null,"reply":string|null}',
-    '- action "call": the user wants you to call someone new. contactName is your best guess at which saved contact they mean (or null if unclear). objective is a short phrase describing what to say or ask on the call — if they also gave any tone or manner direction (stay calm, keep it light, let it flow naturally, be quick about it, etc.), include that in objective too, don\'t drop it.',
+    '{"action":"call"|"retry"|"reply","phoneNumber":string|null,"contactName":string|null,"objective":string|null,"reply":string|null}',
+    '- action "call": the user wants you to call someone new. If they gave you an actual phone number in their message, put the digits (with country code if given, e.g. "+15551234567") in phoneNumber. Otherwise, if they named someone from the saved contacts list, put your best guess at that name in contactName. objective is a short phrase describing what to say or ask on the call — if they also gave any tone or manner direction (stay calm, keep it light, let it flow naturally, be quick about it, etc.), include that in objective too, don\'t drop it.',
     '- action "retry": the user wants you to call the same person again (e.g. "call him again", "try it again").',
-    '- action "reply": anything else — just talk back normally and put your response in "reply".',
+    '- action "reply": anything else, including if they want to call someone but haven\'t given you a number or a known contact yet — ask for the phone number in "reply".',
   ].join('\n');
 
   const chatMessages = [
@@ -222,7 +222,7 @@ async function sendMessage(req, res, supabase, userId) {
         const { data: c } = await supabase.from('contacts').select('*').eq('id', lastCall.contact_id).maybeSingle();
         contact = c;
       }
-    } else {
+    } else if (!intent.phoneNumber) {
       const name = (intent.contactName || '').trim().toLowerCase();
       if (name) {
         contact =
@@ -232,11 +232,14 @@ async function sendMessage(req, res, supabase, userId) {
       }
     }
 
-    if (!contact) {
+    const toNumber = intent.phoneNumber || contact?.phone_number || null;
+    const label = contact?.name || intent.phoneNumber;
+
+    if (!toNumber) {
       const msg =
         intent.action === 'retry'
           ? "I'm not sure who to call again yet — tell me who you'd like me to call."
-          : `I don't have ${intent.contactName ? `"${intent.contactName}"` : 'that person'} in your contacts yet. Add them in Profile → Contacts, then ask me again.`;
+          : "What number should I call? You can give me a phone number, or a name from your saved contacts.";
       newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', msg));
       return respond();
     }
@@ -247,16 +250,16 @@ async function sendMessage(req, res, supabase, userId) {
       const langName = LANGUAGE_NAMES[langProfile.language] || langProfile.language;
       objective = `Speak only in ${langName} for this entire call, regardless of what language this instruction is written in. ${objective}`;
     }
-    const placed = await placeCall(supabase, userId, { toNumber: contact.phone_number, objective, contactId: contact.id, callerId: callerId || null, sessionId });
+    const placed = await placeCall(supabase, userId, { toNumber, objective, contactId: contact?.id || null, callerId: callerId || null, sessionId });
 
     if (placed.error) {
-      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${contact.name}: ${placed.error}`));
+      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${label}: ${placed.error}`));
       return respond();
     }
 
     const verb = intent.action === 'retry' ? 'again now' : 'now';
-    newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I'm calling ${contact.name} ${verb}.`, placed.call.id));
-    return respond({ callId: placed.call.id });
+    newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I'm calling ${label} ${verb}.`, placed.call.id));
+    return respond({ callId: placed.call.id, toNumber });
   }
 
   newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', intent.reply || 'Got it.'));

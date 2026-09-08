@@ -340,6 +340,7 @@ async function initHomeChat() {
     renderHomeMessages(messages || [], true);
   }
   startMessagePolling();
+  resumeActiveCallIfAny();
 }
 
 async function openChatSession(sessionId) {
@@ -367,7 +368,7 @@ function startNewChat() {
 function setHomeChatActive(active) {
   $('homeIdle').classList.toggle('hidden', active);
   $('homeChat').classList.toggle('hidden', !active);
-  $('homeHeaderLogo').classList.toggle('hidden', !active);
+  $('homeHeaderLogoWrap').classList.toggle('hidden', !active);
 }
 
 function renderHomeMessages(messages, replaceAll) {
@@ -438,6 +439,45 @@ async function openCallFromMessage(callId) {
   openCallScreen(call.id, call.to_number);
 }
 
+// ---------- Header logo: shows a spinning ring while a call placed from
+// this chat is actually happening, and opens the live call screen (with
+// transcript) when tapped. ----------
+let activeHeaderCall = null; // { id, toNumber } | null
+let headerCallChannel = null;
+
+function trackActiveCall(callId, toNumber) {
+  activeHeaderCall = { id: callId, toNumber };
+  $('homeHeaderLogoWrap').classList.add('calling');
+  if (headerCallChannel) supabase.removeChannel(headerCallChannel);
+  headerCallChannel = supabase
+    .channel(`header-call-${callId}`)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'calls', filter: `id=eq.${callId}` }, (payload) => {
+      if (['completed', 'failed', 'no_answer'].includes(payload.new.status)) clearActiveCall();
+    })
+    .subscribe();
+}
+
+function clearActiveCall() {
+  activeHeaderCall = null;
+  $('homeHeaderLogoWrap').classList.remove('calling');
+  if (headerCallChannel) { supabase.removeChannel(headerCallChannel); headerCallChannel = null; }
+}
+
+// If a call placed earlier is still going (app was backgrounded, tab
+// switched away, page reloaded), pick the ring back up rather than losing
+// the indicator until the next message.
+async function resumeActiveCallIfAny() {
+  const resp = await authedFetch('/api/calls?action=list');
+  if (!resp.ok) return;
+  const { calls } = await resp.json();
+  const live = (calls || []).find((c) => ['queued', 'ringing', 'in_progress'].includes(c.status));
+  if (live) trackActiveCall(live.id, live.to_number);
+}
+
+$('homeHeaderLogoWrap').addEventListener('click', () => {
+  if (activeHeaderCall) openCallScreen(activeHeaderCall.id, activeHeaderCall.toNumber);
+});
+
 async function sendChatMessage(text) {
   appendChatBubble({ id: `local-${Date.now()}`, role: 'user', content: text, created_at: new Date().toISOString() });
   setHomeChatActive(true);
@@ -454,6 +494,7 @@ async function sendChatMessage(text) {
     return;
   }
   if (data.sessionId) currentChatSessionId = data.sessionId;
+  if (data.callId && data.toNumber) trackActiveCall(data.callId, data.toNumber);
   // The optimistic user bubble above already shows this turn; mark the
   // server's saved copy of it as seen (without re-rendering) so the next
   // poll doesn't draw a second, duplicate copy of the same user message.
@@ -686,6 +727,7 @@ function openCallScreen(callId, toNumber) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ callId }),
     });
+    clearActiveCall();
     closeCallScreen();
   };
 

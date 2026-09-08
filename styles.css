@@ -201,7 +201,14 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .homeHeaderBtn svg{width:20px; height:20px;}
 .homeHeaderBtn.recording{color:#ff6b6b;}
 .homeHeaderTitle{display:flex; flex-direction:column; align-items:center; gap:6px; font-size:15px; font-weight:650; color:var(--dim); flex:1; min-width:0;}
-.homeHeaderLogo{width:38px; height:38px; border-radius:50%; object-fit:cover; margin-bottom:-16px; box-shadow:0 4px 14px rgba(0,0,0,0.4);}
+.homeHeaderLogo{width:38px; height:38px; border-radius:50%; object-fit:cover; box-shadow:0 4px 14px rgba(0,0,0,0.4); display:block;}
+.homeHeaderLogoWrap{position:relative; margin-bottom:-16px; cursor:pointer;}
+.homeHeaderLogoWrap.calling::after{
+  content:''; position:absolute; inset:-4px; border-radius:50%;
+  border:2px solid transparent; border-top-color:var(--accent); border-right-color:var(--accent);
+  animation:headerCallSpin 0.9s linear infinite;
+}
+@keyframes headerCallSpin{to{transform:rotate(360deg);}}
 
 .homeIdle{
   flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
