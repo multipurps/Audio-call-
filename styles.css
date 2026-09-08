@@ -409,6 +409,36 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .socialRow{display:flex; gap:10px;}
 .socialRow .profileCard{flex:1; justify-content:center; margin-bottom:0;}
 
+/* ---------- saved chats ---------- */
+.savedChatsHeader{display:flex; align-items:center; gap:6px; padding:calc(env(safe-area-inset-top, 0px) + 18px) 14px 14px;}
+.searchBar{
+  display:flex; align-items:center; gap:8px; background:var(--glass-bg); backdrop-filter:blur(18px) saturate(160%);
+  -webkit-backdrop-filter:blur(18px) saturate(160%); border:1px solid var(--glass-border); border-radius:14px;
+  padding:11px 14px; margin-bottom:18px; color:var(--dim);
+}
+.searchBar svg{width:18px; height:18px; flex:none;}
+.searchBar input{flex:1; background:none; border:none; outline:none; color:#fff; font-size:14.5px; font-family:inherit;}
+.searchBar input::placeholder{color:var(--dim);}
+.savedChatRow{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  background:var(--glass-bg); backdrop-filter:blur(18px) saturate(160%); -webkit-backdrop-filter:blur(18px) saturate(160%);
+  border:1px solid var(--glass-border); border-radius:16px; padding:15px 16px; margin-bottom:8px; cursor:pointer;
+}
+.savedChatTitle{font-size:14.5px; font-weight:650; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.savedChatDate{font-size:12.5px; color:var(--dim); flex:none;}
+
+/* ---------- recent calls ---------- */
+.recentRow{
+  display:flex; align-items:center; gap:12px;
+  background:var(--glass-bg); backdrop-filter:blur(18px) saturate(160%); -webkit-backdrop-filter:blur(18px) saturate(160%);
+  border:1px solid var(--glass-border); border-radius:18px; padding:14px; margin-bottom:10px;
+}
+.recentAvatar{width:46px; height:46px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:16px; color:#fff; flex:none;}
+.recentBody{flex:1; min-width:0;}
+.recentName{font-size:15px; font-weight:650; margin-bottom:3px;}
+.recentPreview{font-size:12.5px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.recentDate{font-size:12px; color:var(--dim); flex:none; align-self:flex-start; margin-top:2px;}
+
 /* ---------- ss3 theme: peach-to-black gradient with a drifting glow, from Mitra's onboarding screen ---------- */
 [data-theme="ss3"]{
   --accent:#e8b7a0;

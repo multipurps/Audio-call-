@@ -139,5 +139,14 @@ async function listCalls(req, res, supabase, userId) {
     .order('created_at', { ascending: false })
     .limit(50);
   if (error) return res.status(500).json({ error: error.message });
-  return res.status(200).json({ calls: data });
+
+  const contactIds = [...new Set((data || []).map((c) => c.contact_id).filter(Boolean))];
+  let namesById = new Map();
+  if (contactIds.length) {
+    const { data: contacts } = await supabase.from('contacts').select('id,name').in('id', contactIds);
+    namesById = new Map((contacts || []).map((c) => [c.id, c.name]));
+  }
+  const calls = (data || []).map((c) => ({ ...c, contact_name: c.contact_id ? namesById.get(c.contact_id) || null : null }));
+
+  return res.status(200).json({ calls });
 }

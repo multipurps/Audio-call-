@@ -286,49 +286,6 @@ supabase.auth.getSession()
     startAuthFlow();
   });
 
-// ---------- AI callers ----------
-async function loadCallers() {
-  if (!currentSession) return;
-  const resp = await authedFetch('/api/callers');
-  if (!resp.ok) return;
-  const { callers } = await resp.json();
-  const list = $('callerList');
-  list.innerHTML = '';
-  if (!callers?.length) {
-    list.innerHTML = `<div class="authHint" style="text-align:left;">No AI callers yet — create one to get started.</div>`;
-    return;
-  }
-  for (const c of callers) {
-    const el = document.createElement('div');
-    el.className = 'callerCard';
-    el.innerHTML = `
-      <div class="callerAvatar">${(c.name || '?')[0].toUpperCase()}</div>
-      <div>
-        <div class="callerName">${c.name}</div>
-        <div class="callerMeta">${c.personality}</div>
-      </div>`;
-    el.addEventListener('click', () => { window.__selectedCallerId = c.id; markSelected(el); });
-    list.appendChild(el);
-  }
-}
-
-function markSelected(el) {
-  document.querySelectorAll('.callerCard').forEach((c) => c.style.outline = 'none');
-  el.style.outline = `2px solid var(--accent)`;
-}
-
-$('newCallerBtn').addEventListener('click', async () => {
-  const name = window.prompt('Name your AI caller:');
-  if (!name) return;
-  const instructions = window.prompt('How should it behave? e.g. "Be polite and natural, get to the point but greet first."') || '';
-  const resp = await authedFetch('/api/callers', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, instructions, personality: 'natural', voiceSource: 'cloned' }),
-  });
-  if (resp.ok) loadCallers();
-});
-
 // ---------- Home: chat with the assistant (Mitra-style) ----------
 // Replaces the old "type a raw phone number" composer: you talk to the
 // assistant in plain language, it looks up who you mean in your saved
@@ -338,6 +295,7 @@ $('newCallerBtn').addEventListener('click', async () => {
 // the actual orchestration.
 let homeMessageIds = new Set();
 let pollTimer = null;
+let currentChatSessionId = null;
 
 function greetingForNow(name) {
   const h = new Date().getHours();
@@ -354,10 +312,33 @@ async function initHomeChat() {
 
   const resp = await authedFetch('/api/assistant?action=messages');
   if (resp.ok) {
+    const { messages, sessionId } = await resp.json();
+    currentChatSessionId = sessionId || null;
+    renderHomeMessages(messages || [], true);
+  }
+  startMessagePolling();
+}
+
+async function openChatSession(sessionId) {
+  stopMessagePolling();
+  currentChatSessionId = sessionId;
+  homeMessageIds.clear();
+  $('homeChat').innerHTML = '';
+  setHomeChatActive(false);
+  const resp = await authedFetch(`/api/assistant?action=messages&sessionId=${encodeURIComponent(sessionId)}`);
+  if (resp.ok) {
     const { messages } = await resp.json();
     renderHomeMessages(messages || [], true);
   }
   startMessagePolling();
+}
+
+function startNewChat() {
+  stopMessagePolling();
+  currentChatSessionId = null;
+  homeMessageIds.clear();
+  $('homeChat').innerHTML = '';
+  setHomeChatActive(false);
 }
 
 function setHomeChatActive(active) {
@@ -442,13 +423,14 @@ async function sendChatMessage(text) {
   const resp = await authedFetch('/api/assistant?action=send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, callerId: window.__selectedCallerId || null }),
+    body: JSON.stringify({ text, sessionId: currentChatSessionId }),
   });
   const data = await resp.json();
   if (!resp.ok) {
     appendChatBubble({ id: `err-${Date.now()}`, role: 'assistant', content: data.error || 'Something went wrong.', created_at: new Date().toISOString() });
     return;
   }
+  if (data.sessionId) currentChatSessionId = data.sessionId;
   // The optimistic user bubble above already shows this turn; mark the
   // server's saved copy of it as seen (without re-rendering) so the next
   // poll doesn't draw a second, duplicate copy of the same user message.
@@ -480,7 +462,8 @@ $('briefInput').addEventListener('input', () => {
 function startMessagePolling() {
   if (pollTimer || !currentUser) return;
   pollTimer = setInterval(async () => {
-    const resp = await authedFetch('/api/assistant?action=messages');
+    if (!currentChatSessionId) return;
+    const resp = await authedFetch(`/api/assistant?action=messages&sessionId=${encodeURIComponent(currentChatSessionId)}`);
     if (!resp.ok) return;
     const { messages } = await resp.json();
     renderHomeMessages(messages || [], false);
@@ -491,18 +474,59 @@ function stopMessagePolling() {
   pollTimer = null;
 }
 
-// ---------- Home header: hamburger menu + wave (voice input) ----------
-$('homeMenuBtn').addEventListener('click', () => openSheet('sheet-home-menu'));
-$('menuCallersBtn').addEventListener('click', () => { loadCallers(); openSheet('sheet-callers'); });
-$('menuContactsBtn').addEventListener('click', () => { loadContacts(); openSheet('sheet-contacts'); });
-$('menuClearBtn').addEventListener('click', async () => {
-  if (!confirm('Clear the whole conversation with Mitra? This can\'t be undone.')) return;
-  await authedFetch('/api/assistant?action=clear', { method: 'POST' });
-  $('homeChat').innerHTML = '';
-  homeMessageIds.clear();
-  setHomeChatActive(false);
-  closeSheets();
+// ---------- Home header: hamburger menu (Saved Chats) + wave (voice input) ----------
+function monthGroupLabel(iso) {
+  return new Date(iso).toLocaleDateString([], { month: 'long', year: new Date(iso).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+}
+function shortDateLabel(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+let savedChatSessions = [];
+
+async function loadSavedChats() {
+  const list = $('savedChatsList');
+  list.innerHTML = '<div class="authHint">Loading…</div>';
+  const resp = await authedFetch('/api/assistant?action=sessions');
+  if (!resp.ok) { list.innerHTML = '<div class="authHint">Could not load saved chats.</div>'; return; }
+  const { sessions } = await resp.json();
+  savedChatSessions = sessions || [];
+  renderSavedChats(savedChatSessions);
+}
+
+function renderSavedChats(sessions) {
+  const list = $('savedChatsList');
+  if (!sessions.length) {
+    list.innerHTML = '<div class="authHint" style="margin-top:20px;">No saved chats yet — start one from Home.</div>';
+    return;
+  }
+  let lastGroup = null;
+  list.innerHTML = '';
+  for (const s of sessions) {
+    const group = monthGroupLabel(s.updated_at);
+    if (group !== lastGroup) {
+      const h = document.createElement('div');
+      h.className = 'sectionLabel';
+      h.textContent = group;
+      list.appendChild(h);
+      lastGroup = group;
+    }
+    const row = document.createElement('div');
+    row.className = 'savedChatRow';
+    row.innerHTML = `<div class="savedChatTitle">${s.title}</div><div class="savedChatDate">${shortDateLabel(s.updated_at)}</div>`;
+    row.addEventListener('click', () => { openChatSession(s.id); closeSheets(); });
+    list.appendChild(row);
+  }
+}
+
+$('savedChatsSearch').addEventListener('input', () => {
+  const q = $('savedChatsSearch').value.trim().toLowerCase();
+  renderSavedChats(!q ? savedChatSessions : savedChatSessions.filter((s) => s.title.toLowerCase().includes(q)));
 });
+
+$('newChatBtn').addEventListener('click', () => { startNewChat(); closeSheets(); });
+$('homeMenuBtn').addEventListener('click', () => { loadSavedChats(); openSheet('sheet-home-menu'); });
 
 let waveRecorder = null;
 let waveChunks = [];
@@ -677,11 +701,43 @@ function renderTranscript(history) {
 }
 
 // ---------- recent calls ----------
-async function loadCalls() {
-  if (!currentSession) return;
-  const resp = await authedFetch('/api/calls?action=list');
-  if (!resp.ok) return;
-  const { calls } = await resp.json();
+function relativeCallDate(iso) {
+  const d = new Date(iso);
+  const now = new Date();
+  const diffDays = Math.floor((now.setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 86400000);
+  if (diffDays === 0) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays > 1 && diffDays < 7) return d.toLocaleDateString([], { weekday: 'long' });
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function callSummaryLine(c) {
+  if (c.outcome_summary) return c.outcome_summary;
+  const name = c.contact_name || c.to_number;
+  switch (c.status) {
+    case 'queued': return 'Starting the call…';
+    case 'ringing': return `Calling ${name}…`;
+    case 'in_progress': return `On the call with ${name}`;
+    case 'no_answer': return `Reached ${name}'s voicemail and hung up`;
+    case 'failed': return `Couldn't reach ${name} — the call failed to connect`;
+    case 'completed': return c.duration_seconds
+      ? `Finished the call with ${name} (about ${Math.max(1, Math.round(c.duration_seconds / 60))} min)`
+      : `Finished the call with ${name}`;
+    default: return c.objective || '';
+  }
+}
+
+// Deterministic per-contact hue so the same person always gets the same
+// avatar color across the list, without storing anything extra.
+function hueForName(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) % 360;
+  return hash;
+}
+
+let lastLoadedCalls = [];
+
+function renderCallsList(calls) {
   const list = $('callsList');
   list.innerHTML = '';
   if (!calls?.length) {
@@ -689,15 +745,34 @@ async function loadCalls() {
     return;
   }
   for (const c of calls) {
+    const name = c.contact_name || c.to_number;
+    const hue = hueForName(name);
     const el = document.createElement('div');
-    el.className = 'card';
+    el.className = 'recentRow';
     el.innerHTML = `
-      <div class="cardTitle">${c.to_number}</div>
-      <div class="cardMeta">${c.objective}</div>
-      ${c.outcome_summary ? `<div class="cardMeta" style="margin-top:6px;">${c.outcome_summary}</div>` : ''}
-      <span class="statusPill ${c.status}">${c.status.replace('_', ' ')}</span>`;
+      <div class="recentAvatar" style="background:linear-gradient(135deg, hsl(${hue},55%,58%), hsl(${(hue + 40) % 360},45%,38%));">${(name || '?')[0].toUpperCase()}</div>
+      <div class="recentBody">
+        <div class="recentName">${name}</div>
+        <div class="recentPreview">${callSummaryLine(c)}</div>
+      </div>
+      <div class="recentDate">${relativeCallDate(c.created_at)}</div>`;
     list.appendChild(el);
   }
+}
+
+$('recentSearch').addEventListener('input', () => {
+  const q = $('recentSearch').value.trim().toLowerCase();
+  if (!q) { renderCallsList(lastLoadedCalls); return; }
+  renderCallsList(lastLoadedCalls.filter((c) => (c.contact_name || c.to_number || '').toLowerCase().includes(q)));
+});
+
+async function loadCalls() {
+  if (!currentSession) return;
+  const resp = await authedFetch('/api/calls?action=list');
+  if (!resp.ok) return;
+  const { calls } = await resp.json();
+  lastLoadedCalls = calls || [];
+  renderCallsList(lastLoadedCalls);
 }
 
 // ---------- name (persist on blur) ----------

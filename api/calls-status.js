@@ -20,7 +20,7 @@ export default async function handler(req, res) {
   };
   const status = statusMap[CallStatus] || CallStatus;
 
-  const { data: call } = await supabase.from('calls').select('user_id, contact_id, status').eq('id', callId).maybeSingle();
+  const { data: call } = await supabase.from('calls').select('user_id, contact_id, session_id, status').eq('id', callId).maybeSingle();
 
   const update = { status };
   if (RecordingUrl) update.recording_url = RecordingUrl;
@@ -51,13 +51,13 @@ export default async function handler(req, res) {
   // of these, post a natural-language follow-up back into that same thread
   // so the chat updates asynchronously, exactly like the real call does.
   if (call?.user_id && call?.contact_id && ['no_answer', 'completed', 'failed'].includes(status) && status !== call.status) {
-    await postAssistantFollowUp(supabase, call.user_id, call.contact_id, callId, status, CallDuration);
+    await postAssistantFollowUp(supabase, call.user_id, call.contact_id, call.session_id, callId, status, CallDuration);
   }
 
   return res.status(200).send('ok');
 }
 
-async function postAssistantFollowUp(supabase, userId, contactId, callId, status, callDuration) {
+async function postAssistantFollowUp(supabase, userId, contactId, sessionId, callId, status, callDuration) {
   const { data: contact } = await supabase.from('contacts').select('name').eq('id', contactId).maybeSingle();
   const name = contact?.name || 'them';
 
@@ -83,5 +83,7 @@ async function postAssistantFollowUp(supabase, userId, contactId, callId, status
     content = mins ? `Finished the call with ${name} (about ${mins} min).` : `Finished the call with ${name}.`;
   }
 
-  await supabase.from('assistant_messages').insert({ user_id: userId, role: 'assistant', content, call_id: callId });
+  if (!sessionId) return; // call wasn't started from a saved chat thread — nowhere to post this
+  await supabase.from('assistant_messages').insert({ user_id: userId, session_id: sessionId, role: 'assistant', content, call_id: callId });
+  await supabase.from('chat_sessions').update({ updated_at: new Date().toISOString() }).eq('id', sessionId);
 }

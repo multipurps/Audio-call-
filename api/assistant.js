@@ -6,6 +6,9 @@ import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 // placing a call to a saved contact, and the actual call outcome (busy, no
 // answer, completed) gets posted back into the same thread later by the
 // Twilio status webhook (see api/calls-status.js).
+//
+// Conversations are organized into chat_sessions ("Saved Chats") so the
+// user can keep separate named threads instead of one endless conversation.
 export default async function handler(req, res) {
   const supabase = getServiceClient();
   const userId = await getAuthedUserId(req, supabase);
@@ -13,55 +16,137 @@ export default async function handler(req, res) {
 
   const action = req.query?.action || req.body?.action;
   switch (action) {
+    case 'sessions': return listSessions(req, res, supabase, userId);
     case 'messages': return listMessages(req, res, supabase, userId);
     case 'send': return sendMessage(req, res, supabase, userId);
     case 'transcribe': return transcribeAudio(req, res, supabase, userId);
-    case 'clear': return clearMessages(req, res, supabase, userId);
+    case 'deleteSession': return deleteSession(req, res, supabase, userId);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
   }
 }
 
-async function clearMessages(req, res, supabase, userId) {
+async function listSessions(req, res, supabase, userId) {
+  if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
+  const { data, error } = await supabase
+    .from('chat_sessions')
+    .select('id,title,created_at,updated_at')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(100);
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ sessions: data });
+}
+
+async function deleteSession(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { error } = await supabase.from('assistant_messages').delete().eq('user_id', userId);
+  const { sessionId } = req.body || {};
+  if (!sessionId) return res.status(400).json({ error: 'sessionId required' });
+  const { error } = await supabase.from('chat_sessions').delete().eq('id', sessionId).eq('user_id', userId);
   if (error) return res.status(500).json({ error: error.message });
   return res.status(200).json({ ok: true });
 }
 
+// Users who were chatting before "Saved Chats" existed have messages with no
+// session_id. Fold them into a single session on first read after upgrade,
+// titled from their first message, so nothing they already said disappears.
+async function resolveDefaultSession(supabase, userId) {
+  const { data: mostRecent } = await supabase
+    .from('chat_sessions')
+    .select('id')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (mostRecent) return mostRecent.id;
+
+  const { data: orphans } = await supabase
+    .from('assistant_messages')
+    .select('id,role,content,created_at')
+    .eq('user_id', userId)
+    .is('session_id', null)
+    .order('created_at', { ascending: true });
+  if (!orphans?.length) return null;
+
+  const firstUserMsg = orphans.find((m) => m.role === 'user');
+  const title = titleFromText(firstUserMsg?.content) || 'Saved chat';
+  const { data: session, error } = await supabase
+    .from('chat_sessions')
+    .insert({ user_id: userId, title, updated_at: orphans[orphans.length - 1].created_at })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+
+  await supabase.from('assistant_messages').update({ session_id: session.id }).in('id', orphans.map((m) => m.id));
+  return session.id;
+}
+
+function titleFromText(text) {
+  if (!text) return null;
+  const words = text.trim().split(/\s+/).slice(0, 6).join(' ');
+  const capped = words.length > 42 ? words.slice(0, 42).trimEnd() + '…' : words;
+  return capped.charAt(0).toUpperCase() + capped.slice(1);
+}
+
 async function listMessages(req, res, supabase, userId) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
+  let sessionId = req.query?.sessionId || null;
+  if (!sessionId) {
+    try {
+      sessionId = await resolveDefaultSession(supabase, userId);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+  if (!sessionId) return res.status(200).json({ messages: [], sessionId: null });
+
   const { data, error } = await supabase
     .from('assistant_messages')
     .select('*')
     .eq('user_id', userId)
+    .eq('session_id', sessionId)
     .order('created_at', { ascending: true })
     .limit(200);
   if (error) return res.status(500).json({ error: error.message });
-  return res.status(200).json({ messages: data });
+  return res.status(200).json({ messages: data, sessionId });
 }
 
-async function insertMessage(supabase, userId, role, content, callId = null) {
+async function insertMessage(supabase, userId, sessionId, role, content, callId = null) {
   const { data, error } = await supabase
     .from('assistant_messages')
-    .insert({ user_id: userId, role, content, call_id: callId })
+    .insert({ user_id: userId, session_id: sessionId, role, content, call_id: callId })
     .select()
     .single();
   if (error) throw new Error(error.message);
+  await supabase.from('chat_sessions').update({ updated_at: new Date().toISOString() }).eq('id', sessionId);
   return data;
 }
 
 async function sendMessage(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { text, callerId } = req.body || {};
+  const { text, callerId, sessionId: incomingSessionId } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
 
-  const userMsg = await insertMessage(supabase, userId, 'user', text.trim());
+  let sessionId = incomingSessionId || null;
+  let isNewSession = false;
+  if (!sessionId) {
+    const { data: session, error } = await supabase
+      .from('chat_sessions')
+      .insert({ user_id: userId, title: titleFromText(text) || 'New chat' })
+      .select()
+      .single();
+    if (error) return res.status(500).json({ error: error.message });
+    sessionId = session.id;
+    isNewSession = true;
+  }
+
+  const userMsg = await insertMessage(supabase, userId, sessionId, 'user', text.trim());
   const newMessages = [userMsg];
+  const respond = (extra = {}) => res.status(200).json({ messages: newMessages, sessionId, isNewSession, ...extra });
 
   const groqKey = process.env.GROQ_API_KEY;
   if (!groqKey) {
-    newMessages.push(await insertMessage(supabase, userId, 'assistant', "I'm not fully set up yet — the assistant's API key hasn't been added on the server."));
-    return res.status(200).json({ messages: newMessages });
+    newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "I'm not fully set up yet — the assistant's API key hasn't been added on the server."));
+    return respond();
   }
 
   const { data: contacts } = await supabase.from('contacts').select('id,name,phone_number').eq('user_id', userId);
@@ -69,6 +154,7 @@ async function sendMessage(req, res, supabase, userId) {
     .from('assistant_messages')
     .select('role,content')
     .eq('user_id', userId)
+    .eq('session_id', sessionId)
     .order('created_at', { ascending: false })
     .limit(20);
   const recentHistory = (history || []).reverse();
@@ -108,8 +194,8 @@ async function sendMessage(req, res, supabase, userId) {
     intent = JSON.parse(data.choices?.[0]?.message?.content || '{}');
   } catch (err) {
     console.error('assistant intent parse failed:', err);
-    newMessages.push(await insertMessage(supabase, userId, 'assistant', "Sorry, I couldn't process that — try again in a moment."));
-    return res.status(200).json({ messages: newMessages });
+    newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "Sorry, I couldn't process that — try again in a moment."));
+    return respond();
   }
 
   if (intent.action === 'call' || intent.action === 'retry') {
@@ -143,32 +229,32 @@ async function sendMessage(req, res, supabase, userId) {
         intent.action === 'retry'
           ? "I'm not sure who to call again yet — tell me who you'd like me to call."
           : `I don't have ${intent.contactName ? `"${intent.contactName}"` : 'that person'} in your contacts yet. Add them in Profile → Contacts, then ask me again.`;
-      newMessages.push(await insertMessage(supabase, userId, 'assistant', msg));
-      return res.status(200).json({ messages: newMessages });
+      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', msg));
+      return respond();
     }
 
     const objective = intent.objective || 'Say hello and share what the user wants to talk about.';
-    const placed = await placeCall(supabase, userId, { toNumber: contact.phone_number, objective, contactId: contact.id, callerId: callerId || null });
+    const placed = await placeCall(supabase, userId, { toNumber: contact.phone_number, objective, contactId: contact.id, callerId: callerId || null, sessionId });
 
     if (placed.error) {
-      newMessages.push(await insertMessage(supabase, userId, 'assistant', `I couldn't call ${contact.name}: ${placed.error}`));
-      return res.status(200).json({ messages: newMessages });
+      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${contact.name}: ${placed.error}`));
+      return respond();
     }
 
     const verb = intent.action === 'retry' ? 'again now' : 'now';
-    newMessages.push(await insertMessage(supabase, userId, 'assistant', `I'm calling ${contact.name} ${verb}.`, placed.call.id));
-    return res.status(200).json({ messages: newMessages, callId: placed.call.id });
+    newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I'm calling ${contact.name} ${verb}.`, placed.call.id));
+    return respond({ callId: placed.call.id });
   }
 
-  newMessages.push(await insertMessage(supabase, userId, 'assistant', intent.reply || 'Got it.'));
-  return res.status(200).json({ messages: newMessages });
+  newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', intent.reply || 'Got it.'));
+  return respond();
 }
 
 // Duplicated (rather than shared with api/calls.js) on purpose: this keeps
 // the already-working manual "type a number" composer flow in calls.js
 // completely untouched while this newer assistant path is still being wired
 // up and tested.
-async function placeCall(supabase, userId, { toNumber, objective, contactId, callerId = null }) {
+async function placeCall(supabase, userId, { toNumber, objective, contactId, callerId = null, sessionId = null }) {
   const { data: usage } = await supabase.from('user_usage').select('*').eq('user_id', userId).maybeSingle();
   const used = usage?.call_minutes_used ?? 0;
   const limit = usage?.monthly_minute_limit ?? 60;
@@ -189,6 +275,7 @@ async function placeCall(supabase, userId, { toNumber, objective, contactId, cal
       objective,
       status: 'queued',
       contact_id: contactId || null,
+      session_id: sessionId || null,
     })
     .select()
     .single();
