@@ -596,10 +596,6 @@
       <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0-4-4m4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
       <div class="cBody"><div class="cValue">Request a copy of my data</div></div>
     </div>
-    <div class="profileCard linkCard" id="deleteVoiceBtn">
-      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z" stroke="currentColor" stroke-width="1.7"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
-      <div class="cBody"><div class="cValue">Delete my cloned voice</div></div>
-    </div>
     <div class="profileCard linkCard signOutCard" id="deleteAccountBtn">
       <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
       <div class="cBody"><div class="cValue">Delete my account & all data</div></div>
@@ -632,23 +628,57 @@
   </div>
 </div>
 
-<!-- ---------- Voice ---------- -->
+<!-- ---------- Voice & Language ---------- -->
 <div class="sheetScreen hidden" id="sheet-voice">
   <div class="sheetHeader">
     <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-    <div class="sheetTitle">Voice</div>
+    <div class="sheetTitle">Voice &amp; Language</div>
   </div>
   <div class="sheetBody">
-    <div class="sectionLabel">Your cloned voice</div>
+    <div class="sectionLabel">Call language</div>
     <div class="profileCard">
-      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z" stroke="currentColor" stroke-width="1.7"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
+      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h9M8 4v3M8 7c0 4-1.5 7-5 9M6 12c1 1.5 3 2.5 5 3M14 21l4-9 4 9M15.5 18h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
       <div class="cBody">
-        <div class="cLabel">Your cloned voice</div>
-        <button class="plainInput recordBtn" id="recordVoiceBtn" style="text-align:left; cursor:pointer;">Record 10-30s to clone your voice</button>
+        <div class="cLabel">The AI speaks this language on calls</div>
+        <select class="cSelect" id="profileLanguage">
+          <option value="en">English</option>
+          <option value="es">Spanish</option>
+          <option value="fr">French</option>
+          <option value="pt">Portuguese</option>
+          <option value="de">German</option>
+          <option value="ha">Hausa</option>
+          <option value="yo">Yoruba</option>
+          <option value="ig">Igbo</option>
+          <option value="sw">Swahili</option>
+          <option value="ar">Arabic</option>
+          <option value="hi">Hindi</option>
+          <option value="zh">Chinese</option>
+        </select>
       </div>
     </div>
-    <div class="authHint" id="voiceStatus" style="margin:8px 0 8px 4px;"></div>
-    <p>This recording is used only to let the AI caller speak in a voice that sounds like yours. You can delete it any time from Profile → Data controls.</p>
+
+    <div class="sectionLabel" style="margin-top:24px;">Your cloned voice</div>
+    <p class="hint" id="voiceRecordStatus" style="margin:0 0 14px;">10–30s of clear speech, quiet room, no music.</p>
+
+    <div id="voiceCloneSection" style="display:flex; gap:10px;">
+      <button class="secondaryBtn" id="recordVoiceBtn">Record</button>
+      <button class="secondaryBtn" id="uploadVoiceBtn">Upload</button>
+    </div>
+    <input type="file" id="voiceFileInput" accept="audio/*,.m4a,.mp3,.wav,.aac,.caf,.mp4" style="display:none;">
+
+    <div class="previewRow hidden" id="voicePreviewRow">
+      <button class="playCircleBtn" id="voicePreviewBtn" aria-label="Play preview">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+      <div class="cBody">
+        <div class="cValue">Your cloned voice is ready</div>
+        <div class="hint" style="margin:2px 0 0;">Tap to hear a preview</div>
+      </div>
+      <button class="cChevron" id="deleteVoiceBtn" aria-label="Delete voice"><svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </div>
+    <audio id="voicePreviewAudio" style="display:none;"></audio>
+
+    <p style="margin-top:18px;">This recording is used only to let the AI caller speak in a voice that sounds like yours. Delete it any time above.</p>
   </div>
 </div>
 

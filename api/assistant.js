@@ -1,5 +1,7 @@
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 
+const LANGUAGE_NAMES = { en: 'English', es: 'Spanish', fr: 'French', pt: 'Portuguese', de: 'German', ha: 'Hausa', yo: 'Yoruba', ig: 'Igbo', sw: 'Swahili', ar: 'Arabic', hi: 'Hindi', zh: 'Chinese' };
+
 // Home-screen "talk to the assistant" chat. Separate from the live in-call
 // relay (server/relay.js) — this is the request/response layer where the
 // user tells Mitra what they want done, Mitra decides whether that means
@@ -233,7 +235,12 @@ async function sendMessage(req, res, supabase, userId) {
       return respond();
     }
 
-    const objective = intent.objective || 'Say hello and share what the user wants to talk about.';
+    let objective = intent.objective || 'Say hello and share what the user wants to talk about.';
+    const { data: langProfile } = await supabase.from('profiles').select('language').eq('user_id', userId).maybeSingle();
+    if (langProfile?.language && langProfile.language !== 'en') {
+      const langName = LANGUAGE_NAMES[langProfile.language] || langProfile.language;
+      objective = `Speak only in ${langName} for this entire call, regardless of what language this instruction is written in. ${objective}`;
+    }
     const placed = await placeCall(supabase, userId, { toNumber: contact.phone_number, objective, contactId: contact.id, callerId: callerId || null, sessionId });
 
     if (placed.error) {

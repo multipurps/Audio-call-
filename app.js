@@ -235,22 +235,22 @@ async function enterApp(session) {
 
 function renderAvatar(url) {
   const el = $('profileAvatarCircle');
-  const email = currentUser?.email || '';
+  const initial = ($('profileEmailDisplay').textContent || currentUser?.email || '?')[0].toUpperCase();
   if (url) {
     el.innerHTML = `<img src="${url}" alt="">`;
   } else {
-    el.textContent = email ? email[0].toUpperCase() : '?';
+    el.textContent = initial;
   }
 }
 
 async function renderProfileHeader() {
   if (!currentUser) return;
-  const email = currentUser.email || '';
-  $('profileEmailDisplay').textContent = email;
-  renderAvatar(null);
-  const { data } = await supabase.from('profiles').select('avatar_url, name').eq('user_id', currentUser.id).maybeSingle();
-  if (data?.avatar_url) renderAvatar(data.avatar_url);
+  const { data } = await supabase.from('profiles').select('avatar_url, name, language').eq('user_id', currentUser.id).maybeSingle();
+  const displayName = data?.name || (currentUser.email || '').split('@')[0] || 'You';
+  $('profileEmailDisplay').textContent = displayName;
+  renderAvatar(data?.avatar_url || null);
   if (data?.name && !$('profileName').value) $('profileName').value = data.name;
+  if (data?.language) $('profileLanguage').value = data.language;
 }
 
 supabase.auth.onAuthStateChange((_event, session) => {
@@ -909,7 +909,6 @@ $('accountBtn').addEventListener('click', () => {
   $('accountEmailDisplay').textContent = currentUser?.email || '–';
   openSheet('sheet-account');
 });
-$('voiceBtn').addEventListener('click', () => openSheet('sheet-voice'));
 $('themeBtn').addEventListener('click', () => openSheet('sheet-theme'));
 $('upgradeBtn').addEventListener('click', () => openSheet('sheet-upgrade'));
 $('referralsBtn').addEventListener('click', () => openSheet('sheet-referrals'));
@@ -941,10 +940,6 @@ function mailtoSupport(subject, body) {
   window.location.href = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body + email)}`;
 }
 $('exportDataBtn').addEventListener('click', () => mailtoSupport('Data export request', 'Please send me a copy of the personal data associated with my account.'));
-$('deleteVoiceBtn').addEventListener('click', () => {
-  if (!confirm('Delete your cloned voice? You can record a new one any time.')) return;
-  mailtoSupport('Delete my cloned voice', 'Please delete the voice model associated with my account.');
-});
 $('deleteAccountBtn').addEventListener('click', () => {
   if (!confirm('This permanently deletes your account and all associated data. Continue?')) return;
   mailtoSupport('Delete my account', 'Please permanently delete my account and all associated data.');
@@ -967,6 +962,29 @@ if (savedTheme) {
 }
 
 // ---------- voice cloning ----------
+async function refreshVoiceStatus() {
+  const resp = await authedFetch('/api/voice-clone');
+  if (!resp.ok) return;
+  const { status } = await resp.json();
+  const ready = status === 'ready';
+  $('voiceCloneSection').style.display = ready ? 'none' : 'flex';
+  $('voicePreviewRow').classList.toggle('hidden', !ready);
+  $('voiceRecordStatus').textContent = status === 'pending' ? 'Cloning your voice…' : status === 'failed' ? 'Last attempt failed — try again with a longer, quieter sample.' : '10–30s of clear speech, quiet room, no music.';
+}
+
+async function uploadVoiceClip(blob, mimeType) {
+  $('voiceRecordStatus').textContent = 'Uploading…';
+  const audioBase64 = await blobToBase64(blob);
+  const resp = await authedFetch('/api/voice-clone', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ audioBase64, mimeType }),
+  });
+  const data = await resp.json();
+  $('voiceRecordStatus').textContent = resp.ok ? 'Voice cloned.' : (data.error || 'Could not clone voice — try a longer, quieter sample.');
+  if (resp.ok) refreshVoiceStatus();
+}
+
 let mediaRecorder, recordedChunks = [];
 $('recordVoiceBtn').addEventListener('click', async () => {
   const btn = $('recordVoiceBtn');
@@ -980,21 +998,53 @@ $('recordVoiceBtn').addEventListener('click', async () => {
   mediaRecorder.ondataavailable = (e) => recordedChunks.push(e.data);
   mediaRecorder.onstop = async () => {
     btn.classList.remove('recording');
-    btn.textContent = 'Record 10-30s to clone your voice';
-    $('voiceStatus').textContent = 'Uploading...';
+    btn.textContent = 'Record';
     const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-    const audioBase64 = await blobToBase64(blob);
-    const resp = await authedFetch('/api/voice-clone', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ audioBase64, mimeType: 'audio/webm' }),
-    });
-    $('voiceStatus').textContent = resp.ok ? 'Voice cloned.' : 'Could not clone voice — try a longer, quieter sample.';
     stream.getTracks().forEach((t) => t.stop());
+    await uploadVoiceClip(blob, 'audio/webm');
   };
   mediaRecorder.start();
   btn.classList.add('recording');
-  btn.textContent = 'Recording... tap to stop';
+  btn.textContent = 'Stop';
+});
+
+$('uploadVoiceBtn').addEventListener('click', () => $('voiceFileInput').click());
+$('voiceFileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  await uploadVoiceClip(file, file.type || 'audio/mpeg');
+});
+
+$('voicePreviewBtn').addEventListener('click', async () => {
+  const audio = $('voicePreviewAudio');
+  if (audio.src && !audio.paused) { audio.pause(); return; }
+  if (audio.src) { audio.play().catch(() => {}); return; }
+  $('voicePreviewBtn').disabled = true;
+  const resp = await authedFetch('/api/voice-clone?action=preview', { method: 'POST' });
+  const data = await resp.json();
+  $('voicePreviewBtn').disabled = false;
+  if (!resp.ok) { $('voiceRecordStatus').textContent = data.error || 'Could not generate a preview.'; return; }
+  audio.src = `data:${data.mimeType};base64,${data.audioBase64}`;
+  audio.play().catch(() => {});
+});
+$('voicePreviewAudio').addEventListener('play', () => { $('voicePreviewBtn').innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>'; });
+$('voicePreviewAudio').addEventListener('pause', () => { $('voicePreviewBtn').innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'; });
+$('voicePreviewAudio').addEventListener('ended', () => { $('voicePreviewBtn').innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'; });
+
+$('deleteVoiceBtn').addEventListener('click', async () => {
+  if (!confirm('Delete your cloned voice? You can record or upload a new one any time.')) return;
+  await authedFetch('/api/voice-clone', { method: 'DELETE' });
+  $('voicePreviewAudio').removeAttribute('src');
+  refreshVoiceStatus();
+});
+
+$('voiceBtn').addEventListener('click', () => { openSheet('sheet-voice'); refreshVoiceStatus(); });
+
+// ---------- language ----------
+$('profileLanguage').addEventListener('change', async () => {
+  if (!currentUser) return;
+  await supabase.from('profiles').upsert({ user_id: currentUser.id, language: $('profileLanguage').value }, { onConflict: 'user_id' });
 });
 
 if ('serviceWorker' in navigator) {
