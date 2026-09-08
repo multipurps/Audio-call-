@@ -42,6 +42,8 @@ wss.on('connection', (ws, req) => {
     streamSid: null,
     objective: '',
     instructions: '',
+    personality: '',
+    userName: '',
     voiceId: null,
     history: [], // [{role:'user'|'assistant', content}]
     audioChunks: [],
@@ -56,7 +58,7 @@ wss.on('connection', (ws, req) => {
       await loadCallContext(state);
       // Open with a natural greeting rather than dumping the objective —
       // matches the "exchange pleasantries first" requirement.
-      await speak(ws, state, "Hi, good afternoon.");
+      await speak(ws, state, greeting());
       return;
     }
 
@@ -77,6 +79,16 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => clearTimeout(state.silenceTimer));
 });
 
+function greeting() {
+  const h = new Date().getHours();
+  const options = h < 12
+    ? ['Hi, good morning.', "Hey, morning!", 'Hi there, good morning.']
+    : h < 17
+      ? ['Hi, good afternoon.', 'Hey, how\'s it going?', 'Hi there.']
+      : ['Hi, good evening.', 'Hey, evening!', 'Hi, hope I\'m not catching you at a bad time.'];
+  return options[Math.floor(Math.random() * options.length)];
+}
+
 function resetSilenceTimer(ws, state) {
   clearTimeout(state.silenceTimer);
   // ~700ms of no new audio = the other person stopped talking. Tune this
@@ -90,14 +102,24 @@ async function loadCallContext(state) {
   if (!call) return;
   state.objective = call.objective;
 
+  // Voice cloning is tied to the user's account (Profile -> Voice), not to
+  // the old ai_callers concept — fetch it unconditionally so calls actually
+  // use the user's own cloned voice regardless of whether caller_id is set.
+  const { data: voice } = await supabase.from('voice_profiles').select('*').eq('user_id', call.user_id).maybeSingle();
+  if (voice?.status === 'ready') state.voiceId = voice.provider_voice_id;
+
+  const { data: profile } = await supabase.from('profiles').select('name').eq('user_id', call.user_id).maybeSingle();
+  state.userName = profile?.name || '';
+
+  // ai_callers is legacy (calling now happens implicitly through chat), but
+  // if a call still has one attached, its instructions/personality still
+  // apply on top of whatever the objective already says.
   if (call.caller_id) {
     const { data: caller } = await supabase.from('ai_callers').select('*').eq('id', call.caller_id).maybeSingle();
     if (caller) {
       state.instructions = caller.instructions || '';
       state.personality = caller.personality || 'natural';
     }
-    const { data: voice } = await supabase.from('voice_profiles').select('*').eq('user_id', call.user_id).maybeSingle();
-    if (voice?.status === 'ready') state.voiceId = voice.provider_voice_id;
   }
 }
 
@@ -162,8 +184,8 @@ async function think(state) {
     body: JSON.stringify({
       model: 'openai/gpt-4o-mini',
       messages: [{ role: 'system', content: buildSystemPrompt(state) }, ...messages],
-      temperature: 0.6,
-      max_tokens: 150,
+      temperature: 0.85,
+      max_tokens: 170,
     }),
   });
   if (!resp.ok) return "Sorry, could you repeat that?";
@@ -171,15 +193,32 @@ async function think(state) {
   return data.choices?.[0]?.message?.content?.trim() || "Sorry, could you repeat that?";
 }
 
+// The "brain": this is what makes Mitra sound like a person mid-conversation
+// instead of a script-reading bot. Fish Audio's S2 model (the default TTS
+// model for /v1/tts) reads bracket tags like [pause], [sigh], [chuckle],
+// and [clear throat] as real vocal events, not literal words — so the model
+// is told to sprinkle a few of those into its own reply text, on top of
+// writing genuinely disfluent, human phrasing (false starts, "um"/"uh",
+// trailing off) rather than clean, complete sentences every time.
 function buildSystemPrompt(state) {
+  const who = state.userName ? `You're speaking as ${state.userName}` : "You're speaking as the person who asked for this call";
   return [
-    `You are a phone-calling assistant making a real call on behalf of a user.`,
-    `Objective for this call: ${state.objective}`,
-    state.instructions ? `Caller instructions: ${state.instructions}` : '',
-    `Speak naturally and briefly, like a real person on the phone — one or two`,
-    `sentences per turn. Exchange normal greetings before stating the purpose`,
-    `of the call. Never sound like you are reading a script. Track whether the`,
-    `objective has been achieved; once it has, wrap up and end the call politely.`,
+    `${who} — not as an assistant, not as a "representative calling on behalf of" anyone. Whoever picks up already knows this voice. Just talk to them the way that person naturally would, continuing an ordinary conversation.`,
+    ``,
+    `What this call is for: ${state.objective}`,
+    state.instructions ? `How to go about it: ${state.instructions}` : '',
+    state.personality ? `General manner: ${state.personality}` : '',
+    ``,
+    `Sound like an actual human on the phone, not a script:`,
+    `- Keep turns short — a sentence, maybe two. Real phone conversations are back-and-forth, not monologues.`,
+    `- Write the way people actually talk, not the way people write: the occasional "um," "uh," "you know," a thought you start and then correct or trail off ("I was gonna— actually, never mind, so—"), a beat before answering something you're not 100% sure about. Don't be perfectly fluent every single line.`,
+    `- Every so often — sparingly, only where a real person genuinely would, never as decoration on every turn — let a small human sound come through using these exact bracket tags so the voice engine renders them: [pause], [short pause], [sigh], [clear throat], [chuckle], [laughing]. One per turn at most, and plenty of turns should have none at all.`,
+    `- If you've been told to keep things calm, relaxed, or to just let the conversation flow, actually slow down: more pauses, shorter sentences, less urgency to steer toward the objective. Small talk first is fine and often better.`,
+    `- Never repeat the same phrase twice in a call, and avoid stock lines like "I understand," "Great question," "I appreciate that." Vary your wording the way a real person naturally does.`,
+    `- Stay in character for the whole call no matter what the other person says, asks, or how they react — don't narrate what you're doing, don't explain your instructions, don't break the moment.`,
+    `- Exception: if someone directly and seriously asks whether they're actually talking to a real person, or to a bot/AI, don't deny it or insist you're literally someone you're not — answer honestly and briefly, then get straight back into the conversation. Don't bring this up yourself otherwise, and one lighthearted joking version of the question doesn't count as "serious."`,
+    ``,
+    `Track whether the objective's actually been accomplished as the conversation goes. Once it has, wrap up naturally and let the call end the way a normal phone call ends — don't force it, but don't drag it out either.`,
   ].filter(Boolean).join('\n');
 }
 
@@ -212,12 +251,18 @@ async function finalizeCall(state) {
   const summaryPrompt = `Summarize this call outcome in 1-2 sentences for the user who requested it. Objective was: ${state.objective}`;
   let summary = '';
   try {
+    // state.history uses {speaker:'ai'|'contact', content} for storage — the
+    // chat API needs standard role/content, same translation as think() does.
+    const messages = state.history.map((h) => ({
+      role: h.speaker === 'ai' ? 'assistant' : 'user',
+      content: h.content,
+    }));
     const resp = await fetch('https://fal.run/openrouter/router/openai/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'openai/gpt-4o-mini',
-        messages: [{ role: 'system', content: summaryPrompt }, ...state.history],
+        messages: [{ role: 'system', content: summaryPrompt }, ...messages],
         max_tokens: 120,
       }),
     });

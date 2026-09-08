@@ -175,7 +175,7 @@ async function sendMessage(req, res, supabase, userId) {
     '',
     'Reply with ONLY a JSON object, no other text, matching this shape:',
     '{"action":"call"|"retry"|"reply","contactName":string|null,"objective":string|null,"reply":string|null}',
-    '- action "call": the user wants you to call someone new. contactName is your best guess at which saved contact they mean (or null if unclear). objective is a short phrase describing what to say or ask on the call.',
+    '- action "call": the user wants you to call someone new. contactName is your best guess at which saved contact they mean (or null if unclear). objective is a short phrase describing what to say or ask on the call — if they also gave any tone or manner direction (stay calm, keep it light, let it flow naturally, be quick about it, etc.), include that in objective too, don\'t drop it.',
     '- action "retry": the user wants you to call the same person again (e.g. "call him again", "try it again").',
     '- action "reply": anything else — just talk back normally and put your response in "reply".',
   ].join('\n');
