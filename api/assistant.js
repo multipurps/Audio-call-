@@ -11,6 +11,12 @@ const LANGUAGE_NAMES = { en: 'English', es: 'Spanish', fr: 'French', pt: 'Portug
 //
 // Conversations are organized into chat_sessions ("Saved Chats") so the
 // user can keep separate named threads instead of one endless conversation.
+//
+// Intent parsing (action=send) uses fal.ai's OpenRouter-compatible chat
+// completions proxy with openai/gpt-4o-mini — not Groq. Groq's
+// llama-3.3-70b-versatile (used here until now) was decommissioned; every
+// call to it now fails with model_decommissioned. Voice-input transcription
+// (action=transcribe) still uses Groq Whisper, which is unaffected.
 export default async function handler(req, res) {
   const supabase = getServiceClient();
   const userId = await getAuthedUserId(req, supabase);
@@ -145,8 +151,8 @@ async function sendMessage(req, res, supabase, userId) {
   const newMessages = [userMsg];
   const respond = (extra = {}) => res.status(200).json({ messages: newMessages, sessionId, isNewSession, ...extra });
 
-  const groqKey = process.env.GROQ_API_KEY;
-  if (!groqKey) {
+  const falKey = process.env.FAL_KEY;
+  if (!falKey) {
     newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "I'm not fully set up yet — the assistant's API key hasn't been added on the server."));
     return respond();
   }
@@ -181,11 +187,11 @@ async function sendMessage(req, res, supabase, userId) {
 
   let intent;
   try {
-    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const resp = await fetch('https://fal.run/openrouter/router/openai/v1/chat/completions', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Key ${falKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: 'openai/gpt-4o-mini',
         messages: chatMessages,
         temperature: 0.3,
         response_format: { type: 'json_object' },

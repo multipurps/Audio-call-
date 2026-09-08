@@ -8,9 +8,10 @@
 //
 // Per call this does, in a loop:
 //   caller speaks -> buffered -> flushed to Groq Whisper (STT)
-//   -> transcript fed into the call's Groq chat brain (system prompt =
-//      caller's objective/instructions, memory of the conversation so far)
-//   -> Groq's reply text -> Fish Audio TTS -> mulaw/8000 audio
+//   -> transcript fed into the call's chat brain via fal.ai's OpenRouter
+//      proxy, openai/gpt-4o-mini (system prompt = caller's objective/
+//      instructions, memory of the conversation so far)
+//   -> reply text -> Fish Audio TTS -> mulaw/8000 audio
 //   -> streamed back to Twilio as 'media' frames
 //
 // This is the skeleton: the wiring is real and the API calls are correct,
@@ -23,6 +24,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const PORT = process.env.PORT || 8080;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const FAL_KEY = process.env.FAL_KEY;
 const FISH_API_KEY = process.env.FISH_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -154,11 +156,11 @@ async function think(state) {
     role: h.speaker === 'ai' ? 'assistant' : 'user',
     content: h.content,
   }));
-  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  const resp = await fetch('https://fal.run/openrouter/router/openai/v1/chat/completions', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
+      model: 'openai/gpt-4o-mini',
       messages: [{ role: 'system', content: buildSystemPrompt(state) }, ...messages],
       temperature: 0.6,
       max_tokens: 150,
@@ -210,11 +212,11 @@ async function finalizeCall(state) {
   const summaryPrompt = `Summarize this call outcome in 1-2 sentences for the user who requested it. Objective was: ${state.objective}`;
   let summary = '';
   try {
-    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const resp = await fetch('https://fal.run/openrouter/router/openai/v1/chat/completions', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: 'openai/gpt-4o-mini',
         messages: [{ role: 'system', content: summaryPrompt }, ...state.history],
         max_tokens: 120,
       }),
