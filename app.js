@@ -436,17 +436,17 @@ async function openCallFromMessage(callId) {
   const { calls } = await resp.json();
   const call = (calls || []).find((c) => c.id === callId);
   if (!call || !['queued', 'ringing', 'in_progress'].includes(call.status)) return; // call's over, nothing live to show
-  openCallScreen(call.id, call.to_number);
+  openCallScreen(call.id, call.to_number, call.contact_name);
 }
 
 // ---------- Header logo: shows a spinning ring while a call placed from
 // this chat is actually happening, and opens the live call screen (with
 // transcript) when tapped. ----------
-let activeHeaderCall = null; // { id, toNumber } | null
+let activeHeaderCall = null; // { id, toNumber, contactName } | null
 let headerCallChannel = null;
 
-function trackActiveCall(callId, toNumber) {
-  activeHeaderCall = { id: callId, toNumber };
+function trackActiveCall(callId, toNumber, contactName) {
+  activeHeaderCall = { id: callId, toNumber, contactName };
   $('homeHeaderLogoWrap').classList.add('calling');
   if (headerCallChannel) supabase.removeChannel(headerCallChannel);
   headerCallChannel = supabase
@@ -471,14 +471,14 @@ async function resumeActiveCallIfAny() {
   if (!resp.ok) return;
   const { calls } = await resp.json();
   const live = (calls || []).find((c) => ['queued', 'ringing', 'in_progress'].includes(c.status));
-  if (live) trackActiveCall(live.id, live.to_number);
+  if (live) trackActiveCall(live.id, live.to_number, live.contact_name);
 }
 
 $('homeHeaderLogoWrap').addEventListener('click', () => {
-  if (activeHeaderCall) openCallScreen(activeHeaderCall.id, activeHeaderCall.toNumber);
+  if (activeHeaderCall) openCallScreen(activeHeaderCall.id, activeHeaderCall.toNumber, activeHeaderCall.contactName);
 });
 
-async function sendChatMessage(text) {
+async function sendChatMessage(text, onReply) {
   appendChatBubble({ id: `local-${Date.now()}`, role: 'user', content: text, created_at: new Date().toISOString() });
   setHomeChatActive(true);
   $('homeChat').scrollTop = $('homeChat').scrollHeight;
@@ -490,17 +490,21 @@ async function sendChatMessage(text) {
   });
   const data = await resp.json();
   if (!resp.ok) {
-    appendChatBubble({ id: `err-${Date.now()}`, role: 'assistant', content: data.error || 'Something went wrong.', created_at: new Date().toISOString() });
+    const errText = data.error || 'Something went wrong.';
+    appendChatBubble({ id: `err-${Date.now()}`, role: 'assistant', content: errText, created_at: new Date().toISOString() });
+    if (onReply) onReply(errText);
     return;
   }
   if (data.sessionId) currentChatSessionId = data.sessionId;
-  if (data.callId && data.toNumber) trackActiveCall(data.callId, data.toNumber);
+  if (data.callId && data.toNumber) trackActiveCall(data.callId, data.toNumber, data.contactName);
   // The optimistic user bubble above already shows this turn; mark the
   // server's saved copy of it as seen (without re-rendering) so the next
   // poll doesn't draw a second, duplicate copy of the same user message.
   const savedUserMsg = (data.messages || []).find((m) => m.role === 'user');
   if (savedUserMsg) homeMessageIds.add(savedUserMsg.id);
-  renderHomeMessages((data.messages || []).filter((m) => m.role !== 'user'), false);
+  const replies = (data.messages || []).filter((m) => m.role !== 'user');
+  renderHomeMessages(replies, false);
+  if (onReply) onReply(replies.map((m) => m.content).join(' ') || '');
 }
 
 async function sendBrief() {
@@ -594,20 +598,77 @@ $('homeMenuBtn').addEventListener('click', () => { loadSavedChats(); openSheet('
 
 let waveRecorder = null;
 let waveChunks = [];
-$('homeWaveBtn').addEventListener('click', async () => {
-  if (waveRecorder && waveRecorder.state === 'recording') {
-    waveRecorder.stop();
-    return;
-  }
+let assistantCallOpen = false;
+let assistantListening = false;
+let assistantMuted = false;
+
+function appendCallTranscriptLine(speaker, content) {
+  const panel = $('transcriptPanel');
+  const el = document.createElement('div');
+  el.className = `transcriptLine ${speaker}`;
+  el.innerHTML = `<div class="transcriptDot"></div><div class="transcriptBubble">${content}</div>`;
+  panel.appendChild(el);
+  panel.scrollTop = panel.scrollHeight;
+}
+
+function openAssistantCallScreen() {
+  assistantCallOpen = true;
+  assistantMuted = false;
+  $('callScreen').classList.remove('hidden');
+  $('callScreen').classList.add('assistantMode');
+  $('callContactAvatar').style.display = 'none';
+  $('callTitleText').textContent = 'Emysa';
+  $('transcriptPanel').innerHTML = '';
+  $('waveRow').classList.remove('speaking');
+  $('callMuteBtn').classList.remove('active');
+
+  const startedAt = Date.now();
+  clearInterval(callTimerInterval);
+  callTimerInterval = setInterval(() => {
+    const secs = Math.floor((Date.now() - startedAt) / 1000);
+    const m = String(Math.floor(secs / 60)).padStart(2, '0');
+    const s = String(secs % 60).padStart(2, '0');
+    $('callTimer').textContent = `${m}:${s}`;
+  }, 1000);
+
+  $('callEndBtn').onclick = () => {
+    if (waveRecorder && waveRecorder.state === 'recording') waveRecorder.stop();
+    assistantCallOpen = false;
+    clearInterval(callTimerInterval);
+    $('callScreen').classList.add('hidden');
+    $('callScreen').classList.remove('assistantMode');
+    $('callContactAvatar').style.display = '';
+  };
+  $('callMuteBtn').onclick = () => {
+    assistantMuted = !assistantMuted;
+    $('callMuteBtn').classList.toggle('active', assistantMuted);
+    if (assistantMuted && waveRecorder?.state === 'recording') waveRecorder.stop();
+    else if (!assistantMuted && assistantCallOpen) startAssistantListening();
+  };
+  $('callAudioBtn').onclick = () => $('callAudioBtn').classList.toggle('active');
+  $('callKeypadBtn').onclick = () => {};
+  $('waveRow').onclick = () => {
+    if (waveRecorder && waveRecorder.state === 'recording') waveRecorder.stop();
+    else if (!assistantListening) startAssistantListening();
+  };
+
+  startAssistantListening();
+}
+
+async function startAssistantListening() {
+  if (assistantListening || assistantMuted || !assistantCallOpen) return;
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     waveChunks = [];
     waveRecorder = new MediaRecorder(stream);
+    assistantListening = true;
+    $('waveRow').classList.add('speaking');
     waveRecorder.ondataavailable = (e) => waveChunks.push(e.data);
     waveRecorder.onstop = async () => {
       stream.getTracks().forEach((t) => t.stop());
-      $('homeWaveBtn').classList.remove('recording');
-      $('listenLabel').textContent = 'Thinking…';
+      assistantListening = false;
+      $('waveRow').classList.remove('speaking');
+      if (!waveChunks.length || !assistantCallOpen) return;
       const blob = new Blob(waveChunks, { type: 'audio/webm' });
       const base64 = await blobToBase64(blob);
       const resp = await authedFetch('/api/assistant?action=transcribe', {
@@ -615,22 +676,26 @@ $('homeWaveBtn').addEventListener('click', async () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audioBase64: base64, mimeType: 'audio/webm' }),
       });
-      $('listenScreen').classList.add('hidden');
-      $('listenLabel').textContent = 'Listening…';
       const data = await resp.json();
-      if (resp.ok && data.text?.trim()) sendChatMessage(data.text.trim());
-      else if (!resp.ok) alert(data.error || 'Could not transcribe — try typing instead.');
+      if (!assistantCallOpen) return;
+      if (resp.ok && data.text?.trim()) {
+        appendCallTranscriptLine('user', data.text.trim());
+        await sendChatMessage(data.text.trim(), (reply) => {
+          if (assistantCallOpen && reply) appendCallTranscriptLine('ai', reply);
+        });
+      } else if (!resp.ok) {
+        appendCallTranscriptLine('ai', data.error || "Sorry, I didn't catch that.");
+      }
+      if (assistantCallOpen && !assistantMuted) startAssistantListening();
     };
     waveRecorder.start();
-    $('homeWaveBtn').classList.add('recording');
-    $('listenScreen').classList.remove('hidden');
   } catch (err) {
+    assistantListening = false;
     alert('Microphone access is needed to talk to Emysa by voice.');
   }
-});
-$('listenStopBtn').addEventListener('click', () => {
-  if (waveRecorder && waveRecorder.state === 'recording') waveRecorder.stop();
-});
+}
+
+$('homeWaveBtn').addEventListener('click', () => openAssistantCallScreen());
 
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
@@ -694,10 +759,13 @@ let activeCallChannel = null;
 let callTimerInterval = null;
 let callAiMuted = false;
 
-function openCallScreen(callId, toNumber) {
+function openCallScreen(callId, toNumber, contactName) {
   $('callScreen').classList.remove('hidden');
-  $('callContactAvatar').textContent = toNumber.replace(/[^0-9]/g, '').slice(-2) || '?';
-  $('callTitleText').textContent = toNumber;
+  $('callScreen').classList.remove('assistantMode');
+  $('callContactAvatar').style.display = '';
+  const displayName = contactName || toNumber;
+  $('callContactAvatar').textContent = (contactName ? contactName[0] : toNumber.replace(/[^0-9]/g, '').slice(-2)) || '?';
+  $('callTitleText').textContent = `Emysa & ${displayName}`;
   $('transcriptPanel').innerHTML = '';
   $('waveRow').classList.remove('speaking');
   callAiMuted = false;

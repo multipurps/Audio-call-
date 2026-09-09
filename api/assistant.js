@@ -259,7 +259,7 @@ async function sendMessage(req, res, supabase, userId) {
 
     const verb = intent.action === 'retry' ? 'again now' : 'now';
     newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I'm calling ${label} ${verb}.`, placed.call.id));
-    return respond({ callId: placed.call.id, toNumber });
+    return respond({ callId: placed.call.id, toNumber, contactName: contact?.name || null });
   }
 
   newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', intent.reply || 'Got it.'));
