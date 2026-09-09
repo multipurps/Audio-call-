@@ -64,6 +64,7 @@ async function createCall(req, res, supabase, userId) {
       StatusCallback: status_callback,
       StatusCallbackEvent: 'initiated ringing answered completed',
       Record: 'true',
+      MachineDetection: 'Enable', // lets calls-twiml.js hang up immediately on voicemail instead of connecting the relay
     });
 
     const twilioResp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`, {

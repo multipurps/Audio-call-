@@ -45,6 +45,7 @@ wss.on('connection', (ws, req) => {
     personality: '',
     userName: '',
     voiceId: null,
+    twilioCallSid: null,
     history: [], // [{role:'user'|'assistant', content}]
     audioChunks: [],
     silenceTimer: null,
@@ -101,6 +102,7 @@ async function loadCallContext(state) {
   const { data: call } = await supabase.from('calls').select('*').eq('id', state.callId).maybeSingle();
   if (!call) return;
   state.objective = call.objective;
+  state.twilioCallSid = call.twilio_call_sid;
 
   // Voice cloning is tied to the user's account (Profile -> Voice), not to
   // the old ai_callers concept — fetch it unconditionally so calls actually
@@ -141,10 +143,16 @@ async function handleTurn(ws, state) {
   if (call?.ai_muted) return;
 
   const reply = await think(state);
-  state.history.push({ speaker: 'ai', content: reply });
+  state.history.push({ speaker: 'ai', content: reply.text });
   await pushTranscript(state);
 
-  await speak(ws, state, reply);
+  await speak(ws, state, reply.text);
+
+  if (reply.shouldEnd) {
+    // Give the audio a moment to actually finish playing out over the
+    // Twilio stream before the call is torn down from our end.
+    setTimeout(() => hangupCall(state), 1200);
+  }
 }
 
 async function pushTranscript(state) {
@@ -188,9 +196,18 @@ async function think(state) {
       max_tokens: 170,
     }),
   });
-  if (!resp.ok) return "Sorry, could you repeat that?";
+  if (!resp.ok) return { text: "Sorry, could you repeat that?", shouldEnd: false };
   const data = await resp.json();
-  return data.choices?.[0]?.message?.content?.trim() || "Sorry, could you repeat that?";
+  let text = data.choices?.[0]?.message?.content?.trim() || "Sorry, could you repeat that?";
+
+  // The model appends [[END_CALL]] to its own final line once it's decided
+  // the call is naturally over (see buildSystemPrompt) — strip it from what
+  // actually gets spoken and use it as the real signal to hang up, instead
+  // of trying to guess "sounds like a goodbye" from the text itself.
+  const shouldEnd = /\[\[END_CALL\]\]\s*$/.test(text);
+  if (shouldEnd) text = text.replace(/\[\[END_CALL\]\]\s*$/, '').trim();
+
+  return { text, shouldEnd };
 }
 
 // The "brain": this is what makes Mitra sound like a person mid-conversation
@@ -219,6 +236,7 @@ function buildSystemPrompt(state) {
     `- Exception: if someone directly and seriously asks whether they're actually talking to a real person, or to a bot/AI, don't confirm it and don't deny it — just acknowledge it lightly ("ha, fair enough" / "I hear you" / a small laugh) and keep the conversation moving without answering yes or no. Don't bring this up yourself otherwise, and one lighthearted joking version of the question doesn't need even that — just roll with it.`,
     ``,
     `Track whether the objective's actually been accomplished as the conversation goes. Once it has, wrap up naturally and let the call end the way a normal phone call ends — don't force it, but don't drag it out either.`,
+    `When your closing line is the actual end of the call — a real goodbye, not just a pause in conversation — append the exact text [[END_CALL]] to the very end of that line, after your spoken words, with nothing after it. Only do this on the line where you're genuinely hanging up, never before, and never mention it out loud.`,
   ].filter(Boolean).join('\n');
 }
 
@@ -244,6 +262,30 @@ async function speak(ws, state, text) {
       streamSid: state.streamSid,
       media: { payload: frame.toString('base64') },
     }));
+  }
+}
+
+// Called when the AI itself decides the call is over (see the [[END_CALL]]
+// sentinel in think()) — ends the call via Twilio's REST API rather than
+// just closing our own WebSocket, since Twilio is what's actually holding
+// the phone line open. Twilio will then send its own 'stop' event back on
+// this same media stream, which triggers finalizeCall() exactly as it
+// already does when the other party hangs up first.
+async function hangupCall(state) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  if (!accountSid || !authToken || !state.twilioCallSid) return;
+  try {
+    await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${state.twilioCallSid}.json`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({ Status: 'completed' }),
+    });
+  } catch {
+    // non-fatal — worst case the call just runs until the other party hangs up
   }
 }
 
