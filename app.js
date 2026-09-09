@@ -830,7 +830,8 @@ function renderTranscript(history) {
   for (const line of history) {
     const el = document.createElement('div');
     el.className = `transcriptLine ${line.speaker}`;
-    el.innerHTML = `<div class="transcriptDot"></div><div class="transcriptBubble">${line.content}</div>`;
+    const dot = line.speaker === 'ai' ? '<img src="icon-192.png" alt="">' : '';
+    el.innerHTML = `<div class="transcriptDot">${dot}</div><div class="transcriptBubble">${line.content}</div>`;
     panel.appendChild(el);
   }
   panel.scrollTop = panel.scrollHeight;

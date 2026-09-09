@@ -240,13 +240,14 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .recordBtn.recording{background:rgba(220,80,80,0.25); color:#ff8b8b;}
 
 /* ---------- call screen (edge to edge, no safe-area padding) ---------- */
-#callScreen{position:absolute; inset:0; z-index:200; background:none; display:flex; flex-direction:column;}
+#callScreen{position:absolute; inset:0; z-index:200; background:var(--coffee); display:flex; flex-direction:column;}
+#callScreen.assistantMode{background:rgba(10,8,14,0.72); backdrop-filter:blur(24px) saturate(160%); -webkit-backdrop-filter:blur(24px) saturate(160%);}
 #callScreen.hidden{display:none;}
 .callHeader{padding-top:56px; text-align:center; flex:none;}
 .callAvatars{display:flex; justify-content:center; margin-bottom:14px;}
 .callAvatar{width:64px; height:64px; border-radius:50%; background:var(--panel); border:2px solid var(--coffee); display:flex; align-items:center; justify-content:center; overflow:hidden;}
 .callAvatar.ai{margin-right:-16px; z-index:2; background:var(--accent);}
-.callAvatar.contact{background:#5b5b66; font-weight:700; font-size:20px;}
+.callAvatar.contact{background:linear-gradient(135deg, var(--accent), var(--panel)); font-weight:700; font-size:20px;}
 .callAvatar img{width:100%; height:100%; object-fit:cover;}
 .callTitle{font-size:19px; font-weight:700;}
 .callTimer{font-size:13px; color:var(--dim); margin-top:4px;}
@@ -255,8 +256,9 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .transcriptLine{max-width:88%; display:flex; align-items:flex-start; gap:8px;}
 .transcriptLine.ai{align-self:flex-start;}
 .transcriptLine.contact{align-self:flex-end; flex-direction:row-reverse;}
-.transcriptDot{width:22px; height:22px; border-radius:50%; flex:none; margin-top:2px; background:var(--accent);}
-.transcriptLine.contact .transcriptDot{background:#5b5b66;}
+.transcriptDot{width:22px; height:22px; border-radius:50%; flex:none; margin-top:2px; background:var(--coffee); overflow:hidden; display:flex; align-items:center; justify-content:center;}
+.transcriptDot img{width:100%; height:100%; object-fit:cover;}
+.transcriptLine.contact .transcriptDot{background:linear-gradient(135deg, var(--accent), var(--panel));}
 .transcriptBubble{background:var(--glass-bg); backdrop-filter:blur(14px) saturate(150%); -webkit-backdrop-filter:blur(14px) saturate(150%); border:1px solid var(--glass-border); border-radius:14px; padding:10px 13px; font-size:14.5px; line-height:1.4;}
 .transcriptLine.contact .transcriptBubble{background:rgba(255,255,255,0.16);}
 
