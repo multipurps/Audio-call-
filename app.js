@@ -664,27 +664,63 @@ async function startAssistantListening() {
     assistantListening = true;
     $('waveRow').classList.add('speaking');
     waveRecorder.ondataavailable = (e) => waveChunks.push(e.data);
+
+    // Auto-stop on silence, the same idea as the phone-call relay's turn
+    // detection — without this, recording only ever ended if the person
+    // tapped the wave a second time, which they had no reason to know to
+    // do, and just looked like the assistant never responding.
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    audioCtx.createMediaStreamSource(stream).connect(analyser);
+    const levels = new Uint8Array(analyser.frequencyBinCount);
+    let hasSpoken = false;
+    let lastLoudAt = Date.now();
+    let watchdog = null;
+
+    function checkSilence() {
+      if (!waveRecorder || waveRecorder.state !== 'recording') return;
+      analyser.getByteTimeDomainData(levels);
+      let sumSq = 0;
+      for (let i = 0; i < levels.length; i++) { const v = (levels[i] - 128) / 128; sumSq += v * v; }
+      const volume = Math.sqrt(sumSq / levels.length);
+      const now = Date.now();
+      if (volume > 0.04) { hasSpoken = true; lastLoudAt = now; }
+      if (hasSpoken && now - lastLoudAt > 900) { waveRecorder.stop(); return; }
+      if (!hasSpoken && now - lastLoudAt > 8000) { waveRecorder.stop(); return; } // gave up waiting for any speech at all
+      watchdog = requestAnimationFrame(checkSilence);
+    }
+    watchdog = requestAnimationFrame(checkSilence);
+
     waveRecorder.onstop = async () => {
+      cancelAnimationFrame(watchdog);
+      audioCtx.close().catch(() => {});
       stream.getTracks().forEach((t) => t.stop());
       assistantListening = false;
       $('waveRow').classList.remove('speaking');
-      if (!waveChunks.length || !assistantCallOpen) return;
-      const blob = new Blob(waveChunks, { type: 'audio/webm' });
-      const base64 = await blobToBase64(blob);
-      const resp = await authedFetch('/api/assistant?action=transcribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioBase64: base64, mimeType: 'audio/webm' }),
-      });
-      const data = await resp.json();
-      if (!assistantCallOpen) return;
-      if (resp.ok && data.text?.trim()) {
-        appendCallTranscriptLine('user', data.text.trim());
-        await sendChatMessage(data.text.trim(), (reply) => {
-          if (assistantCallOpen && reply) appendCallTranscriptLine('ai', reply);
+      if (!waveChunks.length || !assistantCallOpen || !hasSpoken) return;
+      try {
+        const blob = new Blob(waveChunks, { type: 'audio/webm' });
+        const base64 = await blobToBase64(blob);
+        const resp = await authedFetch('/api/assistant?action=transcribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ audioBase64: base64, mimeType: 'audio/webm' }),
         });
-      } else if (!resp.ok) {
-        appendCallTranscriptLine('ai', data.error || "Sorry, I didn't catch that.");
+        const data = await resp.json();
+        if (!assistantCallOpen) return;
+        if (resp.ok && data.text?.trim()) {
+          appendCallTranscriptLine('user', data.text.trim());
+          await sendChatMessage(data.text.trim(), (reply) => {
+            if (assistantCallOpen && reply) appendCallTranscriptLine('ai', reply);
+          });
+        } else if (!resp.ok) {
+          appendCallTranscriptLine('ai', data.error || "Sorry, I didn't catch that.");
+        }
+      } catch (err) {
+        // A silent failure here used to mean the whole turn just vanished
+        // with no feedback at all — now it always shows something.
+        if (assistantCallOpen) appendCallTranscriptLine('ai', "Sorry, something went wrong there — try again.");
       }
       if (assistantCallOpen && !assistantMuted) startAssistantListening();
     };
