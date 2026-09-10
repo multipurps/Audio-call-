@@ -342,7 +342,8 @@ async function transcribeAudio(req, res, supabase, userId) {
     const audioBytes = Buffer.from(audioBase64, 'base64');
     const form = new FormData();
     form.append('model', 'whisper-large-v3-turbo');
-    form.append('file', new Blob([audioBytes], { type: mimeType || 'audio/webm' }), 'voice.webm');
+    const ext = (mimeType || 'audio/webm').split('/')[1]?.split(';')[0] || 'webm';
+    form.append('file', new Blob([audioBytes], { type: mimeType || 'audio/webm' }), `voice.${ext}`);
 
     const resp = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
       method: 'POST',

@@ -660,7 +660,13 @@ async function startAssistantListening() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     waveChunks = [];
-    waveRecorder = new MediaRecorder(stream);
+    // Don't hardcode a mimeType — Safari/iOS doesn't support webm at all
+    // and silently records something else regardless of what you ask for,
+    // so pick from what this browser actually says it supports and use
+    // that same real value later, instead of always claiming "audio/webm".
+    const recorderMime = ['audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg']
+      .find((t) => window.MediaRecorder?.isTypeSupported?.(t)) || '';
+    waveRecorder = recorderMime ? new MediaRecorder(stream, { mimeType: recorderMime }) : new MediaRecorder(stream);
     assistantListening = true;
     $('waveRow').classList.add('speaking');
     waveRecorder.ondataavailable = (e) => waveChunks.push(e.data);
@@ -700,12 +706,13 @@ async function startAssistantListening() {
       $('waveRow').classList.remove('speaking');
       if (!waveChunks.length || !assistantCallOpen || !hasSpoken) return;
       try {
-        const blob = new Blob(waveChunks, { type: 'audio/webm' });
+        const actualMime = waveRecorder.mimeType || recorderMime || 'audio/webm';
+        const blob = new Blob(waveChunks, { type: actualMime });
         const base64 = await blobToBase64(blob);
         const resp = await authedFetch('/api/assistant?action=transcribe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ audioBase64: base64, mimeType: 'audio/webm' }),
+          body: JSON.stringify({ audioBase64: base64, mimeType: actualMime }),
         });
         const data = await resp.json();
         if (!assistantCallOpen) return;
@@ -1169,14 +1176,17 @@ $('recordVoiceBtn').addEventListener('click', async () => {
   }
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   recordedChunks = [];
-  mediaRecorder = new MediaRecorder(stream);
+  const recorderMime = ['audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg']
+    .find((t) => window.MediaRecorder?.isTypeSupported?.(t)) || '';
+  mediaRecorder = recorderMime ? new MediaRecorder(stream, { mimeType: recorderMime }) : new MediaRecorder(stream);
   mediaRecorder.ondataavailable = (e) => recordedChunks.push(e.data);
   mediaRecorder.onstop = async () => {
     btn.classList.remove('recording');
     btn.textContent = 'Record';
-    const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+    const actualMime = mediaRecorder.mimeType || recorderMime || 'audio/webm';
+    const blob = new Blob(recordedChunks, { type: actualMime });
     stream.getTracks().forEach((t) => t.stop());
-    await uploadVoiceClip(blob, 'audio/webm');
+    await uploadVoiceClip(blob, actualMime);
   };
   mediaRecorder.start();
   btn.classList.add('recording');
