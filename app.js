@@ -722,7 +722,7 @@ async function startAssistantListening() {
             if (assistantCallOpen && reply) appendCallTranscriptLine('ai', reply);
           });
         } else if (!resp.ok) {
-          appendCallTranscriptLine('ai', data.error || "Sorry, I didn't catch that.");
+          appendCallTranscriptLine('ai', data.detail ? `${data.error}: ${data.detail}`.slice(0, 300) : (data.error || "Sorry, I didn't catch that."));
         }
       } catch (err) {
         // A silent failure here used to mean the whole turn just vanished
@@ -1209,7 +1209,7 @@ $('voicePreviewBtn').addEventListener('click', async () => {
   const resp = await authedFetch('/api/voice-clone?action=preview', { method: 'POST' });
   const data = await resp.json();
   $('voicePreviewBtn').disabled = false;
-  if (!resp.ok) { $('voiceRecordStatus').textContent = data.error || 'Could not generate a preview.'; return; }
+  if (!resp.ok) { $('voiceRecordStatus').textContent = data.detail ? `${data.error}: ${data.detail}`.slice(0, 300) : (data.error || 'Could not generate a preview.'); return; }
   audio.src = `data:${data.mimeType};base64,${data.audioBase64}`;
   audio.play().catch(() => {});
 });

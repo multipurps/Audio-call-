@@ -79,7 +79,7 @@ async function previewVoice(req, res, supabase, userId, fishKey) {
   try {
     const resp = await fetch('https://api.fish.audio/v1/tts', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${fishKey}`, 'Content-Type': 'application/json', model: 's2.1-pro' },
+      headers: { Authorization: `Bearer ${fishKey}`, 'Content-Type': 'application/json', model: 's1' },
       body: JSON.stringify({
         text: "Hi, this is what your cloned voice sounds like. I'll use this voice on your calls.",
         reference_id: profile.provider_voice_id,

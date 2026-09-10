@@ -243,7 +243,7 @@ function buildSystemPrompt(state) {
 async function speak(ws, state, text) {
   const resp = await fetch('https://api.fish.audio/v1/tts', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${FISH_API_KEY}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${FISH_API_KEY}`, 'Content-Type': 'application/json', model: 's1' },
     body: JSON.stringify({
       text,
       reference_id: state.voiceId || undefined,
