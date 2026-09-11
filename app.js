@@ -525,7 +525,21 @@ $('briefInput').addEventListener('input', () => {
   const el = $('briefInput');
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+  syncHomeChatPadding();
 });
+
+// The chat's bottom padding has to actually match the input bar's real,
+// current height (which grows as the message box grows) or new messages
+// render hidden behind the bar instead of above it — a fixed guess was
+// wrong as soon as someone typed more than one line.
+function syncHomeChatPadding() {
+  const bar = $('homeInputBar');
+  if (!bar) return;
+  const barHeight = bar.getBoundingClientRect().height || 56;
+  document.documentElement.style.setProperty('--home-chat-pad', `${barHeight + 40}px`);
+}
+window.addEventListener('resize', syncHomeChatPadding);
+syncHomeChatPadding();
 
 function startMessagePolling() {
   if (pollTimer || !currentUser) return;
