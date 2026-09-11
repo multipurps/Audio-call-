@@ -629,7 +629,7 @@ function appendCallTranscriptLine(speaker, content) {
 // alone isn't a voice conversation. Resolves once playback ends (or on
 // failure) so the mic doesn't start listening again over Emysa's own voice.
 let assistantAudioEl = null;
-const AUDIO_BTN_HTML = '<div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M16 9C16.5 9.5 17 10.5 17 12C17 13.5 16.5 14.5 16 15M19 6C20.5 7.5 21 10 21 12C21 14 20.5 16.5 19 18M13 3L7 8H5C3.89543 8 3 8.89543 3 10V14C3 15.1046 3.89543 16 5 16H7L13 21V3Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>\n          Audio';
+const AUDIO_BTN_HTML = '<div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M16 9C16.5 9.5 17 10.5 17 12C17 13.5 16.5 14.5 16 15M19 6C20.5 7.5 21 10 21 12C21 14 20.5 16.5 19 18M13 3L7 8H5C3.89543 8 3 8.89543 3 10V14C3 15.1046 3.89543 16 5 16H7L13 21V3Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>\n          Speaker';
 const MORE_BTN_HTML = '<div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg></div>\n          More';
 async function speakReply(text) {
   if (!text || !text.trim() || !assistantCallOpen) return;
@@ -797,7 +797,18 @@ async function startAssistantListening() {
   }
 }
 
-$('homeWaveBtn').addEventListener('click', () => openAssistantCallScreen());
+$('homeWaveBtn').addEventListener('click', () => {
+  // iOS Safari only allows audio playback that traces back to a direct,
+  // synchronous tap — a .play() call after any await (like the network
+  // fetch to generate speech) gets silently blocked. Priming the element
+  // with a play/pause right here, inside the real tap, unlocks it for
+  // every later programmatic .play() on this same element for the rest
+  // of the call, even from deep inside async code.
+  if (!assistantAudioEl) assistantAudioEl = new Audio();
+  assistantAudioEl.play().catch(() => {});
+  assistantAudioEl.pause();
+  openAssistantCallScreen();
+});
 
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
@@ -865,6 +876,9 @@ function openCallScreen(callId, toNumber, contactName) {
   $('callScreen').classList.remove('hidden');
   $('callScreen').classList.remove('assistantMode');
   $('callAudioBtn').innerHTML = AUDIO_BTN_HTML;
+  $('callFaceTimeBtn').onclick = () => {
+    alert('FaceTime video calls are a Pro feature — upgrade to unlock video.');
+  };
   $('callContactAvatar').style.display = '';
   const displayName = contactName || toNumber;
   $('callContactAvatar').textContent = (contactName ? contactName[0] : toNumber.replace(/[^0-9]/g, '').slice(-2)) || '?';
