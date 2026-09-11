@@ -28,8 +28,42 @@ export default async function handler(req, res) {
     case 'messages': return listMessages(req, res, supabase, userId);
     case 'send': return sendMessage(req, res, supabase, userId);
     case 'transcribe': return transcribeAudio(req, res, supabase, userId);
+    case 'speak': return speakText(req, res, supabase, userId);
     case 'deleteSession': return deleteSession(req, res, supabase, userId);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
+  }
+}
+
+// Synthesizes a short line of text through Fish Audio so the in-app "call"
+// with Emysa is an actual voice back-and-forth, not text you have to read —
+// used for the assistant's own replies on the call screen, independent of
+// whether voice *input* (transcription) is working, so a Groq outage
+// doesn't also silence output that has nothing to do with Groq.
+async function speakText(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const fishKey = process.env.FISH_API_KEY;
+  if (!fishKey) return res.status(500).json({ error: 'Voice output not configured (missing FISH_API_KEY)' });
+
+  const { text } = req.body || {};
+  if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
+
+  const { data: voice } = await supabase.from('voice_profiles').select('*').eq('user_id', userId).maybeSingle();
+  const referenceId = voice?.status === 'ready' ? voice.provider_voice_id : undefined;
+
+  try {
+    const resp = await fetch('https://api.fish.audio/v1/tts', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${fishKey}`, 'Content-Type': 'application/json', model: 's1' },
+      body: JSON.stringify({ text: text.slice(0, 600), reference_id: referenceId, format: 'mp3' }),
+    });
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '');
+      return res.status(502).json({ error: 'Speech generation failed', detail: detail.slice(0, 300) });
+    }
+    const audioBuf = Buffer.from(await resp.arrayBuffer());
+    return res.status(200).json({ audioBase64: audioBuf.toString('base64'), mimeType: 'audio/mpeg' });
+  } catch (err) {
+    return res.status(500).json({ error: 'Speech generation failed', detail: String(err?.message || err).slice(0, 300) });
   }
 }
 

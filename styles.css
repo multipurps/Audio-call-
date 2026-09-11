@@ -289,7 +289,9 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .callBtn.endCall svg{width:31px; height:31px;}
 .callBtn.disabled{opacity:0.35;}
 #callScreen.assistantMode .callBtn.hideInAssistant{display:none;}
-#callScreen.assistantMode .callControlsRow{justify-content:center; gap:56px;}
+#callScreen.assistantMode .callControls{flex-direction:row; justify-content:center; align-items:flex-start; gap:0;}
+#callScreen.assistantMode .callControlsRow{display:contents;}
+#callScreen.assistantMode .callBtn{margin:0 28px;}
 
 /* ---------- admin ---------- */
 .hidden{display:none !important;}

@@ -625,11 +625,41 @@ function appendCallTranscriptLine(speaker, content) {
   panel.scrollTop = panel.scrollHeight;
 }
 
+// Actually speaks the assistant's line out loud on the call screen — text
+// alone isn't a voice conversation. Resolves once playback ends (or on
+// failure) so the mic doesn't start listening again over Emysa's own voice.
+let assistantAudioEl = null;
+const AUDIO_BTN_HTML = '<div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M16 9C16.5 9.5 17 10.5 17 12C17 13.5 16.5 14.5 16 15M19 6C20.5 7.5 21 10 21 12C21 14 20.5 16.5 19 18M13 3L7 8H5C3.89543 8 3 8.89543 3 10V14C3 15.1046 3.89543 16 5 16H7L13 21V3Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>\n          Audio';
+const MORE_BTN_HTML = '<div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg></div>\n          More';
+async function speakReply(text) {
+  if (!text || !text.trim() || !assistantCallOpen) return;
+  try {
+    const resp = await authedFetch('/api/assistant?action=speak', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const data = await resp.json();
+    if (!resp.ok || !assistantCallOpen) return;
+    if (!assistantAudioEl) assistantAudioEl = new Audio();
+    assistantAudioEl.src = `data:${data.mimeType};base64,${data.audioBase64}`;
+    await new Promise((resolve) => {
+      assistantAudioEl.onended = resolve;
+      assistantAudioEl.onerror = resolve;
+      assistantAudioEl.play().catch(resolve);
+    });
+  } catch {
+    // Voice output failing shouldn't block the text conversation from continuing.
+  }
+}
+
 function openAssistantCallScreen() {
   assistantCallOpen = true;
   assistantMuted = false;
   $('callScreen').classList.remove('hidden');
   $('callScreen').classList.add('assistantMode');
+  $('callAudioBtn').innerHTML = MORE_BTN_HTML;
+  $('callAudioBtn').onclick = () => {};
   $('callContactAvatar').style.display = 'none';
   $('callTitleText').textContent = 'Emysa';
   $('transcriptPanel').innerHTML = '';
@@ -659,14 +689,21 @@ function openAssistantCallScreen() {
     if (assistantMuted && waveRecorder?.state === 'recording') waveRecorder.stop();
     else if (!assistantMuted && assistantCallOpen) startAssistantListening();
   };
-  $('callAudioBtn').onclick = () => $('callAudioBtn').classList.toggle('active');
   $('callKeypadBtn').onclick = () => {};
   $('waveRow').onclick = () => {
     if (waveRecorder && waveRecorder.state === 'recording') waveRecorder.stop();
     else if (!assistantListening) startAssistantListening();
   };
 
-  startAssistantListening();
+  // Speak first, on connect — a real call has a greeting before it ever
+  // waits on you, and it means you hear the voice working immediately
+  // rather than only after your own input round-trips successfully.
+  (async () => {
+    const greeting = 'Hey! What can I help you with?';
+    appendCallTranscriptLine('ai', greeting);
+    await speakReply(greeting);
+    if (assistantCallOpen && !assistantMuted) startAssistantListening();
+  })();
 }
 
 async function startAssistantListening() {
@@ -732,16 +769,24 @@ async function startAssistantListening() {
         if (!assistantCallOpen) return;
         if (resp.ok && data.text?.trim()) {
           appendCallTranscriptLine('user', data.text.trim());
-          await sendChatMessage(data.text.trim(), (reply) => {
-            if (assistantCallOpen && reply) appendCallTranscriptLine('ai', reply);
+          await sendChatMessage(data.text.trim(), async (reply) => {
+            if (assistantCallOpen && reply) {
+              appendCallTranscriptLine('ai', reply);
+              await speakReply(reply);
+            }
           });
         } else if (!resp.ok) {
-          appendCallTranscriptLine('ai', data.detail ? `${data.error}: ${data.detail}`.slice(0, 300) : (data.error || "Sorry, I didn't catch that."));
+          const errText = data.detail ? `${data.error}: ${data.detail}`.slice(0, 300) : (data.error || "Sorry, I didn't catch that.");
+          appendCallTranscriptLine('ai', errText);
+          await speakReply(data.error === 'Transcription failed' ? "Sorry, I didn't catch that." : errText);
         }
       } catch (err) {
         // A silent failure here used to mean the whole turn just vanished
         // with no feedback at all — now it always shows something.
-        if (assistantCallOpen) appendCallTranscriptLine('ai', "Sorry, something went wrong there — try again.");
+        if (assistantCallOpen) {
+          appendCallTranscriptLine('ai', "Sorry, something went wrong there — try again.");
+          await speakReply("Sorry, something went wrong there — try again.");
+        }
       }
       if (assistantCallOpen && !assistantMuted) startAssistantListening();
     };
@@ -819,6 +864,7 @@ let callAiMuted = false;
 function openCallScreen(callId, toNumber, contactName) {
   $('callScreen').classList.remove('hidden');
   $('callScreen').classList.remove('assistantMode');
+  $('callAudioBtn').innerHTML = AUDIO_BTN_HTML;
   $('callContactAvatar').style.display = '';
   const displayName = contactName || toNumber;
   $('callContactAvatar').textContent = (contactName ? contactName[0] : toNumber.replace(/[^0-9]/g, '').slice(-2)) || '?';
