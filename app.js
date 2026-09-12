@@ -1568,6 +1568,7 @@ if ('serviceWorker' in navigator) {
 // would reject anyway.
 // ---------- welcome/login/signup backgrounds (gallery set by the admin app, auto-rotates here) ----------
 const authBgLayers = [$('authBgA'), $('authBgB')];
+const authBgVideoEl = $('authBgVideo');
 let authBgUrls = [];
 let authBgIndex = 0;
 let authBgActiveLayer = 0;
@@ -1580,11 +1581,34 @@ function showAuthBg(url) {
   authBgActiveLayer = nextLayer;
 }
 
+let authBgVideoUrls = [];
+let authBgVideoIndex = 0;
+function playNextAuthBgVideo() {
+  authBgVideoEl.src = authBgVideoUrls[authBgVideoIndex];
+  authBgVideoEl.loop = authBgVideoUrls.length === 1;
+  authBgVideoEl.play().catch(() => {});
+}
+authBgVideoEl.addEventListener('ended', () => {
+  authBgVideoIndex = (authBgVideoIndex + 1) % authBgVideoUrls.length;
+  playNextAuthBgVideo();
+});
+
 // Public read (no sign-in needed) so the welcome/login screens can be
-// themed before anyone has authenticated.
+// themed before anyone has authenticated. A video, if one's been uploaded,
+// takes over as the background entirely; otherwise falls back to the
+// crossfading image gallery.
 (async () => {
-  const { data } = await supabase.from('auth_backgrounds').select('url').order('created_at', { ascending: true });
-  authBgUrls = (data || []).map((r) => r.url);
+  const { data } = await supabase.from('auth_backgrounds').select('url,media_type').order('created_at', { ascending: true });
+  const rows = data || [];
+  authBgVideoUrls = rows.filter((r) => r.media_type === 'video').map((r) => r.url);
+  authBgUrls = rows.filter((r) => r.media_type !== 'video').map((r) => r.url);
+
+  if (authBgVideoUrls.length) {
+    authBgVideoEl.classList.remove('hidden');
+    playNextAuthBgVideo();
+    return;
+  }
+
   if (!authBgUrls.length) return;
   showAuthBg(authBgUrls[0]);
   if (authBgUrls.length > 1) {

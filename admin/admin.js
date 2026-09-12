@@ -125,16 +125,18 @@ function renderUsers({ users }) {
   }
 }
 
-// ---------- welcome/login/signup background gallery ----------
+// ---------- welcome/login/signup background gallery (images + video) ----------
 async function loadBackgrounds() {
-  const { data } = await supabase.from('auth_backgrounds').select('id,url').order('created_at', { ascending: false });
+  const { data } = await supabase.from('auth_backgrounds').select('id,url,media_type').order('created_at', { ascending: false });
   const grid = $('bgGrid');
   grid.innerHTML = (data || []).map((row) => `
     <div class="bgCard">
-      <img src="${row.url}" alt="">
+      ${row.media_type === 'video'
+        ? `<video src="${row.url}" muted loop playsinline autoplay></video>`
+        : `<img src="${row.url}" alt="">`}
       <button data-id="${row.id}" title="Remove">✕</button>
     </div>
-  `).join('') || '<div class="authHint" style="grid-column:1/-1;">No images yet.</div>';
+  `).join('') || '<div class="authHint" style="grid-column:1/-1;">No backgrounds yet.</div>';
 
   grid.querySelectorAll('button[data-id]').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -154,27 +156,38 @@ async function loadBackgrounds() {
 $('uploadBgBtn').addEventListener('click', () => $('bgFileInput').click());
 $('bgFileInput').addEventListener('change', async (e) => {
   const file = e.target.files[0];
+  e.target.value = '';
   if (!file) return;
-  $('bgUploadStatus').textContent = 'Uploading...';
-  const imageBase64 = await blobToBase64(file);
-  const resp = await authedFetch('/api/admin?action=upload-background', {
+  const mediaType = file.type.startsWith('video') ? 'video' : 'image';
+
+  $('bgUploadStatus').textContent = 'Preparing upload…';
+  const createResp = await authedFetch('/api/admin?action=create-background-upload', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ imageBase64, mimeType: file.type }),
+    body: JSON.stringify({ mimeType: file.type, mediaType }),
   });
-  const data = await resp.json();
-  $('bgFileInput').value = '';
-  $('bgUploadStatus').textContent = resp.ok ? 'Added — the app fades between all uploaded images on the welcome, login and sign-up screens.' : (data.error || 'Upload failed.');
-  if (resp.ok) loadBackgrounds();
-});
+  const createData = await createResp.json();
+  if (!createResp.ok) { $('bgUploadStatus').textContent = createData.error || 'Could not start upload.'; return; }
 
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
+  $('bgUploadStatus').textContent = mediaType === 'video' ? 'Uploading video…' : 'Uploading…';
+  // Goes straight from this browser to Supabase Storage — never touches our
+  // own server, so there's no small body-size ceiling to hit on a video file.
+  const { error: uploadErr } = await supabase.storage
+    .from('app-assets')
+    .uploadToSignedUrl(createData.path, createData.token, file);
+  if (uploadErr) { $('bgUploadStatus').textContent = uploadErr.message || 'Upload failed.'; return; }
+
+  const confirmResp = await authedFetch('/api/admin?action=confirm-background', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: createData.path, mediaType }),
   });
+  const confirmData = await confirmResp.json();
+  $('bgUploadStatus').textContent = confirmResp.ok
+    ? 'Added — this plays on the welcome, login and sign-up screens.'
+    : (confirmData.error || 'Could not save the upload.');
+  if (confirmResp.ok) loadBackgrounds();
+});
 }
 
 // ---------- announcements ----------
