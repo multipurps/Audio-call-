@@ -59,7 +59,7 @@ wss.on('connection', (ws, req) => {
       await loadCallContext(state);
       // Open with a natural greeting rather than dumping the objective —
       // matches the "exchange pleasantries first" requirement.
-      await speak(ws, state, greeting());
+      await speak(ws, state, state.greetingOverride || greeting());
       return;
     }
 
@@ -103,6 +103,14 @@ async function loadCallContext(state) {
   if (!call) return;
   state.objective = call.objective;
   state.twilioCallSid = call.twilio_call_sid;
+  state.userId = call.user_id;
+  state.contactId = call.contact_id || null;
+  state.direction = call.direction || 'outbound';
+
+  if (state.direction === 'inbound') {
+    const { data: answering } = await supabase.from('call_answering_settings').select('greeting').eq('user_id', call.user_id).maybeSingle();
+    state.greetingOverride = answering?.greeting || '';
+  }
 
   // Voice cloning is tied to the user's account (Profile -> Voice), not to
   // the old ai_callers concept — fetch it unconditionally so calls actually
@@ -112,6 +120,17 @@ async function loadCallContext(state) {
 
   const { data: profile } = await supabase.from('profiles').select('name').eq('user_id', call.user_id).maybeSingle();
   state.userName = profile?.name || '';
+
+  // Recent memories (Profile -> Memories) — contact-specific ones first,
+  // since those are the most likely to actually be relevant to this call.
+  const { data: memRows } = await supabase
+    .from('memories')
+    .select('content, contact_id')
+    .eq('user_id', call.user_id)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  const relevant = (memRows || []).filter((m) => !call.contact_id || m.contact_id === call.contact_id || !m.contact_id);
+  state.memories = relevant.slice(0, 5).map((m) => m.content);
 
   // ai_callers is legacy (calling now happens implicitly through chat), but
   // if a call still has one attached, its instructions/personality still
@@ -219,12 +238,16 @@ async function think(state) {
 // trailing off) rather than clean, complete sentences every time.
 function buildSystemPrompt(state) {
   const who = state.userName ? `You're speaking as ${state.userName}` : "You're speaking as the person who asked for this call";
+  const situation = state.direction === 'inbound'
+    ? `${who}, answering a call that just came in — not as an assistant, not as a "representative." Whoever's calling already knows this voice. Just talk to them the way that person naturally would.`
+    : `${who} — not as an assistant, not as a "representative calling on behalf of" anyone. Whoever picks up already knows this voice. Just talk to them the way that person naturally would, continuing an ordinary conversation.`;
   return [
-    `${who} — not as an assistant, not as a "representative calling on behalf of" anyone. Whoever picks up already knows this voice. Just talk to them the way that person naturally would, continuing an ordinary conversation.`,
+    situation,
     ``,
     `What this call is for: ${state.objective}`,
     state.instructions ? `How to go about it: ${state.instructions}` : '',
     state.personality ? `General manner: ${state.personality}` : '',
+    state.memories?.length ? `Things worth remembering from past conversations: ${state.memories.join('; ')}` : '',
     ``,
     `Sound like an actual human on the phone, not a script:`,
     `- Keep turns short — a sentence, maybe two. Real phone conversations are back-and-forth, not monologues.`,
@@ -290,8 +313,14 @@ async function hangupCall(state) {
 }
 
 async function finalizeCall(state) {
-  const summaryPrompt = `Summarize this call outcome in 1-2 sentences for the user who requested it. Objective was: ${state.objective}`;
+  const prompt = [
+    `Summarize this call outcome in 1-2 sentences for the user who requested it. Objective was: ${state.objective}`,
+    `Also decide if there's one specific, concrete fact worth remembering for next time — a preference, a detail about the person called, a recurring circumstance. Only include one if it's genuinely reusable later; most calls won't have one, and a restatement of the summary doesn't count.`,
+    `Reply with ONLY JSON: {"summary": string, "memory": string|null}`,
+  ].join('\n');
+
   let summary = '';
+  let memory = null;
   try {
     // state.history uses {speaker:'ai'|'contact', content} for storage — the
     // chat API needs standard role/content, same translation as think() does.
@@ -304,17 +333,28 @@ async function finalizeCall(state) {
       headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'openai/gpt-4o-mini',
-        messages: [{ role: 'system', content: summaryPrompt }, ...messages],
-        max_tokens: 120,
+        messages: [{ role: 'system', content: prompt }, ...messages],
+        max_tokens: 150,
+        response_format: { type: 'json_object' },
       }),
     });
     const data = await resp.json();
-    summary = data.choices?.[0]?.message?.content?.trim() || '';
+    const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+    summary = parsed.summary || '';
+    memory = parsed.memory || null;
   } catch {
     // non-fatal — calls-status.js still records duration/status from Twilio
   }
   if (summary) {
     await supabase.from('calls').update({ outcome_summary: summary, transcript: state.history }).eq('id', state.callId);
+  }
+  if (memory && state.userId) {
+    await supabase.from('memories').insert({
+      user_id: state.userId,
+      contact_id: state.contactId || null,
+      content: memory,
+      source_call_id: state.callId,
+    });
   }
 }
 

@@ -25,6 +25,7 @@ export default async function handler(req, res) {
   const action = req.query?.action || req.body?.action;
   switch (action) {
     case 'sessions': return listSessions(req, res, supabase, userId);
+    case 'archiveSession': return archiveSession(req, res, supabase, userId);
     case 'messages': return listMessages(req, res, supabase, userId);
     case 'send': return sendMessage(req, res, supabase, userId);
     case 'transcribe': return transcribeAudio(req, res, supabase, userId);
@@ -73,14 +74,25 @@ async function speakText(req, res, supabase, userId) {
 
 async function listSessions(req, res, supabase, userId) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
+  const archived = req.query?.archived === 'true';
   const { data, error } = await supabase
     .from('chat_sessions')
-    .select('id,title,created_at,updated_at')
+    .select('id,title,created_at,updated_at,archived')
     .eq('user_id', userId)
+    .eq('archived', archived)
     .order('updated_at', { ascending: false })
     .limit(100);
   if (error) return res.status(500).json({ error: error.message });
   return res.status(200).json({ sessions: data });
+}
+
+async function archiveSession(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { sessionId, archived } = req.body || {};
+  if (!sessionId) return res.status(400).json({ error: 'sessionId required' });
+  const { error } = await supabase.from('chat_sessions').update({ archived: !!archived }).eq('id', sessionId).eq('user_id', userId);
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ ok: true });
 }
 
 async function deleteSession(req, res, supabase, userId) {
@@ -202,6 +214,7 @@ async function sendMessage(req, res, supabase, userId) {
   }
 
   const { data: contacts } = await supabase.from('contacts').select('id,name,phone_number').eq('user_id', userId);
+  const { data: memRows } = await supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5);
   const { data: history } = await supabase
     .from('assistant_messages')
     .select('role,content')
@@ -212,17 +225,19 @@ async function sendMessage(req, res, supabase, userId) {
   const recentHistory = (history || []).reverse();
 
   const contactsList = (contacts || []).map((c) => `- ${c.name}`).join('\n') || '(no contacts saved yet)';
+  const memoriesList = (memRows || []).map((m) => `- ${m.content}`).join('\n');
   const systemPrompt = [
     'You are Emysa, the in-app assistant for a phone-calling app. The user tells you who to call and what to say, and you place the call for them. They can give you either a phone number directly, or a name from their saved contacts below:',
     'Known contacts:',
     contactsList,
+    memoriesList ? `\nThings worth remembering about this user from past calls:\n${memoriesList}` : '',
     '',
     'Reply with ONLY a JSON object, no other text, matching this shape:',
     '{"action":"call"|"retry"|"reply","phoneNumber":string|null,"contactName":string|null,"objective":string|null,"reply":string|null}',
     '- action "call": the user wants you to call someone new. If they gave you an actual phone number in their message, put the digits (with country code if given, e.g. "+15551234567") in phoneNumber. Otherwise, if they named someone from the saved contacts list, put your best guess at that name in contactName. objective is a short phrase describing what to say or ask on the call — if they also gave any tone or manner direction (stay calm, keep it light, let it flow naturally, be quick about it, etc.), include that in objective too, don\'t drop it.',
     '- action "retry": the user wants you to call the same person again (e.g. "call him again", "try it again").',
     '- action "reply": anything else, including if they want to call someone but haven\'t given you a number or a known contact yet — ask for the phone number in "reply".',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   const chatMessages = [
     { role: 'system', content: systemPrompt },
@@ -317,7 +332,7 @@ async function sendMessage(req, res, supabase, userId) {
 async function placeCall(supabase, userId, { toNumber, objective, contactId, callerId = null, sessionId = null }) {
   const { data: usage } = await supabase.from('user_usage').select('*').eq('user_id', userId).maybeSingle();
   const used = usage?.call_minutes_used ?? 0;
-  const limit = usage?.monthly_minute_limit ?? 60;
+  const limit = (usage?.monthly_minute_limit ?? 60) + (usage?.bonus_minutes ?? 0);
   if (used >= limit) return { error: 'monthly call minutes exhausted' };
 
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
@@ -325,6 +340,10 @@ async function placeCall(supabase, userId, { toNumber, objective, contactId, cal
   const fromNumber = process.env.TWILIO_FROM_NUMBER;
   const appUrl = process.env.PUBLIC_APP_URL;
   if (!accountSid || !authToken || !fromNumber || !appUrl) return { error: 'telephony not configured yet' };
+
+  const { data: settings } = await supabase.from('profiles').select('record_calls, ring_seconds').eq('user_id', userId).maybeSingle();
+  const recordCalls = settings?.record_calls ?? true;
+  const ringSeconds = settings?.ring_seconds ?? 25;
 
   const { data: call, error: insertErr } = await supabase
     .from('calls')
@@ -350,7 +369,8 @@ async function placeCall(supabase, userId, { toNumber, objective, contactId, cal
       Url: twiml_url,
       StatusCallback: status_callback,
       StatusCallbackEvent: 'initiated ringing answered completed',
-      Record: 'true',
+      Record: recordCalls ? 'true' : 'false',
+      Timeout: String(ringSeconds),
       MachineDetection: 'Enable', // lets calls-twiml.js hang up immediately on voicemail instead of connecting the relay
     });
     const twilioResp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`, {

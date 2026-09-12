@@ -354,6 +354,63 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .profileSub{font-size:12px; color:var(--dim); margin-top:2px;}
 .sectionLabel{font-size:12px; font-weight:700; color:var(--dim); text-transform:uppercase; letter-spacing:0.04em; margin:20px 0 8px 4px;}
 .sectionLabel:first-of-type{margin-top:0;}
+
+/* ---------- Profile feature screens: pricing, referral code, stats, segmented control ---------- */
+.pricingCard{
+  background:linear-gradient(160deg, var(--panel) 0%, var(--coffee) 100%);
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:24px; padding:26px 24px; margin-bottom:20px;
+}
+.pricingBadge{
+  display:inline-block; font-size:11px; font-weight:800; letter-spacing:0.08em;
+  color:var(--coffee); background:var(--accent); padding:4px 10px; border-radius:20px; margin-bottom:14px;
+}
+.pricingPrice{font-size:36px; font-weight:800; color:#fff; margin-bottom:18px;}
+.pricingPrice span{font-size:15px; font-weight:500; color:var(--dim);}
+.pricingFeatures{list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px;}
+.pricingFeatures li{font-size:14.5px; color:#fff; padding-left:26px; position:relative;}
+.pricingFeatures li::before{
+  content:''; position:absolute; left:0; top:3px; width:16px; height:16px; border-radius:50%;
+  background:var(--accent); opacity:0.9;
+}
+.pricingFeatures li::after{
+  content:''; position:absolute; left:5px; top:6px; width:6px; height:3px;
+  border-left:2px solid var(--coffee); border-bottom:2px solid var(--coffee); transform:rotate(-45deg);
+}
+
+.codeCard{
+  background:var(--coffee-light); border-radius:20px; padding:22px; text-align:center; margin-bottom:18px;
+}
+.codeCardLabel{font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px;}
+.codeCardValue{font-size:32px; font-weight:800; letter-spacing:0.12em; color:#fff; margin-bottom:16px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+.codeCardActions{display:flex; gap:10px;}
+
+.statRow{display:flex; gap:12px; margin-bottom:8px;}
+.statBox{flex:1; background:var(--coffee-light); border-radius:18px; padding:18px 14px; text-align:center;}
+.statValue{font-size:26px; font-weight:800; color:#fff;}
+.statLabel{font-size:12px; color:var(--dim); margin-top:4px;}
+
+.segmented{display:flex; gap:8px; margin-bottom:20px;}
+.segmentedBtn{
+  flex:1; padding:10px 0; border-radius:14px; background:var(--coffee-light);
+  color:var(--dim); font-size:14px; font-weight:600; text-align:center;
+}
+.segmentedBtn.active{background:var(--accent); color:var(--coffee);}
+
+.memoryCard{background:var(--coffee-light); border-radius:16px; padding:16px 18px; margin-bottom:10px; position:relative;}
+.memoryCard .memoryContact{font-size:11.5px; font-weight:700; color:var(--accent); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;}
+.memoryCard .memoryContent{font-size:14.5px; color:#fff; line-height:1.5; padding-right:28px;}
+.memoryCard .memoryDate{font-size:11.5px; color:var(--dim); margin-top:8px;}
+.memoryCard .memoryDelete{position:absolute; right:14px; top:14px; width:24px; height:24px; color:var(--dim); opacity:0.7;}
+.memoryCard .memoryDelete svg{width:14px; height:14px;}
+.emptyState{text-align:center; padding:40px 20px; color:var(--dim); font-size:14px; line-height:1.6;}
+.emptyState svg{width:36px; height:36px; margin-bottom:12px; opacity:0.5;}
+
+.chatRowActions{display:flex; align-items:center; gap:4px;}
+.chatRowIconBtn{width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--dim); opacity:0.85;}
+.chatRowIconBtn svg{width:15px; height:15px;}
+.chatRowIconBtn.danger{color:#ff6b6b;}
+
 .profileCard{
   display:flex; align-items:center; gap:13px;
   background:var(--coffee-light); border-radius:20px; padding:15px 17px;

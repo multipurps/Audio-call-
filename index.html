@@ -711,38 +711,123 @@
 <div class="sheetScreen hidden" id="sheet-upgrade">
   <div class="sheetHeader">
     <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-    <div class="sheetTitle">Upgrade to Pro</div>
+    <div class="sheetTitle">Emysa Pro</div>
   </div>
-  <div class="sheetBody"><p>Pro plans aren't available yet — check back soon.</p></div>
+  <div class="sheetBody">
+    <div class="pricingCard">
+      <div class="pricingBadge">PRO</div>
+      <div class="pricingPrice">$19<span>/month</span></div>
+      <ul class="pricingFeatures">
+        <li>Unlimited saved contacts and chats</li>
+        <li>Higher monthly calling minutes</li>
+        <li>Priority call connection</li>
+        <li>Call Answering for incoming calls</li>
+      </ul>
+    </div>
+    <button class="primaryBtn" id="upgradeSubscribeBtn">Subscribe</button>
+    <button class="secondaryBtn hidden" id="upgradeManageBtn" style="margin-top:10px;">Manage billing</button>
+    <div class="authHint" id="upgradeStatus" style="text-align:center; margin-top:12px;"></div>
+  </div>
 </div>
+
 <div class="sheetScreen hidden" id="sheet-referrals">
   <div class="sheetHeader">
     <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="sheetTitle">Referrals</div>
   </div>
-  <div class="sheetBody"><p>Referrals aren't set up yet — check back soon.</p></div>
+  <div class="sheetBody">
+    <p>Share your code — you and your friend each get bonus calling minutes once they sign up.</p>
+    <div class="codeCard">
+      <div class="codeCardLabel">Your code</div>
+      <div class="codeCardValue" id="referralCodeValue">——————</div>
+      <div class="codeCardActions">
+        <button class="secondaryBtn" id="referralCopyBtn" style="flex:1;">Copy</button>
+        <button class="secondaryBtn" id="referralShareBtn" style="flex:1;">Share</button>
+      </div>
+    </div>
+    <div class="statRow">
+      <div class="statBox">
+        <div class="statValue" id="referralCount">0</div>
+        <div class="statLabel">Friends referred</div>
+      </div>
+      <div class="statBox">
+        <div class="statValue" id="referralMinutes">0</div>
+        <div class="statLabel">Bonus minutes earned</div>
+      </div>
+    </div>
+  </div>
 </div>
+
 <div class="sheetScreen hidden" id="sheet-call-answering">
   <div class="sheetHeader">
     <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="sheetTitle">Call Answering</div>
   </div>
-  <div class="sheetBody"><p>Automatic call-answering settings aren't available yet — check back soon.</p></div>
+  <div class="sheetBody">
+    <p>Give people a number to call that Emysa answers for you, in your own voice.</p>
+    <div class="profileCard">
+      <div class="cBody"><div class="cValue">Enable Call Answering</div></div>
+      <div class="toggleSwitch" id="callAnsweringToggle"></div>
+    </div>
+    <div class="authHint" id="callAnsweringStatus" style="margin:8px 0 8px 4px;"></div>
+
+    <div id="callAnsweringDetails" class="hidden">
+      <div class="sectionLabel">Your number</div>
+      <div class="profileCard">
+        <div class="cBody"><div class="cValue" id="callAnsweringNumber">—</div></div>
+      </div>
+
+      <div class="sectionLabel">Greeting</div>
+      <div class="profileCard">
+        <div class="cBody"><textarea class="plainInput" id="callAnsweringGreeting" rows="2" placeholder="What Emysa says the moment it picks up"></textarea></div>
+      </div>
+
+      <div class="sectionLabel">Instructions</div>
+      <div class="profileCard">
+        <div class="cBody"><textarea class="plainInput" id="callAnsweringInstructions" rows="3" placeholder="What should Emysa do with the call? e.g. take a message, answer questions about your availability, etc."></textarea></div>
+      </div>
+
+      <button class="secondaryBtn" id="callAnsweringSaveBtn" style="margin-bottom:10px;">Save</button>
+      <div class="authHint" id="callAnsweringSaveStatus" style="margin:-4px 0 8px 4px;"></div>
+    </div>
+  </div>
 </div>
+
 <div class="sheetScreen hidden" id="sheet-memories">
   <div class="sheetHeader">
     <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="sheetTitle">Memories</div>
   </div>
-  <div class="sheetBody"><p>Memories aren't available yet — check back soon.</p></div>
+  <div class="sheetBody">
+    <p>Details Emysa picks up on during calls and keeps in mind for next time.</p>
+    <div id="memoriesList"></div>
+  </div>
 </div>
+
 <div class="sheetScreen hidden" id="sheet-call-settings">
   <div class="sheetHeader">
     <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="sheetTitle">Call Settings</div>
   </div>
-  <div class="sheetBody"><p>Call settings aren't available yet — check back soon.</p></div>
+  <div class="sheetBody">
+    <div class="profileCard">
+      <div class="cBody"><div class="cValue">Auto-retry on busy</div><div class="cLabel">Offer to try again if the line's busy or no one answers</div></div>
+      <div class="toggleSwitch" id="autoRetryToggle"></div>
+    </div>
+    <div class="profileCard">
+      <div class="cBody"><div class="cValue">Record calls</div><div class="cLabel">Keep a recording alongside the transcript</div></div>
+      <div class="toggleSwitch" id="recordCallsToggle"></div>
+    </div>
+    <div class="sectionLabel">Ring duration</div>
+    <div class="segmented" id="ringSecondsGroup">
+      <button class="segmentedBtn" data-value="15">15s</button>
+      <button class="segmentedBtn" data-value="25">25s</button>
+      <button class="segmentedBtn" data-value="35">35s</button>
+      <button class="segmentedBtn" data-value="45">45s</button>
+    </div>
+  </div>
 </div>
+
 <div class="sheetScreen hidden" id="sheet-contacts">
   <div class="sheetHeader">
     <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
@@ -769,8 +854,12 @@
     <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="sheetTitle">Archive</div>
   </div>
-  <div class="sheetBody"><p>Archived calls will show up here once this is built — check back soon.</p></div>
+  <div class="sheetBody">
+    <p>Chats you've archived from Saved Chats — restore any of them any time.</p>
+    <div id="archivedChatsList"></div>
+  </div>
 </div>
+
 
 <!-- ---------- Permissions ---------- -->
 <div class="sheetScreen hidden" id="sheet-permissions">

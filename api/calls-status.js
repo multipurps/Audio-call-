@@ -71,11 +71,18 @@ async function postAssistantFollowUp(supabase, userId, contactId, sessionId, cal
     .gte('created_at', since);
   const attempts = count || 1;
 
+  const { data: settings } = await supabase.from('profiles').select('auto_retry').eq('user_id', userId).maybeSingle();
+  const autoRetry = settings?.auto_retry ?? true;
+
   let content;
   if (status === 'no_answer') {
-    content = attempts > 1
-      ? `${name}'s line is still busy. Would you like me to try again in a little while?`
-      : `I tried calling ${name}, but the line was busy.`;
+    if (!autoRetry) {
+      content = `I tried calling ${name}, but the line was busy.`;
+    } else {
+      content = attempts > 1
+        ? `${name}'s line is still busy. Would you like me to try again in a little while?`
+        : `I tried calling ${name}, but the line was busy.`;
+    }
   } else if (status === 'failed') {
     content = `I couldn't reach ${name} — the call failed to connect.`;
   } else {

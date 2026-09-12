@@ -31,6 +31,18 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const $ = (id) => document.getElementById(id);
+
+// Referral capture: ?ref=CODE on first load gets stashed until sign-up
+// completes and there's a user to actually attach it to.
+(() => {
+  const ref = new URLSearchParams(window.location.search).get('ref');
+  if (ref) {
+    localStorage.setItem('emysa_pending_referral', ref.toUpperCase());
+    const url = new URL(window.location.href);
+    url.searchParams.delete('ref');
+    window.history.replaceState({}, '', url.toString());
+  }
+})();
 let currentUser = null;
 let currentSession = null;
 
@@ -254,6 +266,18 @@ async function enterApp(session) {
   renderProfileHeader();
   initHomeChat();
   moveTabGlider('home');
+  redeemPendingReferral();
+}
+
+async function redeemPendingReferral() {
+  const code = localStorage.getItem('emysa_pending_referral');
+  if (!code) return;
+  const resp = await authedFetch('/api/referrals?action=redeem', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  if (resp.ok) localStorage.removeItem('emysa_pending_referral');
 }
 
 function renderAvatar(url) {
@@ -601,8 +625,25 @@ function renderSavedChats(sessions) {
     }
     const row = document.createElement('div');
     row.className = 'savedChatRow';
-    row.innerHTML = `<div class="savedChatTitle">${s.title}</div><div class="savedChatDate">${shortDateLabel(s.updated_at)}</div>`;
+    row.innerHTML = `
+      <div class="savedChatTitle">${s.title}</div>
+      <div class="chatRowActions">
+        <div class="savedChatDate">${shortDateLabel(s.updated_at)}</div>
+        <button class="chatRowIconBtn" data-action="archive" aria-label="Archive"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M5 9v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        <button class="chatRowIconBtn danger" data-action="delete" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>`;
     row.addEventListener('click', () => { openChatSession(s.id); closeSheets(); });
+    row.querySelector('[data-action="archive"]').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await authedFetch('/api/assistant?action=archiveSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: s.id, archived: true }) });
+      loadSavedChats();
+    });
+    row.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Delete "${s.title}"? This can't be undone.`)) return;
+      await authedFetch('/api/assistant?action=deleteSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: s.id }) });
+      loadSavedChats();
+    });
     list.appendChild(row);
   }
 }
@@ -1164,6 +1205,12 @@ function setToggle(el, on) {
   el.classList.toggle('on', !!on);
 }
 
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
 function haptic() {
   if (localStorage.getItem(HAPTICS_KEY) !== '0' && navigator.vibrate) navigator.vibrate(8);
 }
@@ -1235,14 +1282,181 @@ $('accountBtn').addEventListener('click', () => {
   openSheet('sheet-account');
 });
 $('themeBtn').addEventListener('click', () => openSheet('sheet-theme'));
-$('upgradeBtn').addEventListener('click', () => openSheet('sheet-upgrade'));
-$('referralsBtn').addEventListener('click', () => openSheet('sheet-referrals'));
-$('callAnsweringBtn').addEventListener('click', () => openSheet('sheet-call-answering'));
-$('memoriesBtn').addEventListener('click', () => openSheet('sheet-memories'));
-$('callSettingsBtn').addEventListener('click', () => openSheet('sheet-call-settings'));
+$('upgradeBtn').addEventListener('click', () => { loadBillingStatus(); openSheet('sheet-upgrade'); });
+$('referralsBtn').addEventListener('click', () => { loadReferrals(); openSheet('sheet-referrals'); });
+$('callAnsweringBtn').addEventListener('click', () => { loadCallAnswering(); openSheet('sheet-call-answering'); });
+$('memoriesBtn').addEventListener('click', () => { loadMemories(); openSheet('sheet-memories'); });
+$('callSettingsBtn').addEventListener('click', () => { loadCallSettings(); openSheet('sheet-call-settings'); });
 $('contactsBtn').addEventListener('click', () => openSheet('sheet-contacts'));
-$('archiveBtn').addEventListener('click', () => openSheet('sheet-archive'));
+$('archiveBtn').addEventListener('click', () => { loadArchivedChats(); openSheet('sheet-archive'); });
 $('getStartedBtn').addEventListener('click', () => openSheet('sheet-get-started'));
+
+// ---------- Upgrade to Pro (Stripe) ----------
+async function loadBillingStatus() {
+  $('upgradeStatus').textContent = '';
+  const resp = await authedFetch('/api/billing');
+  if (!resp.ok) return;
+  const data = await resp.json();
+  const isActive = data.status === 'active' || data.status === 'past_due';
+  $('upgradeSubscribeBtn').classList.toggle('hidden', isActive);
+  $('upgradeManageBtn').classList.toggle('hidden', !isActive);
+  $('upgradeStatus').textContent = isActive
+    ? (data.status === 'past_due' ? "Your last payment didn't go through — update it to keep Pro active." : 'You\'re on Pro. Thanks for the support.')
+    : '';
+}
+$('upgradeSubscribeBtn').addEventListener('click', async () => {
+  $('upgradeSubscribeBtn').disabled = true;
+  $('upgradeStatus').textContent = 'Redirecting to checkout…';
+  const resp = await authedFetch('/api/billing?action=checkout', { method: 'POST' });
+  const data = await resp.json();
+  $('upgradeSubscribeBtn').disabled = false;
+  if (!resp.ok) { $('upgradeStatus').textContent = data.error || 'Could not start checkout.'; return; }
+  window.location.href = data.url;
+});
+$('upgradeManageBtn').addEventListener('click', async () => {
+  $('upgradeManageBtn').disabled = true;
+  const resp = await authedFetch('/api/billing?action=portal', { method: 'POST' });
+  const data = await resp.json();
+  $('upgradeManageBtn').disabled = false;
+  if (!resp.ok) { $('upgradeStatus').textContent = data.error || 'Could not open billing portal.'; return; }
+  window.location.href = data.url;
+});
+
+// ---------- Referrals ----------
+async function loadReferrals() {
+  const resp = await authedFetch('/api/referrals');
+  if (!resp.ok) return;
+  const data = await resp.json();
+  $('referralCodeValue').textContent = data.code || '——————';
+  $('referralCount').textContent = data.referralCount ?? 0;
+  $('referralMinutes').textContent = (data.referralCount ?? 0) * (data.bonusPerReferral ?? 30);
+}
+$('referralCopyBtn').addEventListener('click', async () => {
+  const code = $('referralCodeValue').textContent;
+  try { await navigator.clipboard.writeText(code); $('referralCopyBtn').textContent = 'Copied!'; setTimeout(() => { $('referralCopyBtn').textContent = 'Copy'; }, 1500); } catch {}
+});
+$('referralShareBtn').addEventListener('click', async () => {
+  const code = $('referralCodeValue').textContent;
+  const url = `${window.location.origin}/?ref=${code}`;
+  if (navigator.share) { try { await navigator.share({ title: 'Emysa', text: `Use my code ${code} on Emysa and we both get bonus calling minutes.`, url }); } catch {} }
+  else { try { await navigator.clipboard.writeText(url); $('referralShareBtn').textContent = 'Link copied!'; setTimeout(() => { $('referralShareBtn').textContent = 'Share'; }, 1500); } catch {} }
+});
+
+// ---------- Call Answering ----------
+async function loadCallAnswering() {
+  const resp = await authedFetch('/api/call-answering');
+  if (!resp.ok) return;
+  const data = await resp.json();
+  setToggle($('callAnsweringToggle'), data.enabled);
+  $('callAnsweringDetails').classList.toggle('hidden', !data.enabled);
+  $('callAnsweringNumber').textContent = data.twilioNumber || 'Not assigned yet';
+  $('callAnsweringGreeting').value = data.greeting || '';
+  $('callAnsweringInstructions').value = data.instructions || '';
+  $('callAnsweringStatus').textContent = '';
+}
+$('callAnsweringToggle').addEventListener('click', async () => {
+  const turningOn = !$('callAnsweringToggle').classList.contains('on');
+  $('callAnsweringStatus').textContent = turningOn ? 'Setting up your number…' : 'Turning off…';
+  const resp = await authedFetch(`/api/call-answering?action=${turningOn ? 'enable' : 'disable'}`, { method: 'POST' });
+  const data = await resp.json();
+  if (!resp.ok) { $('callAnsweringStatus').textContent = data.error || 'Something went wrong.'; return; }
+  await loadCallAnswering();
+});
+$('callAnsweringSaveBtn').addEventListener('click', async () => {
+  $('callAnsweringSaveStatus').textContent = 'Saving…';
+  const resp = await authedFetch('/api/call-answering?action=update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ greeting: $('callAnsweringGreeting').value, instructions: $('callAnsweringInstructions').value }),
+  });
+  const data = await resp.json();
+  $('callAnsweringSaveStatus').textContent = resp.ok ? 'Saved.' : (data.error || 'Could not save.');
+});
+
+// ---------- Memories ----------
+async function loadMemories() {
+  const resp = await authedFetch('/api/memories');
+  const list = $('memoriesList');
+  list.innerHTML = '';
+  if (!resp.ok) return;
+  const { memories } = await resp.json();
+  if (!memories?.length) {
+    list.innerHTML = `<div class="emptyState"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 21s-7-4.35-9.5-8.5C.7 9 2 5.5 5.5 4.7 8 4.1 10 5.3 12 7.5c2-2.2 4-3.4 6.5-2.8C22 5.5 23.3 9 21.5 12.5 19 16.65 12 21 12 21z"/></svg><div>Nothing yet — after a few calls, useful details Emysa picks up on will show up here.</div></div>`;
+    return;
+  }
+  for (const m of memories) {
+    const el = document.createElement('div');
+    el.className = 'memoryCard';
+    const date = new Date(m.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' });
+    el.innerHTML = `
+      ${m.contactName ? `<div class="memoryContact">${escapeHtml(m.contactName)}</div>` : ''}
+      <div class="memoryContent">${escapeHtml(m.content)}</div>
+      <div class="memoryDate">${date}</div>
+      <button class="memoryDelete" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+    el.querySelector('.memoryDelete').addEventListener('click', async () => {
+      await authedFetch('/api/memories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id }) });
+      loadMemories();
+    });
+    list.appendChild(el);
+  }
+}
+
+// ---------- Call Settings ----------
+async function loadCallSettings() {
+  const resp = await authedFetch('/api/call-settings');
+  if (!resp.ok) return;
+  const data = await resp.json();
+  setToggle($('autoRetryToggle'), data.auto_retry);
+  setToggle($('recordCallsToggle'), data.record_calls);
+  document.querySelectorAll('#ringSecondsGroup .segmentedBtn').forEach((btn) => {
+    btn.classList.toggle('active', Number(btn.dataset.value) === data.ring_seconds);
+  });
+}
+$('autoRetryToggle').addEventListener('click', () => {
+  const on = !$('autoRetryToggle').classList.contains('on');
+  setToggle($('autoRetryToggle'), on);
+  authedFetch('/api/call-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ auto_retry: on }) });
+});
+$('recordCallsToggle').addEventListener('click', () => {
+  const on = !$('recordCallsToggle').classList.contains('on');
+  setToggle($('recordCallsToggle'), on);
+  authedFetch('/api/call-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ record_calls: on }) });
+});
+document.querySelectorAll('#ringSecondsGroup .segmentedBtn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#ringSecondsGroup .segmentedBtn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    authedFetch('/api/call-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ring_seconds: Number(btn.dataset.value) }) });
+  });
+});
+
+// ---------- Archive ----------
+async function loadArchivedChats() {
+  const resp = await authedFetch('/api/assistant?action=sessions&archived=true');
+  const list = $('archivedChatsList');
+  list.innerHTML = '';
+  if (!resp.ok) return;
+  const { sessions } = await resp.json();
+  if (!sessions?.length) {
+    list.innerHTML = `<div class="emptyState"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></svg><div>No archived chats.</div></div>`;
+    return;
+  }
+  for (const s of sessions) {
+    const row = document.createElement('div');
+    row.className = 'profileCard';
+    row.innerHTML = `<div class="cBody"><div class="cValue">${escapeHtml(s.title)}</div></div>`;
+    const restore = document.createElement('button');
+    restore.className = 'secondaryBtn';
+    restore.style.cssText = 'width:auto; padding:8px 14px;';
+    restore.textContent = 'Restore';
+    restore.addEventListener('click', async () => {
+      await authedFetch('/api/assistant?action=archiveSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: s.id, archived: false }) });
+      loadArchivedChats();
+    });
+    row.appendChild(restore);
+    list.appendChild(row);
+  }
+}
 
 $('permissionsBtn').addEventListener('click', () => {
   refreshPermissionsSheet();
