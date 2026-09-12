@@ -58,11 +58,13 @@ async function speakText(req, res, supabase, userId) {
     });
     if (!resp.ok) {
       const detail = await resp.text().catch(() => '');
+      console.error(`speakText: Fish Audio TTS rejected the request (status ${resp.status}):`, detail.slice(0, 500));
       return res.status(502).json({ error: 'Speech generation failed', detail: detail.slice(0, 300) });
     }
     const audioBuf = Buffer.from(await resp.arrayBuffer());
     return res.status(200).json({ audioBase64: audioBuf.toString('base64'), mimeType: 'audio/mpeg' });
   } catch (err) {
+    console.error('speakText: request to Fish Audio threw:', err);
     return res.status(500).json({ error: 'Speech generation failed', detail: String(err?.message || err).slice(0, 300) });
   }
 }
@@ -386,11 +388,13 @@ async function transcribeAudio(req, res, supabase, userId) {
     });
     if (!resp.ok) {
       const detail = await resp.text().catch(() => '');
+      console.error(`transcribeAudio: Groq Whisper rejected the request (status ${resp.status}):`, detail.slice(0, 500));
       return res.status(502).json({ error: 'Transcription failed', detail });
     }
     const data = await resp.json();
     return res.status(200).json({ text: data.text || '' });
   } catch (err) {
+    console.error('transcribeAudio: request to Groq threw:', err);
     return res.status(500).json({ error: err.message || String(err) });
   }
 }

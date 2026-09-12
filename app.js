@@ -640,7 +640,12 @@ async function speakReply(text) {
       body: JSON.stringify({ text }),
     });
     const data = await resp.json();
-    if (!resp.ok || !assistantCallOpen) return;
+    if (!resp.ok) {
+      console.error('speakReply: /api/assistant?action=speak failed:', resp.status, data?.error, data?.detail);
+      if (assistantCallOpen) appendCallTranscriptLine('ai', `[voice output failed: ${data?.error || resp.status}]`);
+      return;
+    }
+    if (!assistantCallOpen) return;
     if (!assistantAudioEl) assistantAudioEl = new Audio();
     assistantAudioEl.src = `data:${data.mimeType};base64,${data.audioBase64}`;
     await new Promise((resolve) => {
@@ -648,8 +653,11 @@ async function speakReply(text) {
       assistantAudioEl.onerror = resolve;
       assistantAudioEl.play().catch(resolve);
     });
-  } catch {
-    // Voice output failing shouldn't block the text conversation from continuing.
+  } catch (err) {
+    // Voice output failing shouldn't block the text conversation from continuing,
+    // but it should be visible instead of vanishing silently.
+    console.error('speakReply: request threw:', err);
+    if (assistantCallOpen) appendCallTranscriptLine('ai', '[voice output failed: network error]');
   }
 }
 
