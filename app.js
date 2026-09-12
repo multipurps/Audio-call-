@@ -548,7 +548,9 @@ async function sendBrief() {
 
 $('sendBtn').addEventListener('click', sendBrief);
 $('briefInput').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBrief(); }
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendBrief(); }
+  // Plain Enter now inserts a newline (default textarea behavior) instead of
+  // sending — only the send button, or Cmd/Ctrl+Enter, submits the message.
 });
 $('briefInput').addEventListener('input', () => {
   const el = $('briefInput');
