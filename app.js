@@ -1282,7 +1282,6 @@ $('accountBtn').addEventListener('click', () => {
   openSheet('sheet-account');
 });
 $('themeBtn').addEventListener('click', () => openSheet('sheet-theme'));
-$('upgradeBtn').addEventListener('click', () => { loadBillingStatus(); openSheet('sheet-upgrade'); });
 $('referralsBtn').addEventListener('click', () => { loadReferrals(); openSheet('sheet-referrals'); });
 $('callAnsweringBtn').addEventListener('click', () => { loadCallAnswering(); openSheet('sheet-call-answering'); });
 $('memoriesBtn').addEventListener('click', () => { loadMemories(); openSheet('sheet-memories'); });
@@ -1290,37 +1289,6 @@ $('callSettingsBtn').addEventListener('click', () => { loadCallSettings(); openS
 $('contactsBtn').addEventListener('click', () => openSheet('sheet-contacts'));
 $('archiveBtn').addEventListener('click', () => { loadArchivedChats(); openSheet('sheet-archive'); });
 $('getStartedBtn').addEventListener('click', () => openSheet('sheet-get-started'));
-
-// ---------- Upgrade to Pro (Stripe) ----------
-async function loadBillingStatus() {
-  $('upgradeStatus').textContent = '';
-  const resp = await authedFetch('/api/billing');
-  if (!resp.ok) return;
-  const data = await resp.json();
-  const isActive = data.status === 'active' || data.status === 'past_due';
-  $('upgradeSubscribeBtn').classList.toggle('hidden', isActive);
-  $('upgradeManageBtn').classList.toggle('hidden', !isActive);
-  $('upgradeStatus').textContent = isActive
-    ? (data.status === 'past_due' ? "Your last payment didn't go through — update it to keep Pro active." : 'You\'re on Pro. Thanks for the support.')
-    : '';
-}
-$('upgradeSubscribeBtn').addEventListener('click', async () => {
-  $('upgradeSubscribeBtn').disabled = true;
-  $('upgradeStatus').textContent = 'Redirecting to checkout…';
-  const resp = await authedFetch('/api/billing?action=checkout', { method: 'POST' });
-  const data = await resp.json();
-  $('upgradeSubscribeBtn').disabled = false;
-  if (!resp.ok) { $('upgradeStatus').textContent = data.error || 'Could not start checkout.'; return; }
-  window.location.href = data.url;
-});
-$('upgradeManageBtn').addEventListener('click', async () => {
-  $('upgradeManageBtn').disabled = true;
-  const resp = await authedFetch('/api/billing?action=portal', { method: 'POST' });
-  const data = await resp.json();
-  $('upgradeManageBtn').disabled = false;
-  if (!resp.ok) { $('upgradeStatus').textContent = data.error || 'Could not open billing portal.'; return; }
-  window.location.href = data.url;
-});
 
 // ---------- Referrals ----------
 async function loadReferrals() {
@@ -1403,7 +1371,7 @@ async function loadMemories() {
 
 // ---------- Call Settings ----------
 async function loadCallSettings() {
-  const resp = await authedFetch('/api/call-settings');
+  const resp = await authedFetch('/api/call-answering?action=settings');
   if (!resp.ok) return;
   const data = await resp.json();
   setToggle($('autoRetryToggle'), data.auto_retry);
@@ -1415,18 +1383,18 @@ async function loadCallSettings() {
 $('autoRetryToggle').addEventListener('click', () => {
   const on = !$('autoRetryToggle').classList.contains('on');
   setToggle($('autoRetryToggle'), on);
-  authedFetch('/api/call-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ auto_retry: on }) });
+  authedFetch('/api/call-answering?action=settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ auto_retry: on }) });
 });
 $('recordCallsToggle').addEventListener('click', () => {
   const on = !$('recordCallsToggle').classList.contains('on');
   setToggle($('recordCallsToggle'), on);
-  authedFetch('/api/call-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ record_calls: on }) });
+  authedFetch('/api/call-answering?action=settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ record_calls: on }) });
 });
 document.querySelectorAll('#ringSecondsGroup .segmentedBtn').forEach((btn) => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('#ringSecondsGroup .segmentedBtn').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
-    authedFetch('/api/call-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ring_seconds: Number(btn.dataset.value) }) });
+    authedFetch('/api/call-answering?action=settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ring_seconds: Number(btn.dataset.value) }) });
   });
 });
 

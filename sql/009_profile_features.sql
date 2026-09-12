@@ -29,6 +29,10 @@ alter table user_usage add column if not exists bonus_minutes numeric not null d
 -- Billing: Stripe Checkout-based Pro subscription. Status mirrors Stripe's
 -- own subscription status strings (active, past_due, canceled, etc.) and is
 -- kept in sync by api/stripe-webhook.js.
+-- Billing: schema kept for later, but there's currently no api/billing.js
+-- or api/stripe-webhook.js — Vercel's Hobby plan caps a deployment at 12
+-- serverless functions and this app is already at that limit. Add it back
+-- (and this table will already be ready) once on a paid Vercel plan.
 create table if not exists subscriptions (
   user_id uuid primary key references auth.users(id) on delete cascade,
   stripe_customer_id text,

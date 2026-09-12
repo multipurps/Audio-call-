@@ -15,6 +15,9 @@ async function twilioFetch(path, { method = 'GET', body } = {}) {
   return data;
 }
 
+// Combined with Call Settings on purpose: Vercel Hobby caps a deployment at
+// 12 serverless functions, and these are both small "how calls behave"
+// config endpoints — separate files aren't worth the budget.
 export default async function handler(req, res) {
   const supabase = getServiceClient();
   const userId = await getAuthedUserId(req, supabase);
@@ -24,7 +27,35 @@ export default async function handler(req, res) {
   if (action === 'enable') return enable(req, res, supabase, userId);
   if (action === 'disable') return disable(req, res, supabase, userId);
   if (action === 'update') return update(req, res, supabase, userId);
+  if (action === 'settings') return callSettings(req, res, supabase, userId);
   return status(req, res, supabase, userId);
+}
+
+async function callSettings(req, res, supabase, userId) {
+  if (req.method === 'GET') {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('auto_retry, record_calls, ring_seconds')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(200).json({
+      auto_retry: data?.auto_retry ?? true,
+      record_calls: data?.record_calls ?? true,
+      ring_seconds: data?.ring_seconds ?? 25,
+    });
+  }
+  if (req.method === 'POST') {
+    const { auto_retry, record_calls, ring_seconds } = req.body || {};
+    const patch = { user_id: userId, updated_at: new Date().toISOString() };
+    if (typeof auto_retry === 'boolean') patch.auto_retry = auto_retry;
+    if (typeof record_calls === 'boolean') patch.record_calls = record_calls;
+    if (typeof ring_seconds === 'number' && ring_seconds >= 10 && ring_seconds <= 60) patch.ring_seconds = ring_seconds;
+    const { error } = await supabase.from('profiles').upsert(patch, { onConflict: 'user_id' });
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(200).json({ ok: true });
+  }
+  return res.status(405).json({ error: 'GET or POST only' });
 }
 
 async function status(req, res, supabase, userId) {
