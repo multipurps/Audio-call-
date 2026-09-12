@@ -29,6 +29,8 @@ export default async function handler(req, res) {
     case 'send': return sendMessage(req, res, supabase, userId);
     case 'transcribe': return transcribeAudio(req, res, supabase, userId);
     case 'speak': return speakText(req, res, supabase, userId);
+    case 'logCallSummary': return logCallSummary(req, res, supabase, userId);
+    case 'summarizeCall': return summarizeCall(req, res, supabase, userId);
     case 'deleteSession': return deleteSession(req, res, supabase, userId);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
   }
@@ -148,16 +150,17 @@ async function listMessages(req, res, supabase, userId) {
     .select('*')
     .eq('user_id', userId)
     .eq('session_id', sessionId)
+    .neq('source', 'call')
     .order('created_at', { ascending: true })
     .limit(200);
   if (error) return res.status(500).json({ error: error.message });
   return res.status(200).json({ messages: data, sessionId });
 }
 
-async function insertMessage(supabase, userId, sessionId, role, content, callId = null) {
+async function insertMessage(supabase, userId, sessionId, role, content, callId = null, source = 'text') {
   const { data, error } = await supabase
     .from('assistant_messages')
-    .insert({ user_id: userId, session_id: sessionId, role, content, call_id: callId })
+    .insert({ user_id: userId, session_id: sessionId, role, content, call_id: callId, source })
     .select()
     .single();
   if (error) throw new Error(error.message);
@@ -167,8 +170,13 @@ async function insertMessage(supabase, userId, sessionId, role, content, callId 
 
 async function sendMessage(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { text, callerId, sessionId: incomingSessionId } = req.body || {};
+  const { text, callerId, sessionId: incomingSessionId, source } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
+  // 'call' = a live voice turn on the call screen — kept out of the home
+  // chat list (which is meant to read as "what I typed / what got decided",
+  // not a transcript of speaking out loud), but still written to
+  // assistant_messages so the model still has real conversation context.
+  const msgSource = source === 'call' ? 'call' : 'text';
 
   let sessionId = incomingSessionId || null;
   let isNewSession = false;
@@ -183,13 +191,13 @@ async function sendMessage(req, res, supabase, userId) {
     isNewSession = true;
   }
 
-  const userMsg = await insertMessage(supabase, userId, sessionId, 'user', text.trim());
+  const userMsg = await insertMessage(supabase, userId, sessionId, 'user', text.trim(), null, msgSource);
   const newMessages = [userMsg];
   const respond = (extra = {}) => res.status(200).json({ messages: newMessages, sessionId, isNewSession, ...extra });
 
   const falKey = process.env.FAL_KEY;
   if (!falKey) {
-    newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "I'm not fully set up yet — the assistant's API key hasn't been added on the server."));
+    newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "I'm not fully set up yet — the assistant's API key hasn't been added on the server.", null, msgSource));
     return respond();
   }
 
@@ -238,7 +246,7 @@ async function sendMessage(req, res, supabase, userId) {
     intent = JSON.parse(data.choices?.[0]?.message?.content || '{}');
   } catch (err) {
     console.error('assistant intent parse failed:', err);
-    newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "Sorry, I couldn't process that — try again in a moment."));
+    newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "Sorry, I couldn't process that — try again in a moment.", null, msgSource));
     return respond();
   }
 
@@ -276,7 +284,7 @@ async function sendMessage(req, res, supabase, userId) {
         intent.action === 'retry'
           ? "I'm not sure who to call again yet — tell me who you'd like me to call."
           : "What number should I call? You can give me a phone number, or a name from your saved contacts.";
-      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', msg));
+      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', msg, null, msgSource));
       return respond();
     }
 
@@ -289,16 +297,16 @@ async function sendMessage(req, res, supabase, userId) {
     const placed = await placeCall(supabase, userId, { toNumber, objective, contactId: contact?.id || null, callerId: callerId || null, sessionId });
 
     if (placed.error) {
-      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${label}: ${placed.error}`));
+      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${label}: ${placed.error}`, null, msgSource));
       return respond();
     }
 
     const verb = intent.action === 'retry' ? 'again now' : 'now';
-    newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I'm calling ${label} ${verb}.`, placed.call.id));
+    newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I'm calling ${label} ${verb}.`, placed.call.id, msgSource));
     return respond({ callId: placed.call.id, toNumber, contactName: contact?.name || null });
   }
 
-  newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', intent.reply || 'Got it.'));
+  newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', intent.reply || 'Got it.', null, msgSource));
   return respond();
 }
 
@@ -363,6 +371,52 @@ async function placeCall(supabase, userId, { toNumber, objective, contactId, cal
   } catch (err) {
     await supabase.from('calls').update({ status: 'failed' }).eq('id', call.id);
     return { error: err.message || String(err) };
+  }
+}
+
+// Posted once, when a voice call with Emysa ends — the home chat is meant
+// to read like a log of decisions, not a transcript of talking out loud,
+// so instead of leaving every "hey" / "how can I help" turn visible there
+// (those were saved with source:'call' and are filtered out of the list),
+// one clean line goes in summarizing what actually happened.
+async function summarizeCall(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { transcript } = req.body || {};
+  if (!transcript || !transcript.trim()) return res.status(400).json({ error: 'transcript required' });
+  const falKey = process.env.FAL_KEY;
+  if (!falKey) return res.status(200).json({ summary: 'Had a call with Emysa.' });
+  try {
+    const resp = await fetch('https://fal.run/openrouter/router/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Key ${falKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'openai/gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'Summarize this voice call with an assistant in ONE short, plain sentence, third person, as if logging what the user did. No quotes, no preamble.' },
+          { role: 'user', content: transcript.slice(0, 4000) },
+        ],
+        temperature: 0.3,
+        max_tokens: 60,
+      }),
+    });
+    if (!resp.ok) return res.status(200).json({ summary: 'Had a call with Emysa.' });
+    const data = await resp.json();
+    const summary = data.choices?.[0]?.message?.content?.trim();
+    return res.status(200).json({ summary: summary || 'Had a call with Emysa.' });
+  } catch {
+    return res.status(200).json({ summary: 'Had a call with Emysa.' });
+  }
+}
+
+async function logCallSummary(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { sessionId, summary } = req.body || {};
+  if (!sessionId || !summary || !summary.trim()) return res.status(400).json({ error: 'sessionId and summary required' });
+  try {
+    const row = await insertMessage(supabase, userId, sessionId, 'assistant', summary.trim(), null, 'text');
+    return res.status(200).json({ message: row });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 }
 

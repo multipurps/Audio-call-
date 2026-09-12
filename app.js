@@ -478,32 +478,37 @@ $('homeHeaderLogoWrap').addEventListener('click', () => {
   if (activeHeaderCall) openCallScreen(activeHeaderCall.id, activeHeaderCall.toNumber, activeHeaderCall.contactName);
 });
 
-async function sendChatMessage(text, onReply) {
-  appendChatBubble({ id: `local-${Date.now()}`, role: 'user', content: text, created_at: new Date().toISOString() });
-  setHomeChatActive(true);
-  $('homeChat').scrollTop = $('homeChat').scrollHeight;
+async function sendChatMessage(text, onReply, source = 'text') {
+  const isCall = source === 'call';
+  if (!isCall) {
+    appendChatBubble({ id: `local-${Date.now()}`, role: 'user', content: text, created_at: new Date().toISOString() });
+    setHomeChatActive(true);
+    $('homeChat').scrollTop = $('homeChat').scrollHeight;
+  }
 
   const resp = await authedFetch('/api/assistant?action=send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, sessionId: currentChatSessionId }),
+    body: JSON.stringify({ text, sessionId: currentChatSessionId, source }),
   });
   const data = await resp.json();
   if (!resp.ok) {
     const errText = data.error || 'Something went wrong.';
-    appendChatBubble({ id: `err-${Date.now()}`, role: 'assistant', content: errText, created_at: new Date().toISOString() });
+    if (!isCall) appendChatBubble({ id: `err-${Date.now()}`, role: 'assistant', content: errText, created_at: new Date().toISOString() });
     if (onReply) onReply(errText);
     return;
   }
   if (data.sessionId) currentChatSessionId = data.sessionId;
   if (data.callId && data.toNumber) trackActiveCall(data.callId, data.toNumber, data.contactName);
-  // The optimistic user bubble above already shows this turn; mark the
-  // server's saved copy of it as seen (without re-rendering) so the next
-  // poll doesn't draw a second, duplicate copy of the same user message.
-  const savedUserMsg = (data.messages || []).find((m) => m.role === 'user');
-  if (savedUserMsg) homeMessageIds.add(savedUserMsg.id);
   const replies = (data.messages || []).filter((m) => m.role !== 'user');
-  renderHomeMessages(replies, false);
+  if (!isCall) {
+    // The optimistic user bubble above already shows this turn; mark the
+    // server's saved copy of it as seen (without re-rendering) so the next
+    // poll doesn't draw a second, duplicate copy of the same user message.
+    const savedUserMsg = (data.messages || []).find((m) => m.role === 'user');
+    if (savedUserMsg) homeMessageIds.add(savedUserMsg.id);
+    renderHomeMessages(replies, false);
+  }
   if (onReply) onReply(replies.map((m) => m.content).join(' ') || '');
 }
 
@@ -613,6 +618,34 @@ $('homeMenuBtn').addEventListener('click', () => { loadSavedChats(); openSheet('
 let waveRecorder = null;
 let waveChunks = [];
 let assistantCallOpen = false;
+let callTranscriptForSummary = [];
+
+// Turns the ephemeral call-screen transcript into the one line that
+// actually belongs in the home chat log. Skipped entirely if nothing but
+// the opening greeting happened — a call nobody spoke on isn't worth a
+// line in the history.
+async function postCallSummary() {
+  if (callTranscriptForSummary.length === 0 || !currentChatSessionId) return;
+  const transcriptText = callTranscriptForSummary.map((t) => `${t.role === 'user' ? 'You' : 'Emysa'}: ${t.content}`).join('\n');
+  let summary = 'Had a quick call with Emysa.';
+  try {
+    const falResp = await authedFetch('/api/assistant?action=summarizeCall', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transcript: transcriptText }),
+    });
+    const falData = await falResp.json();
+    if (falResp.ok && falData.summary) summary = falData.summary;
+  } catch {}
+  await authedFetch('/api/assistant?action=logCallSummary', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId: currentChatSessionId, summary }),
+  });
+  const resp = await authedFetch(`/api/assistant?action=messages&sessionId=${encodeURIComponent(currentChatSessionId)}`);
+  if (resp.ok) { const { messages } = await resp.json(); renderHomeMessages(messages || [], false); }
+  callTranscriptForSummary = [];
+}
 let assistantListening = false;
 let assistantMuted = false;
 
@@ -664,6 +697,7 @@ async function speakReply(text) {
 function openAssistantCallScreen() {
   assistantCallOpen = true;
   assistantMuted = false;
+  callTranscriptForSummary = [];
   $('callScreen').classList.remove('hidden');
   $('callScreen').classList.add('assistantMode');
   $('callAudioBtn').innerHTML = MORE_BTN_HTML;
@@ -690,6 +724,7 @@ function openAssistantCallScreen() {
     $('callScreen').classList.add('hidden');
     $('callScreen').classList.remove('assistantMode');
     $('callContactAvatar').style.display = '';
+    postCallSummary();
   };
   $('callMuteBtn').onclick = () => {
     assistantMuted = !assistantMuted;
@@ -777,12 +812,14 @@ async function startAssistantListening() {
         if (!assistantCallOpen) return;
         if (resp.ok && data.text?.trim()) {
           appendCallTranscriptLine('user', data.text.trim());
+          callTranscriptForSummary.push({ role: 'user', content: data.text.trim() });
           await sendChatMessage(data.text.trim(), async (reply) => {
             if (assistantCallOpen && reply) {
               appendCallTranscriptLine('ai', reply);
+              callTranscriptForSummary.push({ role: 'assistant', content: reply });
               await speakReply(reply);
             }
-          });
+          }, 'call');
         } else if (!resp.ok) {
           const errText = data.detail ? `${data.error}: ${data.detail}`.slice(0, 300) : (data.error || "Sorry, I didn't catch that.");
           appendCallTranscriptLine('ai', errText);
