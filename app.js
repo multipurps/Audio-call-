@@ -886,15 +886,13 @@ async function startAssistantListening() {
           }, 'call');
         } else if (!resp.ok) {
           const errText = data.detail ? `${data.error}: ${data.detail}`.slice(0, 300) : (data.error || "Sorry, I didn't catch that.");
+          // Errors are shown in the transcript, never spoken — Emysa's voice
+          // is reserved for actual replies, not failure messages.
           appendCallTranscriptLine('ai', errText);
-          await speakReply(data.error === 'Transcription failed' ? "Sorry, I didn't catch that." : errText);
         }
       } catch (err) {
-        // A silent failure here used to mean the whole turn just vanished
-        // with no feedback at all — now it always shows something.
         if (assistantCallOpen) {
           appendCallTranscriptLine('ai', "Sorry, something went wrong there — try again.");
-          await speakReply("Sorry, something went wrong there — try again.");
         }
       }
       if (assistantCallOpen && !assistantMuted) startAssistantListening();
