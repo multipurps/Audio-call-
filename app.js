@@ -661,7 +661,25 @@ function appendCallTranscriptLine(speaker, content) {
 // Actually speaks the assistant's line out loud on the call screen — text
 // alone isn't a voice conversation. Resolves once playback ends (or on
 // failure) so the mic doesn't start listening again over Emysa's own voice.
-let assistantAudioEl = null;
+//
+// Played through an AudioContext buffer, not an <audio> element. iOS Safari
+// infers the audio session category from which media APIs are in play —
+// getUserMedia flips it to "play-and-record", and in that mode Safari
+// silently ducks/attenuates <audio>/SpeechSynthesis output (a long-standing,
+// undocumented WebKit behavior). AudioContext.destination output stays at
+// full volume in that same mode, so decoding and playing the reply through
+// it is what keeps Emysa audible while the mic was just active.
+let assistantAudioCtx = null;
+function getAssistantAudioCtx() {
+  if (!assistantAudioCtx) assistantAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return assistantAudioCtx;
+}
+function base64ToArrayBuffer(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
 const AUDIO_BTN_HTML = '<div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M16 9C16.5 9.5 17 10.5 17 12C17 13.5 16.5 14.5 16 15M19 6C20.5 7.5 21 10 21 12C21 14 20.5 16.5 19 18M13 3L7 8H5C3.89543 8 3 8.89543 3 10V14C3 15.1046 3.89543 16 5 16H7L13 21V3Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>\n          Speaker';
 const MORE_BTN_HTML = '<div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg></div>\n          More';
 async function speakReply(text) {
@@ -679,12 +697,15 @@ async function speakReply(text) {
       return;
     }
     if (!assistantCallOpen) return;
-    if (!assistantAudioEl) assistantAudioEl = new Audio();
-    assistantAudioEl.src = `data:${data.mimeType};base64,${data.audioBase64}`;
+    const ctx = getAssistantAudioCtx();
+    if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
+    const audioBuffer = await ctx.decodeAudioData(base64ToArrayBuffer(data.audioBase64));
     await new Promise((resolve) => {
-      assistantAudioEl.onended = resolve;
-      assistantAudioEl.onerror = resolve;
-      assistantAudioEl.play().catch(resolve);
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(ctx.destination);
+      source.onended = resolve;
+      try { source.start(); } catch { resolve(); }
     });
   } catch (err) {
     // Voice output failing shouldn't block the text conversation from continuing,
@@ -844,14 +865,17 @@ async function startAssistantListening() {
 
 $('homeWaveBtn').addEventListener('click', () => {
   // iOS Safari only allows audio playback that traces back to a direct,
-  // synchronous tap — a .play() call after any await (like the network
-  // fetch to generate speech) gets silently blocked. Priming the element
-  // with a play/pause right here, inside the real tap, unlocks it for
-  // every later programmatic .play() on this same element for the rest
-  // of the call, even from deep inside async code.
-  if (!assistantAudioEl) assistantAudioEl = new Audio();
-  assistantAudioEl.play().catch(() => {});
-  assistantAudioEl.pause();
+  // synchronous tap — resuming/creating the AudioContext after any await
+  // (like the network fetch to generate speech) gets silently blocked.
+  // Doing it here, inside the real tap, unlocks every later programmatic
+  // buffer playback on this same context for the rest of the call, even
+  // from deep inside async code.
+  const ctx = getAssistantAudioCtx();
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  // Explicit hint for iOS 17+: Safari otherwise infers the category from
+  // whichever media API ran most recently, which is what causes the
+  // ducking in the first place. Feature-detected — older iOS ignores it.
+  if ('audioSession' in navigator) { try { navigator.audioSession.type = 'play-and-record'; } catch {} }
   openAssistantCallScreen();
 });
 
