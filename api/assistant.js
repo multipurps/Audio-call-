@@ -232,11 +232,13 @@ async function sendMessage(req, res, supabase, userId) {
     contactsList,
     memoriesList ? `\nThings worth remembering about this user from past calls:\n${memoriesList}` : '',
     '',
+    "About the app, for when the user asks (answer naturally and conversationally in \"reply\" — don't deflect these to a phone-number prompt): this app lets you tell Emysa (you) who to call and what to say, then Emysa places a real phone call and carries the conversation. You can call any phone number or a saved contact, ask for the same person again with something like \"call him again\", and Emysa remembers context from past calls to inform future ones.",
+    '',
     'Reply with ONLY a JSON object, no other text, matching this shape:',
     '{"action":"call"|"retry"|"reply","phoneNumber":string|null,"contactName":string|null,"objective":string|null,"reply":string|null}',
     '- action "call": the user wants you to call someone new. If they gave you an actual phone number in their message, put the digits (with country code if given, e.g. "+15551234567") in phoneNumber. Otherwise, if they named someone from the saved contacts list, put your best guess at that name in contactName. objective is a short phrase describing what to say or ask on the call — if they also gave any tone or manner direction (stay calm, keep it light, let it flow naturally, be quick about it, etc.), include that in objective too, don\'t drop it.',
     '- action "retry": the user wants you to call the same person again (e.g. "call him again", "try it again").',
-    '- action "reply": anything else, including if they want to call someone but haven\'t given you a number or a known contact yet — ask for the phone number in "reply".',
+    '- action "reply": anything else — general conversation, questions about you or the app, small talk, or a call request with no number/contact given yet. Answer naturally and helpfully in "reply". Only ask for a phone number or contact name if they\'ve actually expressed intent to make a call but haven\'t said who.',
   ].filter(Boolean).join('\n');
 
   const chatMessages = [
@@ -267,13 +269,17 @@ async function sendMessage(req, res, supabase, userId) {
 
   if (intent.action === 'call' || intent.action === 'retry') {
     let contact = null;
+    let retryToNumber = null;
+    let retryObjective = null;
 
     if (intent.action === 'retry') {
+      // Previously only found a "last call" when it was to a saved contact
+      // (`.not('contact_id','is',null)`), so retrying a raw phone number you
+      // just dialed found nothing. Now it remembers the last call either way.
       const { data: lastCall } = await supabase
         .from('calls')
-        .select('contact_id')
+        .select('contact_id,to_number,objective')
         .eq('user_id', userId)
-        .not('contact_id', 'is', null)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -281,6 +287,8 @@ async function sendMessage(req, res, supabase, userId) {
         const { data: c } = await supabase.from('contacts').select('*').eq('id', lastCall.contact_id).maybeSingle();
         contact = c;
       }
+      retryToNumber = lastCall?.to_number || null;
+      retryObjective = lastCall?.objective || null;
     } else if (!intent.phoneNumber) {
       const name = (intent.contactName || '').trim().toLowerCase();
       if (name) {
@@ -291,8 +299,8 @@ async function sendMessage(req, res, supabase, userId) {
       }
     }
 
-    const toNumber = intent.phoneNumber || contact?.phone_number || null;
-    const label = contact?.name || intent.phoneNumber;
+    const toNumber = intent.phoneNumber || contact?.phone_number || retryToNumber || null;
+    const label = contact?.name || intent.phoneNumber || retryToNumber;
 
     if (!toNumber) {
       const msg =
@@ -303,7 +311,7 @@ async function sendMessage(req, res, supabase, userId) {
       return respond();
     }
 
-    let objective = intent.objective || 'Say hello and share what the user wants to talk about.';
+    let objective = intent.objective || (intent.action === 'retry' ? retryObjective : null) || 'Say hello and share what the user wants to talk about.';
     const { data: langProfile } = await supabase.from('profiles').select('language').eq('user_id', userId).maybeSingle();
     if (langProfile?.language && langProfile.language !== 'en') {
       const langName = LANGUAGE_NAMES[langProfile.language] || langProfile.language;
@@ -382,6 +390,8 @@ async function placeCall(supabase, userId, { toNumber, objective, contactId, cal
       body,
     });
     if (!twilioResp.ok) {
+      const detail = await twilioResp.text().catch(() => '');
+      console.error(`placeCall: Twilio rejected the call (status ${twilioResp.status}):`, detail.slice(0, 500));
       await supabase.from('calls').update({ status: 'failed' }).eq('id', call.id);
       return { error: 'call provider rejected the call' };
     }
