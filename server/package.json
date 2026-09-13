@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "main": "relay.js",
+  "main": "patter-relay.js",
   "scripts": {
-    "start": "node relay.js"
+    "start": "node patter-relay.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
