@@ -188,7 +188,6 @@ $('bgFileInput').addEventListener('change', async (e) => {
     : (confirmData.error || 'Could not save the upload.');
   if (confirmResp.ok) loadBackgrounds();
 });
-}
 
 // ---------- announcements ----------
 $('announceSendBtn').addEventListener('click', async () => {

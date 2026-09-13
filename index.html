@@ -64,7 +64,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-09-09.5').catch(function (err) {
+        import('./app.js?v=2026-09-09.6').catch(function (err) {
           showBootError('Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
