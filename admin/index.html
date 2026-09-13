@@ -105,7 +105,13 @@
   // that instead of the static tag when something needs to be debugged.
   window.addEventListener('error', (e) => showBootFailure('Script error', e.error || e.message));
   window.addEventListener('unhandledrejection', (e) => showBootFailure('Unhandled rejection', e.reason));
-  import('./admin.js').catch((err) => showBootFailure('Failed to load admin.js', err));
+  // A plain "./admin.js" URL is cached aggressively by the browser (module
+  // specifiers especially so, on top of normal HTTP caching) — a redeploy
+  // alone doesn't guarantee a re-fetch, particularly for an installed
+  // standalone app. Tying the import to a version string that changes
+  // every deploy forces a genuinely new request each time instead of
+  // silently continuing to run whatever was cached from before.
+  import(`./admin.js?v=2026-09-09.5`).catch((err) => showBootFailure('Failed to load admin.js', err));
 </script>
 <script>
   if ('serviceWorker' in navigator) {
