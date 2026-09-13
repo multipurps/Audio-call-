@@ -30,6 +30,16 @@ const SUPABASE_URL = 'https://gucblbvfzuraaozswfwd.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1Y2JsYnZmenVyYWFvenN3ZndkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0NzQ0ODQsImV4cCI6MjA5MTA1MDQ4NH0.OCsEC_FfOJmoL5sQWP8zYnw9SmWuy4xggfcpIIxQw-c';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Supabase auto-refreshes the underlying access token in the background, but
+// this app kept its own separate copy in `currentSession` that was only ever
+// set once at sign-in — so an hour into any session, every request kept
+// using the original, now-expired token and every call failed with "Not
+// signed in". This keeps currentSession pointed at whatever token is
+// actually current.
+supabase.auth.onAuthStateChange((_event, session) => {
+  if (session) currentSession = session;
+});
+
 const $ = (id) => document.getElementById(id);
 
 // Referral capture: ?ref=CODE on first load gets stashed until sign-up
@@ -518,7 +528,10 @@ async function sendChatMessage(text, onReply, source = 'text') {
   const data = await resp.json();
   if (!resp.ok) {
     const errText = data.error || 'Something went wrong.';
-    if (!isCall) appendChatBubble({ id: `err-${Date.now()}`, role: 'assistant', content: errText, created_at: new Date().toISOString() });
+    if (!isCall) {
+      appendChatBubble({ id: `err-${Date.now()}`, role: 'assistant', content: errText, created_at: new Date().toISOString() });
+      $('homeChat').scrollTop = $('homeChat').scrollHeight;
+    }
     if (onReply) onReply(errText);
     return;
   }
