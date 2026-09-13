@@ -1,4 +1,4 @@
-import { createClient } from './vendor/supabase.js';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // Installed PWAs (especially iOS "Add to Home Screen") can keep showing a
 // stale build after a new deploy, since there's no browser reload gesture
