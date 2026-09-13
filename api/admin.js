@@ -17,7 +17,8 @@ export default async function handler(req, res) {
   switch (action) {
     case 'list-users': return listUsers(req, res, supabase);
     case 'set-approval': return setApproval(req, res, supabase);
-    case 'upload-background': return uploadBackground(req, res, supabase);
+    case 'create-background-upload': return createBackgroundUpload(req, res, supabase);
+    case 'confirm-background': return confirmBackground(req, res, supabase);
     case 'delete-background': return deleteBackground(req, res, supabase);
     case 'analytics': return analytics(req, res, supabase);
     case 'send-announcement': return sendAnnouncement(req, res, supabase);
@@ -76,27 +77,39 @@ async function setApproval(req, res, supabase) {
   return res.status(200).json({ ok: true });
 }
 
-async function uploadBackground(req, res, supabase) {
+// Vercel serverless functions hard-cap request bodies at 4.5MB (platform
+// limit — not configurable), so a video can never be sent here as a base64
+// JSON body the way small background images used to be. Instead: hand the
+// admin panel a short-lived signed upload URL and let the browser PUT the
+// file straight to Supabase Storage, bypassing this function's body limit
+// entirely. confirmBackground() below then just records the small resulting
+// URL once that direct upload has finished.
+async function createBackgroundUpload(req, res, supabase) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { imageBase64, mimeType } = req.body || {};
-  if (!imageBase64) return res.status(400).json({ error: 'imageBase64 required' });
-  const ext = (mimeType || 'image/jpeg').split('/')[1] || 'jpg';
-  const path = `auth-backgrounds/${randomUUID()}.${ext}`;
-  const bytes = Buffer.from(imageBase64, 'base64');
-  if (bytes.length > 8 * 1024 * 1024) return res.status(400).json({ error: 'Image too large (max 8MB)' });
+  const { mimeType, mediaType } = req.body || {};
+  if (!mimeType) return res.status(400).json({ error: 'mimeType required' });
+  const ext = (mimeType.split('/')[1] || 'bin').split(';')[0];
+  const folder = mediaType === 'video' ? 'auth-backgrounds/video' : 'auth-backgrounds/image';
+  const path = `${folder}/${randomUUID()}.${ext}`;
 
-  const { error: uploadErr } = await supabase.storage
-    .from('app-assets')
-    .upload(path, bytes, { contentType: mimeType || 'image/jpeg', upsert: false });
-  if (uploadErr) return res.status(500).json({ error: uploadErr.message });
+  const { data, error } = await supabase.storage.from('app-assets').createSignedUploadUrl(path);
+  if (error) return res.status(500).json({ error: error.message });
+
+  return res.status(200).json({ path: data.path, token: data.token });
+}
+
+async function confirmBackground(req, res, supabase) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { path, mediaType } = req.body || {};
+  if (!path) return res.status(400).json({ error: 'path required' });
 
   const { data: pub } = supabase.storage.from('app-assets').getPublicUrl(path);
-  const { data: row, error: insertErr } = await supabase
+  const { data: row, error } = await supabase
     .from('auth_backgrounds')
-    .insert({ url: pub.publicUrl, storage_path: path })
+    .insert({ url: pub.publicUrl, storage_path: path, media_type: mediaType === 'video' ? 'video' : 'image' })
     .select()
     .single();
-  if (insertErr) return res.status(500).json({ error: insertErr.message });
+  if (error) return res.status(500).json({ error: error.message });
 
   return res.status(200).json({ ok: true, row });
 }

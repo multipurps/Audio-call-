@@ -17,7 +17,7 @@
   .adminHeader img{width:56px; height:56px; border-radius:16px; margin:0 auto 10px;}
   .bgGrid{display:grid; grid-template-columns:repeat(3,1fr); gap:8px;}
   .bgCard{position:relative; border-radius:12px; overflow:hidden; border:1px solid var(--line); aspect-ratio:9/16; background:var(--panel);}
-  .bgCard img{width:100%; height:100%; object-fit:cover; display:block;}
+  .bgCard img, .bgCard video{width:100%; height:100%; object-fit:cover; display:block;}
   .bgCard button{position:absolute; top:5px; right:5px; width:22px; height:22px; border-radius:50%; background:rgba(0,0,0,0.6); color:#fff; font-size:12px; display:flex; align-items:center; justify-content:center;}
   .minuteLimitRow{display:flex; align-items:center; gap:6px; margin-top:8px;}
   .minuteLimitRow input{width:64px; background:var(--panel); border:1px solid var(--line); border-radius:8px; color:#fff; font-size:13px; padding:6px 8px; text-align:center;}
@@ -68,10 +68,10 @@
 
   <div class="field">
     <label>Welcome, login &amp; signup backgrounds</label>
-    <div style="font-size:12.5px; color:var(--dim); margin-bottom:10px;">Upload as many as you like — the app fades between them automatically.</div>
+    <div style="font-size:12.5px; color:var(--dim); margin-bottom:10px;">Upload images or a short video — video takes over as the background when present; keep clips short and compressed, a few MB at most.</div>
     <div class="bgGrid" id="bgGrid"></div>
-    <button class="secondaryBtn" id="uploadBgBtn" style="margin-top:10px;">Add image</button>
-    <input type="file" id="bgFileInput" accept="image/*" style="display:none;">
+    <button class="secondaryBtn" id="uploadBgBtn" style="margin-top:10px;">Add image or video</button>
+    <input type="file" id="bgFileInput" accept="image/*,video/*" style="display:none;">
     <div class="authHint" id="bgUploadStatus"></div>
   </div>
 
@@ -91,24 +91,28 @@
 </div>
 
 <script>
-  // If admin.js fails to load or throws before it can render anything,
-  // don't leave the screen blank — show something.
-  window.addEventListener('error', (e) => {
+  function showBootFailure(label, err) {
     const boot = document.getElementById('authBoot');
-    if (boot && !boot.classList.contains('hidden')) {
-      boot.innerHTML = `<div style="text-align:center; padding:0 24px; color:#ffb199; font-size:13px;">Script error: ${e.message}</div>`;
-    }
-  });
-  // Async errors (a rejected promise with no .catch) don't fire 'error' —
-  // this is what was actually causing the silent stuck splash screen.
-  window.addEventListener('unhandledrejection', (e) => {
-    const boot = document.getElementById('authBoot');
-    if (boot && !boot.classList.contains('hidden')) {
-      boot.innerHTML = `<div style="text-align:center; padding:0 24px; color:#ffb199; font-size:13px;">${(e.reason && e.reason.message) || e.reason}</div>`;
-    }
-  });
+    if (!boot || boot.classList.contains('hidden')) return;
+    const detail = (err && (err.stack || err.message)) || String(err);
+    boot.innerHTML = `<div style="text-align:left; padding:0 20px; color:#ffb199; font-size:12px; white-space:pre-wrap; word-break:break-word; max-height:70vh; overflow-y:auto;"><b>${label}</b>\n${detail}</div>`;
+  }
+  // A plain <script type="module" src="..."> deliberately hides the real
+  // error on failure (browsers report a generic "SyntaxError: Parser
+  // error" with no file/line/stack, for security reasons) — that's what
+  // was showing here before. A dynamic import() call gives back the
+  // actual rejected error object with a real message and stack, so use
+  // that instead of the static tag when something needs to be debugged.
+  window.addEventListener('error', (e) => showBootFailure('Script error', e.error || e.message));
+  window.addEventListener('unhandledrejection', (e) => showBootFailure('Unhandled rejection', e.reason));
+  // A plain "./admin.js" URL is cached aggressively by the browser (module
+  // specifiers especially so, on top of normal HTTP caching) — a redeploy
+  // alone doesn't guarantee a re-fetch, particularly for an installed
+  // standalone app. Tying the import to a version string that changes
+  // every deploy forces a genuinely new request each time instead of
+  // silently continuing to run whatever was cached from before.
+  import(`./admin.js?v=2026-09-09.6`).catch((err) => showBootFailure('Failed to load admin.js', err));
 </script>
-<script type="module" src="admin.js"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {}));

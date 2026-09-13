@@ -19,6 +19,7 @@
   <div id="authScreen">
     <div class="authBgLayer" id="authBgA"></div>
     <div class="authBgLayer" id="authBgB"></div>
+    <video class="authBgVideo hidden" id="authBgVideo" muted playsinline autoplay></video>
     <div class="authBgOverlay"></div>
 
     <div id="authBoot" style="margin:auto;">
@@ -35,20 +36,40 @@
         var boot = document.getElementById('authBoot');
         if (boot && boot.style.display !== 'none') {
           boot.innerHTML =
-            '<div style="text-align:center; padding:0 24px;">' +
-            '<div style="color:#ffb199; font-size:13px; margin-bottom:14px;">' + message + '</div>' +
-            '<button class="secondaryBtn" onclick="location.reload()" style="width:auto; padding:10px 20px; margin:0 auto;">Retry</button>' +
+            '<div style="text-align:left; padding:0 20px;">' +
+            '<div style="color:#ffb199; font-size:12px; margin-bottom:14px; white-space:pre-wrap; word-break:break-word; max-height:60vh; overflow-y:auto;">' + message + '</div>' +
+            '<button class="secondaryBtn" onclick="location.reload()" style="width:auto; padding:10px 20px; margin:0 auto; display:block;">Retry</button>' +
             '</div>';
         }
       }
-      window.addEventListener('error', function (e) { showBootError('Script error: ' + e.message); });
+      // A plain <script type="module" src="..."> deliberately hides the
+      // real error on failure — browsers report a generic "SyntaxError:
+      // Parser error" with no file/line/stack, for security reasons.
+      // Loading app.js via dynamic import() instead gives back the actual
+      // rejected error object with a real message and stack.
+      window.addEventListener('error', function (e) {
+        var err = e.error || e.message;
+        showBootError('Script error: ' + ((err && err.stack) || (err && err.message) || String(err)));
+      });
       window.addEventListener('unhandledrejection', function (e) {
-        showBootError((e.reason && e.reason.message) || String(e.reason));
+        var err = e.reason;
+        showBootError('Unhandled rejection: ' + ((err && err.stack) || (err && err.message) || String(err)));
       });
       setTimeout(function () {
         var boot = document.getElementById('authBoot');
         if (boot && boot.style.display !== 'none') showBootError('This is taking longer than usual. Check your connection.');
       }, 7000);
+      // Unlike a module <script src>, dynamic import() doesn't wait for the
+      // DOM on its own — app.js expects elements to already exist, so this
+      // has to wait for DOMContentLoaded just like the original tag's
+      // (implicit, built-in) deferred timing did.
+      function loadApp() {
+        import('./app.js?v=2026-09-09.6').catch(function (err) {
+          showBootError('Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
+        });
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadApp);
+      else loadApp();
     </script>
 
     <div id="panelGetStarted" class="authPanel gsPanel">
@@ -881,8 +902,6 @@
     <div id="savedChatsList"></div>
   </div>
 </div>
-
-<script type="module" src="app.js"></script>
 
 </body>
 </html>
