@@ -91,24 +91,22 @@
 </div>
 
 <script>
-  // If admin.js fails to load or throws before it can render anything,
-  // don't leave the screen blank — show something.
-  window.addEventListener('error', (e) => {
+  function showBootFailure(label, err) {
     const boot = document.getElementById('authBoot');
-    if (boot && !boot.classList.contains('hidden')) {
-      boot.innerHTML = `<div style="text-align:center; padding:0 24px; color:#ffb199; font-size:13px;">Script error: ${e.message}</div>`;
-    }
-  });
-  // Async errors (a rejected promise with no .catch) don't fire 'error' —
-  // this is what was actually causing the silent stuck splash screen.
-  window.addEventListener('unhandledrejection', (e) => {
-    const boot = document.getElementById('authBoot');
-    if (boot && !boot.classList.contains('hidden')) {
-      boot.innerHTML = `<div style="text-align:center; padding:0 24px; color:#ffb199; font-size:13px;">${(e.reason && e.reason.message) || e.reason}</div>`;
-    }
-  });
+    if (!boot || boot.classList.contains('hidden')) return;
+    const detail = (err && (err.stack || err.message)) || String(err);
+    boot.innerHTML = `<div style="text-align:left; padding:0 20px; color:#ffb199; font-size:12px; white-space:pre-wrap; word-break:break-word; max-height:70vh; overflow-y:auto;"><b>${label}</b>\n${detail}</div>`;
+  }
+  // A plain <script type="module" src="..."> deliberately hides the real
+  // error on failure (browsers report a generic "SyntaxError: Parser
+  // error" with no file/line/stack, for security reasons) — that's what
+  // was showing here before. A dynamic import() call gives back the
+  // actual rejected error object with a real message and stack, so use
+  // that instead of the static tag when something needs to be debugged.
+  window.addEventListener('error', (e) => showBootFailure('Script error', e.error || e.message));
+  window.addEventListener('unhandledrejection', (e) => showBootFailure('Unhandled rejection', e.reason));
+  import('./admin.js').catch((err) => showBootFailure('Failed to load admin.js', err));
 </script>
-<script type="module" src="admin.js"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {}));
