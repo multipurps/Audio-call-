@@ -28,6 +28,7 @@ export default async function handler(req, res) {
     case 'archiveSession': return archiveSession(req, res, supabase, userId);
     case 'messages': return listMessages(req, res, supabase, userId);
     case 'send': return sendMessage(req, res, supabase, userId);
+    case 'sendImage': return sendImage(req, res, supabase, userId);
     case 'transcribe': return transcribeAudio(req, res, supabase, userId);
     case 'speak': return speakText(req, res, supabase, userId);
     case 'logCallSummary': return logCallSummary(req, res, supabase, userId);
@@ -178,6 +179,75 @@ async function insertMessage(supabase, userId, sessionId, role, content, callId 
   if (error) throw new Error(error.message);
   await supabase.from('chat_sessions').update({ updated_at: new Date().toISOString() }).eq('id', sessionId);
   return data;
+}
+
+// Handles a photo sent from the call screen's "More" menu (Camera/Photos).
+// Uses the same openai/gpt-4o-mini model as text turns, which is
+// vision-capable, so this isn't a separate/lesser model - just a different
+// content shape (image_url instead of plain text) in the same chat
+// completion call used everywhere else in this file.
+async function sendImage(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { imageBase64, mimeType, caption, sessionId: incomingSessionId, source } = req.body || {};
+  if (!imageBase64) return res.status(400).json({ error: 'imageBase64 required' });
+  const msgSource = source === 'call' ? 'call' : 'text';
+  const falKey = process.env.FAL_KEY;
+  if (!falKey) return res.status(500).json({ error: 'Vision not configured (missing FAL_KEY)' });
+
+  let sessionId = incomingSessionId || null;
+  let isNewSession = false;
+  if (!sessionId) {
+    const { data: session, error } = await supabase
+      .from('chat_sessions')
+      .insert({ user_id: userId, title: 'Photo' })
+      .select()
+      .single();
+    if (error) return res.status(500).json({ error: error.message });
+    sessionId = session.id;
+    isNewSession = true;
+  }
+
+  const newMessages = [];
+  newMessages.push(await insertMessage(supabase, userId, sessionId, 'user', caption?.trim() || '📷 Sent a photo', null, msgSource));
+
+  const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
+  let reply = "Sorry, I couldn't look at that just now.";
+  try {
+    const resp = await fetch('https://fal.run/openrouter/router/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Key ${falKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'openai/gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content:
+              "You are Emysa, a helpful voice assistant. The user just shared a photo with you. Respond to what's actually in it naturally and conversationally, in 1-3 sentences, as if speaking out loud on a phone call.",
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: caption?.trim() || "Here's a photo." },
+              { type: 'image_url', image_url: { url: dataUrl } },
+            ],
+          },
+        ],
+        temperature: 0.5,
+      }),
+    });
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '');
+      console.error(`sendImage: vision request rejected (status ${resp.status}):`, detail.slice(0, 500));
+    } else {
+      const data = await resp.json();
+      reply = data.choices?.[0]?.message?.content?.trim() || reply;
+    }
+  } catch (err) {
+    console.error('sendImage: vision request threw:', err);
+  }
+
+  newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', reply, null, msgSource));
+  return res.status(200).json({ messages: newMessages, sessionId, isNewSession });
 }
 
 async function sendMessage(req, res, supabase, userId) {
