@@ -579,8 +579,13 @@ $('briefInput').addEventListener('input', () => {
 function syncHomeChatPadding() {
   const bar = $('homeInputBar');
   if (!bar) return;
-  const barHeight = bar.getBoundingClientRect().height || 56;
-  document.documentElement.style.setProperty('--home-chat-pad', `${barHeight + 40}px`);
+  // The input bar floats above the tab bar (bottom: tabbar-h + 14px), so its
+  // own height alone isn't enough padding - that ignored the tab bar's
+  // reserved space entirely and let messages render behind both bars.
+  // Measuring the actual gap from the bar's top edge to the screen bottom
+  // captures that reserved space regardless of how it's composed.
+  const gap = window.innerHeight - bar.getBoundingClientRect().top + 16;
+  document.documentElement.style.setProperty('--home-chat-pad', `${gap}px`);
 }
 window.addEventListener('resize', syncHomeChatPadding);
 syncHomeChatPadding();
@@ -778,7 +783,16 @@ function openAssistantCallScreen() {
   $('callScreen').classList.remove('hidden');
   $('callScreen').classList.add('assistantMode');
   $('callAudioBtn').innerHTML = MORE_BTN_HTML;
-  $('callAudioBtn').onclick = () => {};
+  $('callAudioBtn').onclick = async () => {
+    const text = callTranscriptForSummary.map((t) => `${t.role === 'user' ? 'You' : 'Emysa'}: ${t.content}`).join('\n');
+    const label = $('callAudioBtn').querySelector('.callBtnCircle')?.nextSibling;
+    try {
+      await navigator.clipboard.writeText(text || '(nothing said yet)');
+      if (label) { const prev = label.textContent; label.textContent = 'Copied'; setTimeout(() => { label.textContent = prev; }, 1200); }
+    } catch {
+      if (label) { const prev = label.textContent; label.textContent = "Can't copy"; setTimeout(() => { label.textContent = prev; }, 1200); }
+    }
+  };
   $('callContactAvatar').style.display = 'none';
   $('callTitleText').textContent = 'Emysa';
   $('transcriptPanel').innerHTML = '';

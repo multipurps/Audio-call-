@@ -301,8 +301,8 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .callBtn.active .callBtnCircle{background:#fff; border-color:#fff;}
 .callBtn.active svg{color:#000;}
 .callBtn.endCall .callBtnCircle{
-  background:radial-gradient(120% 120% at 30% 25%, #ff7a63, #e2453a 65%);
-  border:none; box-shadow:0 6px 18px -4px rgba(226,69,58,0.65);
+  background:#880808;
+  border:none; box-shadow:0 6px 18px -4px rgba(136,8,8,0.65);
 }
 .callBtn.endCall svg{width:31px; height:31px;}
 .callBtn.disabled{opacity:0.35;}
