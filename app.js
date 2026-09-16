@@ -579,8 +579,13 @@ $('briefInput').addEventListener('input', () => {
 function syncHomeChatPadding() {
   const bar = $('homeInputBar');
   if (!bar) return;
-  const barHeight = bar.getBoundingClientRect().height || 56;
-  document.documentElement.style.setProperty('--home-chat-pad', `${barHeight + 40}px`);
+  // The input bar floats above the tab bar (bottom: tabbar-h + 14px), so its
+  // own height alone isn't enough padding - that ignored the tab bar's
+  // reserved space entirely and let messages render behind both bars.
+  // Measuring the actual gap from the bar's top edge to the screen bottom
+  // captures that reserved space regardless of how it's composed.
+  const gap = window.innerHeight - bar.getBoundingClientRect().top + 16;
+  document.documentElement.style.setProperty('--home-chat-pad', `${gap}px`);
 }
 window.addEventListener('resize', syncHomeChatPadding);
 syncHomeChatPadding();
@@ -771,6 +776,89 @@ async function speakReply(text) {
   }
 }
 
+// "More" menu on the Emysa call screen - lets you send a photo (camera or
+// library) for Emysa to actually look at, via the vision-capable model
+// (openai/gpt-4o-mini through the same fal.ai proxy used for text turns).
+let callMoreMenuEl = null;
+function openCallMoreMenu() {
+  if (callMoreMenuEl) return;
+  const menu = document.createElement('div');
+  menu.className = 'callMoreMenu';
+  menu.innerHTML = `
+    <button type="button" data-mode="camera">Camera</button>
+    <button type="button" data-mode="library">Photos</button>
+    <button type="button" data-mode="cancel">Cancel</button>
+  `;
+  document.body.appendChild(menu);
+  callMoreMenuEl = menu;
+
+  const close = () => { menu.remove(); callMoreMenuEl = null; };
+  menu.querySelector('[data-mode="cancel"]').onclick = close;
+  menu.querySelector('[data-mode="camera"]').onclick = () => { close(); pickCallPhoto(true); };
+  menu.querySelector('[data-mode="library"]').onclick = () => { close(); pickCallPhoto(false); };
+}
+
+function pickCallPhoto(useCamera) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  if (useCamera) input.capture = 'environment';
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (file) await sendCallPhoto(file);
+  };
+  input.click();
+}
+
+// Phone-camera photos can be several MB - well over what's sensible to
+// base64 and post from a serverless function - so this downsizes to a
+// reasonable max dimension before sending, same as any normal image upload.
+function resizeImageForUpload(file, maxDim = 1280) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', 0.82).split(',')[1]);
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+async function sendCallPhoto(file) {
+  if (!assistantCallOpen) return;
+  appendCallTranscriptLine('user', '📷 Sent a photo');
+  try {
+    const imageBase64 = await resizeImageForUpload(file);
+    const resp = await authedFetch('/api/assistant?action=sendImage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageBase64, mimeType: 'image/jpeg', sessionId: currentChatSessionId, source: 'call' }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      appendCallTranscriptLine('ai', data.error || "Sorry, I couldn't look at that.");
+      return;
+    }
+    if (data.sessionId) currentChatSessionId = data.sessionId;
+    const reply = (data.messages || []).find((m) => m.role === 'assistant')?.content;
+    if (reply && assistantCallOpen) {
+      appendCallTranscriptLine('ai', reply);
+      callTranscriptForSummary.push({ role: 'user', content: '[sent a photo]' }, { role: 'assistant', content: reply });
+      await speakReply(reply);
+    }
+  } catch (err) {
+    console.error('sendCallPhoto failed:', err);
+    if (assistantCallOpen) appendCallTranscriptLine('ai', "Sorry, something went wrong sending that.");
+  }
+}
+
 function openAssistantCallScreen() {
   assistantCallOpen = true;
   assistantMuted = false;
@@ -778,7 +866,7 @@ function openAssistantCallScreen() {
   $('callScreen').classList.remove('hidden');
   $('callScreen').classList.add('assistantMode');
   $('callAudioBtn').innerHTML = MORE_BTN_HTML;
-  $('callAudioBtn').onclick = () => {};
+  $('callAudioBtn').onclick = () => openCallMoreMenu();
   $('callContactAvatar').style.display = 'none';
   $('callTitleText').textContent = 'Emysa';
   $('transcriptPanel').innerHTML = '';
@@ -1001,6 +1089,9 @@ function openCallScreen(callId, toNumber, contactName) {
   $('callAudioBtn').innerHTML = AUDIO_BTN_HTML;
   $('callFaceTimeBtn').onclick = () => {
     alert('FaceTime video calls are a Pro feature — upgrade to unlock video.');
+  };
+  $('callAddBtn').onclick = () => {
+    alert("Adding another person to the call isn't available yet.");
   };
   $('callContactAvatar').style.display = '';
   const displayName = contactName || toNumber;
