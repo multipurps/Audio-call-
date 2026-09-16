@@ -284,11 +284,11 @@ async function finalizeCall(callId, ctx, transcript) {
       role: h.speaker === 'ai' ? 'assistant' : 'user',
       content: h.content,
     }));
-    const resp = await fetch('https://fal.run/openrouter/router/openai/v1/chat/completions', {
+    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: { Authorization: `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'openai/gpt-4o-mini',
+        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
         messages: [{ role: 'system', content: prompt }, ...messages],
         max_tokens: 150,
         response_format: { type: 'json_object' },
@@ -318,7 +318,7 @@ async function finalizeCall(callId, ctx, transcript) {
 // Wire it together
 // ---------------------------------------------------------------------------
 const phone = new Twilio(); // reads TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN
-const patter = new Patter({ carrier: phone });
+const patter = new Patter({ carrier: phone, phoneNumber: process.env.TWILIO_FROM_NUMBER });
 
 // Per-call state Patter doesn't track for us (transcript history, loaded
 // context) keyed by callId — same shape as the old `state` blob, just
@@ -329,13 +329,11 @@ const agent = patter.agent({
   systemPrompt: SYSTEM_PROMPT_TEMPLATE,
   stt: new GroqWhisperSTT({ apiKey: GROQ_API_KEY }),
   llm: new CustomLLM({
-    baseUrl: 'https://fal.run/openrouter/router/openai/v1',
-    model: 'openai/gpt-4o-mini',
+    baseUrl: 'https://api.groq.com/openai/v1',
+    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
     temperature: 0.85,
     maxTokens: 170,
-    // fal.ai uses "Key <token>", not the standard "Bearer <token>" — leave
-    // apiKey/apiKeyEnv unset so CustomLLM doesn't overwrite this with Bearer.
-    extraHeaders: { Authorization: `Key ${FAL_KEY}` },
+    apiKeyEnv: 'GROQ_API_KEY', // Groq uses standard "Bearer <token>", so CustomLLM's default header handling is fine here
   }),
   tts: new FishAudioTelephonyTTS({ apiKey: FISH_API_KEY }),
 });
