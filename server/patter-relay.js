@@ -25,7 +25,7 @@
 // be swapping Groq Whisper for a streaming STT (Deepgram/AssemblyAI/Soniox) —
 // left as-is here on purpose, pending that decision.
 
-import { Patter, Twilio, CustomLLM, FishAudioTTS } from 'getpatter';
+import { Patter, Twilio, CustomLLM } from 'getpatter';
 import { createClient } from '@supabase/supabase-js';
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -119,6 +119,48 @@ function wrapPcm16InWav(pcm, sampleRate = 8000, channels = 1, bitsPerSample = 16
   header.write('data', 36);
   header.writeUInt32LE(dataSize, 40);
   return Buffer.concat([header, pcm]);
+}
+
+// ---------------------------------------------------------------------------
+// TTS: Fish Audio, hand-written to match relay.js's original working call.
+// getpatter's own Fish Audio TTS/STT adapters only exist on the Patter repo's
+// unreleased main branch (confirmed against the actual published npm 0.7.0
+// package — they're not in it), so rather than pull in a git dependency for
+// a pre-1.0 SDK in a live phone service, this replicates the exact request
+// relay.js already made. `setTelephonyCarrier` is duck-typed by Patter's
+// pipeline (checked via `typeof tts.setTelephonyCarrier === 'function'`) —
+// implementing it tells Patter this adapter already emits carrier-ready
+// audio, so it forwards our mulaw bytes as-is instead of trying to resample
+// them as if they were linear PCM.
+// ---------------------------------------------------------------------------
+class FishAudioTelephonyTTS {
+  constructor({ apiKey, voiceId } = {}) {
+    this.apiKey = apiKey;
+    this.voiceId = voiceId;
+    this.carrier = null;
+  }
+
+  setTelephonyCarrier(carrier) {
+    this.carrier = carrier; // 'twilio' — informational only, we only ever emit mulaw@8kHz
+  }
+
+  setVoice(voiceId) {
+    this.voiceId = voiceId || undefined;
+  }
+
+  async *synthesizeStream(text) {
+    const resp = await fetch('https://api.fish.audio/v1/tts', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json', model: 's1' },
+      body: JSON.stringify({
+        text,
+        reference_id: this.voiceId || undefined,
+        format: 'mulaw', // 8kHz mulaw, forwarded to Twilio unmodified
+      }),
+    });
+    if (!resp.ok) return;
+    yield Buffer.from(await resp.arrayBuffer());
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -295,7 +337,7 @@ const agent = patter.agent({
     // apiKey/apiKeyEnv unset so CustomLLM doesn't overwrite this with Bearer.
     extraHeaders: { Authorization: `Key ${FAL_KEY}` },
   }),
-  tts: FishAudioTTS.forTwilio({ apiKey: FISH_API_KEY }),
+  tts: new FishAudioTelephonyTTS({ apiKey: FISH_API_KEY }),
 });
 
 await patter.serve({
@@ -310,10 +352,10 @@ await patter.serve({
     const ctx = await loadCallContext(callId);
     if (!ctx) return;
     callState.set(callId, { ctx, transcript: [] });
+    agent.tts.setVoice(ctx.voiceId);
     return {
       variables: contextToVariables(ctx),
       first_message: ctx.greetingOverride || greeting(),
-      voice: ctx.voiceId || undefined,
     };
   },
 
