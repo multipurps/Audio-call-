@@ -182,17 +182,16 @@ async function insertMessage(supabase, userId, sessionId, role, content, callId 
 }
 
 // Handles a photo sent from the call screen's "More" menu (Camera/Photos).
-// Uses the same openai/gpt-4o-mini model as text turns, which is
-// vision-capable, so this isn't a separate/lesser model - just a different
-// content shape (image_url instead of plain text) in the same chat
-// completion call used everywhere else in this file.
+// Uses Groq's qwen/qwen3.6-27b, a vision-capable model on the same free
+// tier already used for Whisper transcription in this file - no separate
+// paid account needed for this feature.
 async function sendImage(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { imageBase64, mimeType, caption, sessionId: incomingSessionId, source } = req.body || {};
   if (!imageBase64) return res.status(400).json({ error: 'imageBase64 required' });
   const msgSource = source === 'call' ? 'call' : 'text';
-  const falKey = process.env.FAL_KEY;
-  if (!falKey) return res.status(500).json({ error: 'Vision not configured (missing FAL_KEY)' });
+  const groqKey = process.env.GROQ_API_KEY;
+  if (!groqKey) return res.status(500).json({ error: 'Vision not configured (missing GROQ_API_KEY)' });
 
   let sessionId = incomingSessionId || null;
   let isNewSession = false;
@@ -213,11 +212,11 @@ async function sendImage(req, res, supabase, userId) {
   const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
   let reply = "Sorry, I couldn't look at that just now.";
   try {
-    const resp = await fetch('https://fal.run/openrouter/router/openai/v1/chat/completions', {
+    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: { Authorization: `Key ${falKey}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'openai/gpt-4o-mini',
+        model: 'qwen/qwen3.6-27b',
         messages: [
           {
             role: 'system',
@@ -277,8 +276,8 @@ async function sendMessage(req, res, supabase, userId) {
   const newMessages = [userMsg];
   const respond = (extra = {}) => res.status(200).json({ messages: newMessages, sessionId, isNewSession, ...extra });
 
-  const falKey = process.env.FAL_KEY;
-  if (!falKey) {
+  const groqKey = process.env.GROQ_API_KEY;
+  if (!groqKey) {
     newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "I'm not fully set up yet — the assistant's API key hasn't been added on the server.", null, msgSource));
     return respond();
   }
@@ -318,11 +317,11 @@ async function sendMessage(req, res, supabase, userId) {
 
   let intent;
   try {
-    const resp = await fetch('https://fal.run/openrouter/router/openai/v1/chat/completions', {
+    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: { Authorization: `Key ${falKey}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'openai/gpt-4o-mini',
+        model: 'qwen/qwen3.6-27b',
         messages: chatMessages,
         temperature: 0.3,
         response_format: { type: 'json_object' },
@@ -483,14 +482,14 @@ async function summarizeCall(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { transcript } = req.body || {};
   if (!transcript || !transcript.trim()) return res.status(400).json({ error: 'transcript required' });
-  const falKey = process.env.FAL_KEY;
-  if (!falKey) return res.status(200).json({ summary: 'Had a call with Emysa.' });
+  const groqKey = process.env.GROQ_API_KEY;
+  if (!groqKey) return res.status(200).json({ summary: 'Had a call with Emysa.' });
   try {
-    const resp = await fetch('https://fal.run/openrouter/router/openai/v1/chat/completions', {
+    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: { Authorization: `Key ${falKey}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'openai/gpt-4o-mini',
+        model: 'qwen/qwen3.6-27b',
         messages: [
           { role: 'system', content: 'Summarize this voice call with an assistant in ONE short, plain sentence, third person, as if logging what the user did. No quotes, no preamble.' },
           { role: 'user', content: transcript.slice(0, 4000) },
@@ -499,11 +498,16 @@ async function summarizeCall(req, res, supabase, userId) {
         max_tokens: 60,
       }),
     });
-    if (!resp.ok) return res.status(200).json({ summary: 'Had a call with Emysa.' });
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '');
+      console.error(`summarizeCall: request rejected (status ${resp.status}):`, detail.slice(0, 500));
+      return res.status(200).json({ summary: 'Had a call with Emysa.' });
+    }
     const data = await resp.json();
     const summary = data.choices?.[0]?.message?.content?.trim();
     return res.status(200).json({ summary: summary || 'Had a call with Emysa.' });
-  } catch {
+  } catch (err) {
+    console.error('summarizeCall: request threw:', err);
     return res.status(200).json({ summary: 'Had a call with Emysa.' });
   }
 }
