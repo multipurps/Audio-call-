@@ -1090,6 +1090,9 @@ function openCallScreen(callId, toNumber, contactName) {
   $('callFaceTimeBtn').onclick = () => {
     alert('FaceTime video calls are a Pro feature — upgrade to unlock video.');
   };
+  $('callAddBtn').onclick = () => {
+    alert("Adding another person to the call isn't available yet.");
+  };
   $('callContactAvatar').style.display = '';
   const displayName = contactName || toNumber;
   $('callContactAvatar').textContent = (contactName ? contactName[0] : toNumber.replace(/[^0-9]/g, '').slice(-2)) || '?';
