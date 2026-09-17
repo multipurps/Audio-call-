@@ -54,6 +54,7 @@ const $ = (id) => document.getElementById(id);
   }
 })();
 let currentUser = null;
+let userAvatarUrl = null; // cached so home-chat bubbles can show it without a re-fetch per message
 let currentSession = null;
 
 // ---------- iOS PWA true-height fix ----------
@@ -291,6 +292,7 @@ async function redeemPendingReferral() {
 }
 
 function renderAvatar(url) {
+  userAvatarUrl = url || null;
   const el = $('profileAvatarCircle');
   const initial = ($('profileEmailDisplay').textContent || currentUser?.email || '?')[0].toUpperCase();
   if (url) {
@@ -453,6 +455,19 @@ function formatDayLabel(iso) {
 }
 
 function appendChatBubble(m) {
+  const row = document.createElement('div');
+  row.className = `chatMsgRow ${m.role === 'user' ? 'chatMsgRowUser' : 'chatMsgRowAssistant'}`;
+  const avatar = document.createElement('div');
+  avatar.className = 'chatAvatar';
+  if (m.role === 'user') {
+    if (userAvatarUrl) {
+      avatar.innerHTML = `<img src="${userAvatarUrl}" alt="">`;
+    } else {
+      avatar.textContent = (currentUser?.email || '?')[0].toUpperCase();
+    }
+  } else {
+    avatar.innerHTML = `<img src="icon-192.png" alt="">`;
+  }
   const el = document.createElement('div');
   el.className = `chatMsg ${m.role === 'user' ? 'chatMsgUser' : 'chatMsgAssistant'}`;
   el.dataset.created = m.created_at;
@@ -461,7 +476,9 @@ function appendChatBubble(m) {
     el.classList.add('chatMsgTappable');
     el.addEventListener('click', () => openCallFromMessage(m.call_id));
   }
-  $('homeChat').appendChild(el);
+  row.appendChild(avatar);
+  row.appendChild(el);
+  $('homeChat').appendChild(row);
 }
 
 async function openCallFromMessage(callId) {

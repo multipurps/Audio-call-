@@ -288,7 +288,7 @@ async function finalizeCall(callId, ctx, transcript) {
       method: 'POST',
       headers: { Authorization: `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        model: 'qwen/qwen3.8-27b',
         messages: [{ role: 'system', content: prompt }, ...messages],
         max_tokens: 150,
         response_format: { type: 'json_object' },
@@ -334,7 +334,7 @@ const agent = patter.agent({
   stt: new GroqWhisperSTT({ apiKey: GROQ_API_KEY }),
   llm: new CustomLLM({
     baseUrl: 'https://api.groq.com/openai/v1',
-    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    model: 'qwen/qwen3.8-27b',
     temperature: 0.85,
     maxTokens: 170,
     apiKeyEnv: 'GROQ_API_KEY', // Groq uses standard "Bearer <token>", so CustomLLM's default header handling is fine here

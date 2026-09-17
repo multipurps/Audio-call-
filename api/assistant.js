@@ -18,13 +18,11 @@ const LANGUAGE_NAMES = { en: 'English', es: 'Spanish', fr: 'French', pt: 'Portug
 // call to it now fails with model_decommissioned. Voice-input transcription
 // (action=transcribe) still uses Groq Whisper, which is unaffected.
 export default async function handler(req, res) {
-  const action = req.query?.action || req.body?.action;
-  if (action === 'debugGroqModels') return debugGroqModels(req, res);
-
   const supabase = getServiceClient();
   const userId = await getAuthedUserId(req, supabase);
   if (!userId) return res.status(401).json({ error: 'Not signed in' });
 
+  const action = req.query?.action || req.body?.action;
   switch (action) {
     case 'sessions': return listSessions(req, res, supabase, userId);
     case 'archiveSession': return archiveSession(req, res, supabase, userId);
@@ -40,20 +38,6 @@ export default async function handler(req, res) {
   }
 }
 
-async function debugGroqModels(req, res) {
-  const groqKey = process.env.GROQ_API_KEY;
-  if (!groqKey) return res.status(500).json({ error: 'GROQ_API_KEY not set' });
-  try {
-    const resp = await fetch('https://api.groq.com/openai/v1/models', {
-      headers: { Authorization: `Bearer ${groqKey}` },
-    });
-    const data = await resp.json();
-    if (!resp.ok) return res.status(resp.status).json(data);
-    return res.status(200).json({ models: (data.data || []).map((m) => m.id).sort() });
-  } catch (err) {
-    return res.status(500).json({ error: String(err?.message || err) });
-  }
-}
 
 // Synthesizes a short line of text through Fish Audio so the in-app "call"
 // with Emysa is an actual voice back-and-forth, not text you have to read —
@@ -199,7 +183,7 @@ async function insertMessage(supabase, userId, sessionId, role, content, callId 
 }
 
 // Handles a photo sent from the call screen's "More" menu (Camera/Photos).
-// Uses Groq's meta-llama/llama-4-scout-17b-16e-instruct, a vision-capable model on the same free
+// Uses Groq's qwen/qwen3.8-27b, a vision-capable model on the same free
 // tier already used for Whisper transcription in this file - no separate
 // paid account needed for this feature.
 async function sendImage(req, res, supabase, userId) {
@@ -233,7 +217,7 @@ async function sendImage(req, res, supabase, userId) {
       method: 'POST',
       headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        model: 'qwen/qwen3.8-27b',
         messages: [
           {
             role: 'system',
@@ -338,7 +322,7 @@ async function sendMessage(req, res, supabase, userId) {
       method: 'POST',
       headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        model: 'qwen/qwen3.8-27b',
         messages: chatMessages,
         temperature: 0.3,
         response_format: { type: 'json_object' },
@@ -506,7 +490,7 @@ async function summarizeCall(req, res, supabase, userId) {
       method: 'POST',
       headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        model: 'qwen/qwen3.8-27b',
         messages: [
           { role: 'system', content: 'Summarize this voice call with an assistant in ONE short, plain sentence, third person, as if logging what the user did. No quotes, no preamble.' },
           { role: 'user', content: transcript.slice(0, 4000) },
