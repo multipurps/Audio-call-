@@ -340,7 +340,7 @@ const agent = patter.agent({
 
 await patter.serve({
   agent,
-  port: process.env.PORT || 8080,
+  port: Number(process.env.PORT) || 8080,
 
   onCallStart: async (data) => {
     // data.callId — confirm this against Patter's actual onCallStart payload
