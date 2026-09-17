@@ -318,7 +318,11 @@ async function finalizeCall(callId, ctx, transcript) {
 // Wire it together
 // ---------------------------------------------------------------------------
 const phone = new Twilio(); // reads TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN
-const patter = new Patter({ carrier: phone, phoneNumber: process.env.TWILIO_FROM_NUMBER });
+const patter = new Patter({
+  carrier: phone,
+  phoneNumber: process.env.TWILIO_FROM_NUMBER,
+  webhookUrl: process.env.RENDER_EXTERNAL_URL || 'https://audio-call-relay.onrender.com',
+});
 
 // Per-call state Patter doesn't track for us (transcript history, loaded
 // context) keyed by callId — same shape as the old `state` blob, just
