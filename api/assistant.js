@@ -18,11 +18,13 @@ const LANGUAGE_NAMES = { en: 'English', es: 'Spanish', fr: 'French', pt: 'Portug
 // call to it now fails with model_decommissioned. Voice-input transcription
 // (action=transcribe) still uses Groq Whisper, which is unaffected.
 export default async function handler(req, res) {
+  const action = req.query?.action || req.body?.action;
+  if (action === 'debugGroqModels') return debugGroqModels(req, res);
+
   const supabase = getServiceClient();
   const userId = await getAuthedUserId(req, supabase);
   if (!userId) return res.status(401).json({ error: 'Not signed in' });
 
-  const action = req.query?.action || req.body?.action;
   switch (action) {
     case 'sessions': return listSessions(req, res, supabase, userId);
     case 'archiveSession': return archiveSession(req, res, supabase, userId);
@@ -35,6 +37,21 @@ export default async function handler(req, res) {
     case 'summarizeCall': return summarizeCall(req, res, supabase, userId);
     case 'deleteSession': return deleteSession(req, res, supabase, userId);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
+  }
+}
+
+async function debugGroqModels(req, res) {
+  const groqKey = process.env.GROQ_API_KEY;
+  if (!groqKey) return res.status(500).json({ error: 'GROQ_API_KEY not set' });
+  try {
+    const resp = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { Authorization: `Bearer ${groqKey}` },
+    });
+    const data = await resp.json();
+    if (!resp.ok) return res.status(resp.status).json(data);
+    return res.status(200).json({ models: (data.data || []).map((m) => m.id).sort() });
+  } catch (err) {
+    return res.status(500).json({ error: String(err?.message || err) });
   }
 }
 
