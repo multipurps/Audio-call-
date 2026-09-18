@@ -1,0 +1,20 @@
+{
+  "name": "audio-call-social-relay",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "social-relay.js",
+  "scripts": {
+    "start": "node social-relay.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "express": "^4.19.2",
+    "telegram": "^2.22.2",
+    "@queenanya/baileys": "github:QueenAnya/Bail",
+    "qrcode": "^1.5.4"
+  },
+  "optionalDependencies": {
+    "@roamhq/wrtc": "^0.10.0"
+  }
+}

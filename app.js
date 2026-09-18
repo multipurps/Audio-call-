@@ -1417,6 +1417,7 @@ function openSheet(id) {
 }
 function closeSheets() {
   document.querySelectorAll('.sheetScreen').forEach((s) => s.classList.add('hidden'));
+  if (typeof whatsappPollTimer !== 'undefined') clearInterval(whatsappPollTimer);
 }
 document.querySelectorAll('[data-close-sheet]').forEach((btn) => btn.addEventListener('click', closeSheets));
 
@@ -1701,6 +1702,128 @@ $('deleteVoiceBtn').addEventListener('click', async () => {
 });
 
 $('voiceBtn').addEventListener('click', () => { openSheet('sheet-voice'); refreshVoiceStatus(); });
+$('socialCallingBtn').addEventListener('click', () => { openSheet('sheet-social-calling'); loadSocialAccounts(); });
+
+// ---------- Connected accounts (Telegram / WhatsApp) ----------
+async function loadSocialAccounts() {
+  $('telegramLoginForm').classList.add('hidden');
+  $('telegramOtpForm').classList.add('hidden');
+  $('whatsappQrWrap').classList.add('hidden');
+  $('telegramLoginError').textContent = '';
+  $('whatsappLoginError').textContent = '';
+  try {
+    const resp = await authedFetch('/api/social-calling');
+    const data = await resp.json();
+    renderTelegramStatus(data.telegram);
+    renderWhatsappStatus(data.whatsapp);
+  } catch { /* leave defaults showing */ }
+}
+
+function renderTelegramStatus(tg) {
+  const statusEl = $('telegramAccountStatus');
+  const subEl = $('telegramAccountSub');
+  const btn = $('telegramConnectBtn');
+  if (tg?.status === 'connected') {
+    statusEl.textContent = `Connected as ${tg.displayName || 'Telegram user'}`;
+    subEl.textContent = tg.phoneLast4 ? `Ending in ${tg.phoneLast4}` : '';
+    btn.textContent = 'Disconnect';
+    btn.onclick = async () => { await authedFetch('/api/social-calling?action=telegram-disconnect', { method: 'POST' }); loadSocialAccounts(); };
+  } else {
+    statusEl.textContent = 'Not connected';
+    subEl.textContent = tg?.error || '';
+    btn.textContent = 'Connect';
+    btn.onclick = () => { $('telegramLoginForm').classList.remove('hidden'); $('telegramOtpForm').classList.add('hidden'); };
+  }
+}
+
+function renderWhatsappStatus(wa) {
+  const statusEl = $('whatsappAccountStatus');
+  const subEl = $('whatsappAccountSub');
+  const btn = $('whatsappConnectBtn');
+  if (wa?.status === 'connected') {
+    statusEl.textContent = `Connected as ${wa.displayName || 'WhatsApp user'}`;
+    subEl.textContent = '';
+    btn.textContent = 'Disconnect';
+    btn.onclick = async () => { await authedFetch('/api/social-calling?action=whatsapp-disconnect', { method: 'POST' }); loadSocialAccounts(); };
+  } else {
+    statusEl.textContent = 'Not connected';
+    subEl.textContent = wa?.error || '';
+    btn.textContent = 'Connect';
+    btn.onclick = startWhatsappLink;
+  }
+}
+
+$('telegramSendCodeBtn').addEventListener('click', async () => {
+  const phone = $('telegramPhoneInput').value.trim();
+  $('telegramLoginError').textContent = '';
+  if (!phone) { $('telegramLoginError').textContent = 'Enter your phone number.'; return; }
+  $('telegramSendCodeBtn').disabled = true;
+  try {
+    const resp = await authedFetch('/api/social-calling?action=telegram-start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Could not send code');
+    $('telegramLoginForm').classList.add('hidden');
+    $('telegramOtpForm').classList.remove('hidden');
+  } catch (err) {
+    $('telegramLoginError').textContent = err.message;
+  } finally {
+    $('telegramSendCodeBtn').disabled = false;
+  }
+});
+
+$('telegramVerifyBtn').addEventListener('click', async () => {
+  const code = $('telegramCodeInput').value.trim();
+  const password = $('telegramPasswordInput').value;
+  $('telegramLoginError').textContent = '';
+  if (!code) { $('telegramLoginError').textContent = 'Enter the code Telegram sent you.'; return; }
+  $('telegramVerifyBtn').disabled = true;
+  try {
+    const resp = await authedFetch('/api/social-calling?action=telegram-verify', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, password }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Could not verify code');
+    if (data.status === 'needs_password') {
+      $('telegramPasswordField').classList.remove('hidden');
+      $('telegramLoginError').textContent = 'This account has 2FA — enter your password too.';
+      return;
+    }
+    $('telegramOtpForm').classList.add('hidden');
+    loadSocialAccounts();
+  } catch (err) {
+    $('telegramLoginError').textContent = err.message;
+  } finally {
+    $('telegramVerifyBtn').disabled = false;
+  }
+});
+
+let whatsappPollTimer = null;
+async function startWhatsappLink() {
+  $('whatsappLoginError').textContent = '';
+  $('whatsappQrWrap').classList.remove('hidden');
+  try {
+    const resp = await authedFetch('/api/social-calling?action=whatsapp-start', { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Could not start WhatsApp link');
+    if (data.qr) $('whatsappQrImg').src = data.qr;
+    if (data.status === 'connected') { $('whatsappQrWrap').classList.add('hidden'); loadSocialAccounts(); return; }
+    clearInterval(whatsappPollTimer);
+    whatsappPollTimer = setInterval(async () => {
+      const r = await authedFetch('/api/social-calling?action=whatsapp-status');
+      const d = await r.json();
+      if (d.qr) $('whatsappQrImg').src = d.qr;
+      if (d.status === 'connected') {
+        clearInterval(whatsappPollTimer);
+        $('whatsappQrWrap').classList.add('hidden');
+        loadSocialAccounts();
+      }
+    }, 3000);
+  } catch (err) {
+    $('whatsappLoginError').textContent = err.message;
+  }
+}
 
 // ---------- language ----------
 $('profileLanguage').addEventListener('change', async () => {
