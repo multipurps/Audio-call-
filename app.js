@@ -431,7 +431,7 @@ function renderHomeMessages(messages, replaceAll) {
   if (added) setHomeChatActive(true);
   if (added || replaceAll) {
     if (messages.length === 0) setHomeChatActive(false);
-    $('homeChat').scrollTop = $('homeChat').scrollHeight;
+    scrollHomeChatToBottom();
   }
 }
 
@@ -534,7 +534,7 @@ async function sendChatMessage(text, onReply, source = 'text') {
   if (!isCall) {
     appendChatBubble({ id: `local-${Date.now()}`, role: 'user', content: text, created_at: new Date().toISOString() });
     setHomeChatActive(true);
-    $('homeChat').scrollTop = $('homeChat').scrollHeight;
+    scrollHomeChatToBottom();
   }
 
   const resp = await authedFetch('/api/assistant?action=send', {
@@ -547,7 +547,7 @@ async function sendChatMessage(text, onReply, source = 'text') {
     const errText = data.error || 'Something went wrong.';
     if (!isCall) {
       appendChatBubble({ id: `err-${Date.now()}`, role: 'assistant', content: errText, created_at: new Date().toISOString() });
-      $('homeChat').scrollTop = $('homeChat').scrollHeight;
+      scrollHomeChatToBottom();
     }
     if (onReply) onReply(errText);
     return;
@@ -603,6 +603,23 @@ function syncHomeChatPadding() {
   // captures that reserved space regardless of how it's composed.
   const gap = window.innerHeight - bar.getBoundingClientRect().top + 16;
   document.documentElement.style.setProperty('--home-chat-pad', `${gap}px`);
+}
+
+// scrollTop was sometimes being set from a scrollHeight read before the
+// browser had actually painted a just-updated --home-chat-pad value (a
+// layout race, worst right on first load), leaving the last message resting
+// behind the input bar until something else nudged a reflow. Re-syncing the
+// padding and deferring the actual scroll to the next paint frame (twice,
+// makes this deterministic instead of lucky. (Two rAFs since one can still
+// land before layout settles on some mobile browsers.)
+function scrollHomeChatToBottom() {
+  syncHomeChatPadding();
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const el = $('homeChat');
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+  });
 }
 window.addEventListener('resize', syncHomeChatPadding);
 syncHomeChatPadding();
