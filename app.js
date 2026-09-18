@@ -748,7 +748,15 @@ function appendCallTranscriptLine(speaker, content) {
   const panel = $('transcriptPanel');
   const el = document.createElement('div');
   el.className = `transcriptLine ${speaker}`;
-  el.innerHTML = `<div class="transcriptDot"></div><div class="transcriptBubble">${content}</div>`;
+  let dotInner = '';
+  if (speaker === 'ai') {
+    dotInner = `<img src="icon-192.png" alt="">`;
+  } else if (speaker === 'user' && userAvatarUrl) {
+    dotInner = `<img src="${userAvatarUrl}" alt="">`;
+  } else if (speaker === 'user') {
+    dotInner = (currentUser?.email || '?')[0].toUpperCase();
+  }
+  el.innerHTML = `<div class="transcriptDot">${dotInner}</div><div class="transcriptBubble">${content}</div>`;
   panel.appendChild(el);
   panel.scrollTop = panel.scrollHeight;
 }

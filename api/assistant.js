@@ -309,6 +309,7 @@ async function sendMessage(req, res, supabase, userId) {
     '- action "call": the user wants you to call someone new. If they gave you an actual phone number in their message, put the digits (with country code if given, e.g. "+15551234567") in phoneNumber. Otherwise, if they named someone from the saved contacts list, put your best guess at that name in contactName. objective is a short phrase describing what to say or ask on the call — if they also gave any tone or manner direction (stay calm, keep it light, let it flow naturally, be quick about it, etc.), include that in objective too, don\'t drop it.',
     '- action "retry": the user wants you to call the same person again (e.g. "call him again", "try it again").',
     '- action "reply": anything else — general conversation, questions about you or the app, small talk, or a call request with no number/contact given yet. Answer naturally and helpfully in "reply". Only ask for a phone number or contact name if they\'ve actually expressed intent to make a call but haven\'t said who.',
+    'Every single response, with no exceptions, must be that one JSON object and nothing else - never plain conversational text, never text before or after the JSON, even for casual chat or small talk. Put the conversational reply itself inside the "reply" field.',
   ].filter(Boolean).join('\n');
 
   const chatMessages = [
@@ -332,9 +333,26 @@ async function sendMessage(req, res, supabase, userId) {
     const data = await resp.json();
     intent = JSON.parse(data.choices?.[0]?.message?.content || '{}');
   } catch (err) {
-    console.error('assistant intent parse failed:', err);
-    newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "Sorry, I couldn't process that — try again in a moment.", null, msgSource));
-    return respond();
+    // Groq's strict JSON-mode validator sometimes rejects a perfectly good
+    // conversational reply just because the model didn't wrap it in our
+    // schema - but the actual text it tried to say is right there in the
+    // error payload's failed_generation field. Use it instead of throwing
+    // away a working reply and showing a generic failure.
+    let recovered = null;
+    try {
+      const parsed = JSON.parse(err.message);
+      const text = parsed?.error?.failed_generation;
+      if (text && typeof text === 'string') recovered = text.trim();
+    } catch {
+      // err.message wasn't JSON (a network error, etc.) - nothing to recover.
+    }
+    if (recovered) {
+      intent = { action: 'reply', reply: recovered };
+    } else {
+      console.error('assistant intent parse failed:', err);
+      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "Sorry, I couldn't process that — try again in a moment.", null, msgSource));
+      return respond();
+    }
   }
 
   if (intent.action === 'call' || intent.action === 'retry') {
