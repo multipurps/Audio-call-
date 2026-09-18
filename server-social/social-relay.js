@@ -17,6 +17,7 @@
 
 import express from 'express';
 import crypto from 'crypto';
+import bigInt from 'big-integer';
 import { createClient } from '@supabase/supabase-js';
 import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
@@ -172,6 +173,60 @@ async function telegramDisconnect(userId) {
   return { status: 'disconnected' };
 }
 
+// GramJS (like Telethon, which it's a port of) can only resolve an entity
+// from its *local* cache — usernames resolve fine via a direct server call,
+// but a bare phone number is never in that cache unless it's already a
+// synced contact. That's exactly the "Could not find the input entity"
+// error from Telethon's own docs: the fix it points to is importing the
+// number as a contact first, which makes Telegram's servers tell us which
+// account (if any) it belongs to, so GramJS can then resolve it normally.
+async function resolveTelegramPeer(client, toUsernameOrPhone) {
+  const raw = String(toUsernameOrPhone || '').trim();
+  if (!raw) {
+    const err = new Error('No number or username given to call.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Fast path: usernames, or anything already in the local entity cache
+  // (recent dialogs, a peer resolved earlier this session).
+  if (!/^[+0-9][0-9\s()-]*$/.test(raw)) {
+    try {
+      return await client.getInputEntity(raw);
+    } catch {
+      const err = new Error(`Couldn't find a Telegram user @${raw.replace(/^@/, '')}.`);
+      err.statusCode = 404;
+      throw err;
+    }
+  }
+
+  // It reads as a phone number — needs a country code to mean anything on
+  // Telegram (a bare local-format number like "09038226059" can't be
+  // resolved; there's no way to guess which country it belongs to).
+  const digits = raw.replace(/[\s()-]/g, '');
+  if (!/^\+[1-9]\d{7,14}$/.test(digits)) {
+    const err = new Error("That number needs a country code to call on Telegram — e.g. +2349038226059, not 09038226059.");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const result = await client.invoke(new Api.contacts.ImportContacts({
+    contacts: [new Api.InputPhoneContact({
+      clientId: bigInt(Date.now()),
+      phone: digits,
+      firstName: 'Call',
+      lastName: 'Contact',
+    })],
+  }));
+  const user = result.users?.[0];
+  if (!user) {
+    const err = new Error(`No Telegram account found for ${digits} — they may not be on Telegram, or their privacy settings hide their number from lookups like this.`);
+    err.statusCode = 404;
+    throw err;
+  }
+  return new Api.InputUser({ userId: user.id, accessHash: user.accessHash });
+}
+
 async function telegramCall(userId, toUsernameOrPhone) {
   const client = await getOrRestoreTelegramClient(userId);
   if (!client) {
@@ -179,7 +234,7 @@ async function telegramCall(userId, toUsernameOrPhone) {
     err.statusCode = 409;
     throw err;
   }
-  const peer = await client.getInputEntity(toUsernameOrPhone);
+  const peer = await resolveTelegramPeer(client, toUsernameOrPhone);
   // Real DH-exchange call request at the MTProto level. gAHash/protocol
   // params below are placeholders for the tgcalls key-exchange this needs —
   // NEEDS LIVE VERIFICATION: wiring RequestCall's DH response into tgcalls'
@@ -327,7 +382,17 @@ async function whatsappCall(userId, toJidOrPhone) {
     err.statusCode = 409;
     throw err;
   }
-  const jid = toJidOrPhone.includes('@') ? toJidOrPhone : `${toJidOrPhone.replace(/\D/g, '')}@s.whatsapp.net`;
+  const jid = toJidOrPhone.includes('@')
+    ? toJidOrPhone
+    : (() => {
+        const digits = toJidOrPhone.replace(/[\s()-]/g, '');
+        if (!/^\+?[1-9]\d{7,14}$/.test(digits)) {
+          const err = new Error('That doesn\'t look like a full phone number — include the country code, e.g. +2349038226059.');
+          err.statusCode = 400;
+          throw err;
+        }
+        return `${digits.replace(/^\+/, '')}@s.whatsapp.net`;
+      })();
   // sock.initiateCall() is wired into this fork's core socket chain
   // (attachVoipToSocket(sock), called automatically for every socket —
   // see src/addons/README.md's "VoIP Calling" section), not a bolt-on addon

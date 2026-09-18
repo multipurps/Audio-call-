@@ -434,13 +434,21 @@ async function sendMessage(req, res, supabase, userId) {
 
     if (callChannel === 'whatsapp' || callChannel === 'telegram') {
       const channelName = callChannel === 'whatsapp' ? 'WhatsApp' : 'Telegram';
+      // Fail fast, before the relay round-trip: WhatsApp/Telegram calls only
+      // resolve to a real account with a full international number — no way
+      // to guess a country code for a bare local-format number.
+      const digitsOnly = toNumber.replace(/[\s()-]/g, '');
+      if (!/^\+[1-9]\d{7,14}$/.test(digitsOnly)) {
+        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `That number needs a country code to call on ${channelName} — e.g. +2349038226059, not ${toNumber}.`, null, msgSource));
+        return respond();
+      }
       try {
         // Social calls live in their own table (social_calls) with their own
         // relay and status vocabulary — kept separate from Twilio's `calls`,
         // so there's no callId here to attach for the header's live-call
         // ring / transcript screen yet, same as this channel doesn't have
         // that UI built out on the client side yet either.
-        await relayRequest(`/${callChannel}/call`, { userId, method: 'POST', body: { to: toNumber } });
+        await relayRequest(`/${callChannel}/call`, { userId, method: 'POST', body: { to: digitsOnly } });
         const verb = intent.action === 'retry' ? 'again now' : 'now';
         newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `Calling ${label} on ${channelName} ${verb}.`, null, msgSource));
       } catch (err) {
