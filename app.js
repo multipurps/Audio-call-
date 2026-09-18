@@ -1005,39 +1005,44 @@ async function startAssistantListening() {
       stream.getTracks().forEach((t) => t.stop());
       assistantListening = false;
       $('waveRow').classList.remove('speaking');
-      if (!waveChunks.length || !assistantCallOpen || !hasSpoken) return;
-      try {
-        const actualMime = waveRecorder.mimeType || recorderMime || 'audio/webm';
-        const blob = new Blob(waveChunks, { type: actualMime });
-        const base64 = await blobToBase64(blob);
-        const resp = await authedFetch('/api/assistant?action=transcribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ audioBase64: base64, mimeType: actualMime }),
-        });
-        const data = await resp.json();
-        if (!assistantCallOpen) return;
-        if (resp.ok && data.text?.trim()) {
-          appendCallTranscriptLine('user', data.text.trim());
-          callTranscriptForSummary.push({ role: 'user', content: data.text.trim() });
-          await sendChatMessage(data.text.trim(), async (reply) => {
-            if (assistantCallOpen && reply) {
-              appendCallTranscriptLine('ai', reply);
-              callTranscriptForSummary.push({ role: 'assistant', content: reply });
-              await speakReply(reply);
-            }
-          }, 'call');
-        } else if (!resp.ok) {
-          const errText = data.detail ? `${data.error}: ${data.detail}`.slice(0, 300) : (data.error || "Sorry, I didn't catch that.");
-          // Errors are shown in the transcript, never spoken — Emysa's voice
-          // is reserved for actual replies, not failure messages.
-          appendCallTranscriptLine('ai', errText);
-        }
-      } catch (err) {
-        if (assistantCallOpen) {
-          appendCallTranscriptLine('ai', "Sorry, something went wrong there — try again.");
+      if (waveChunks.length && assistantCallOpen && hasSpoken) {
+        try {
+          const actualMime = waveRecorder.mimeType || recorderMime || 'audio/webm';
+          const blob = new Blob(waveChunks, { type: actualMime });
+          const base64 = await blobToBase64(blob);
+          const resp = await authedFetch('/api/assistant?action=transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ audioBase64: base64, mimeType: actualMime }),
+          });
+          const data = await resp.json();
+          if (resp.ok && data.text?.trim()) {
+            appendCallTranscriptLine('user', data.text.trim());
+            callTranscriptForSummary.push({ role: 'user', content: data.text.trim() });
+            await sendChatMessage(data.text.trim(), async (reply) => {
+              if (assistantCallOpen && reply) {
+                appendCallTranscriptLine('ai', reply);
+                callTranscriptForSummary.push({ role: 'assistant', content: reply });
+                await speakReply(reply);
+              }
+            }, 'call');
+          } else if (!resp.ok) {
+            const errText = data.detail ? `${data.error}: ${data.detail}`.slice(0, 300) : (data.error || "Sorry, I didn't catch that.");
+            // Errors are shown in the transcript, never spoken — Emysa's voice
+            // is reserved for actual replies, not failure messages.
+            appendCallTranscriptLine('ai', errText);
+          }
+        } catch (err) {
+          if (assistantCallOpen) {
+            appendCallTranscriptLine('ai', "Sorry, something went wrong there — try again.");
+          }
         }
       }
+      // This used to be skipped whenever the block above was never entered
+      // (silence, no speech detected) because that path used a bare
+      // `return` before ever reaching this line - so the mic just went
+      // dead and stayed dead until Mute was toggled twice. Now it always
+      // runs, whichever path was taken above.
       if (assistantCallOpen && !assistantMuted) startAssistantListening();
     };
     waveRecorder.start();
