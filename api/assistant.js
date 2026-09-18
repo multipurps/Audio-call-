@@ -1,4 +1,5 @@
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
+import { relayRequest } from '../lib/socialRelayClient.js';
 
 const LANGUAGE_NAMES = { en: 'English', es: 'Spanish', fr: 'French', pt: 'Portuguese', de: 'German', ha: 'Hausa', yo: 'Yoruba', ig: 'Igbo', sw: 'Swahili', ar: 'Arabic', hi: 'Hindi', zh: 'Chinese' };
 
@@ -273,8 +274,12 @@ async function sendImage(req, res, supabase, userId) {
 
 async function sendMessage(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { text, callerId, sessionId: incomingSessionId, source } = req.body || {};
+  const { text, callerId, sessionId: incomingSessionId, source, channel } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
+  // Which line to call out on — 'phone' (Twilio, default) or 'whatsapp'/
+  // 'telegram' (the linked personal account, via the always-on relay).
+  // Selected from the dropdown under the Home header's call-channel button.
+  const callChannel = ['whatsapp', 'telegram'].includes(channel) ? channel : 'phone';
   // 'call' = a live voice turn on the call screen — kept out of the home
   // chat list (which is meant to read as "what I typed / what got decided",
   // not a transcript of speaking out loud), but still written to
@@ -426,6 +431,24 @@ async function sendMessage(req, res, supabase, userId) {
       const langName = LANGUAGE_NAMES[langProfile.language] || langProfile.language;
       objective = `Speak only in ${langName} for this entire call, regardless of what language this instruction is written in. ${objective}`;
     }
+
+    if (callChannel === 'whatsapp' || callChannel === 'telegram') {
+      const channelName = callChannel === 'whatsapp' ? 'WhatsApp' : 'Telegram';
+      try {
+        // Social calls live in their own table (social_calls) with their own
+        // relay and status vocabulary — kept separate from Twilio's `calls`,
+        // so there's no callId here to attach for the header's live-call
+        // ring / transcript screen yet, same as this channel doesn't have
+        // that UI built out on the client side yet either.
+        await relayRequest(`/${callChannel}/call`, { userId, method: 'POST', body: { to: toNumber } });
+        const verb = intent.action === 'retry' ? 'again now' : 'now';
+        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `Calling ${label} on ${channelName} ${verb}.`, null, msgSource));
+      } catch (err) {
+        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${label} on ${channelName}: ${err.message}`, null, msgSource));
+      }
+      return respond();
+    }
+
     const placed = await placeCall(supabase, userId, { toNumber, objective, contactId: contact?.id || null, callerId: callerId || null, sessionId });
 
     if (placed.error) {

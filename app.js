@@ -529,7 +529,7 @@ $('homeHeaderLogoWrap').addEventListener('click', () => {
   if (activeHeaderCall) openCallScreen(activeHeaderCall.id, activeHeaderCall.toNumber, activeHeaderCall.contactName);
 });
 
-async function sendChatMessage(text, onReply, source = 'text') {
+async function sendChatMessage(text, onReply, source = 'text', channel = null) {
   const isCall = source === 'call';
   if (!isCall) {
     appendChatBubble({ id: `local-${Date.now()}`, role: 'user', content: text, created_at: new Date().toISOString() });
@@ -540,7 +540,7 @@ async function sendChatMessage(text, onReply, source = 'text') {
   const resp = await authedFetch('/api/assistant?action=send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, sessionId: currentChatSessionId, source }),
+    body: JSON.stringify({ text, sessionId: currentChatSessionId, source, channel }),
   });
   const data = await resp.json();
   if (!resp.ok) {
@@ -572,7 +572,11 @@ async function sendBrief() {
   $('sendBtn').disabled = true;
   $('briefInput').value = '';
   $('briefInput').style.height = 'auto';
-  await sendChatMessage(text);
+  const channelForThisSend = selectedCallChannel;
+  await sendChatMessage(text, null, 'text', channelForThisSend);
+  // One-shot: the channel picker sets the line for the *next* thing you
+  // send, then falls back to the default (phone) once that's been sent.
+  if (channelForThisSend) setCallChannel('phone');
   $('sendBtn').disabled = false;
 }
 
@@ -1052,20 +1056,55 @@ async function startAssistantListening() {
   }
 }
 
-$('homeWaveBtn').addEventListener('click', () => {
-  // iOS Safari only allows audio playback that traces back to a direct,
-  // synchronous tap — resuming/creating the AudioContext after any await
-  // (like the network fetch to generate speech) gets silently blocked.
-  // Doing it here, inside the real tap, unlocks every later programmatic
-  // buffer playback on this same context for the rest of the call, even
-  // from deep inside async code.
-  const ctx = getAssistantAudioCtx();
-  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-  // Explicit hint for iOS 17+: Safari otherwise infers the category from
-  // whichever media API ran most recently, which is what causes the
-  // ducking in the first place. Feature-detected — older iOS ignores it.
-  if ('audioSession' in navigator) { try { navigator.audioSession.type = 'play-and-record'; } catch {} }
-  openAssistantCallScreen();
+// ---------- Call channel: Emysa (voice) / WhatsApp / Telegram / Phone ----------
+let selectedCallChannel = null; // null = default (phone/Twilio)
+
+const CHANNEL_META = {
+  whatsapp: { label: 'WhatsApp', placeholder: 'Paste a number to call on WhatsApp…' },
+  telegram: { label: 'Telegram', placeholder: 'Paste a number to call on Telegram…' },
+  phone: { label: null, placeholder: 'Message' },
+};
+
+function setCallChannel(channel) {
+  selectedCallChannel = channel === 'phone' ? null : channel;
+  const meta = CHANNEL_META[channel] || CHANNEL_META.phone;
+  $('briefInput').placeholder = meta.placeholder;
+  $('channelBadge').classList.toggle('visible', !!meta.label);
+  if (meta.label) $('channelBadgeText').textContent = `Calling on ${meta.label}`;
+  $('briefInput').focus();
+}
+
+$('homeWaveBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  $('callChannelMenu').classList.toggle('hidden');
+});
+document.addEventListener('click', (e) => {
+  if (!$('callChannelMenu').classList.contains('hidden') && !e.target.closest('.callChannelWrap')) {
+    $('callChannelMenu').classList.add('hidden');
+  }
+});
+document.querySelectorAll('.callChannelItem').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    $('callChannelMenu').classList.add('hidden');
+    const channel = btn.dataset.channel;
+    if (channel === 'emysa') {
+      // iOS Safari only allows audio playback that traces back to a direct,
+      // synchronous tap — resuming/creating the AudioContext after any await
+      // (like the network fetch to generate speech) gets silently blocked.
+      // Doing it here, inside the real tap, unlocks every later programmatic
+      // buffer playback on this same context for the rest of the call, even
+      // from deep inside async code.
+      const ctx = getAssistantAudioCtx();
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      // Explicit hint for iOS 17+: Safari otherwise infers the category from
+      // whichever media API ran most recently, which is what causes the
+      // ducking in the first place. Feature-detected — older iOS ignores it.
+      if ('audioSession' in navigator) { try { navigator.audioSession.type = 'play-and-record'; } catch {} }
+      openAssistantCallScreen();
+      return;
+    }
+    setCallChannel(channel);
+  });
 });
 
 function blobToBase64(blob) {
