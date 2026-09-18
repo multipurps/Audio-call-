@@ -34,8 +34,29 @@ export default async function handler(req, res) {
     case 'logCallSummary': return logCallSummary(req, res, supabase, userId);
     case 'summarizeCall': return summarizeCall(req, res, supabase, userId);
     case 'deleteSession': return deleteSession(req, res, supabase, userId);
+    case 'savePushSubscription': return savePushSubscription(req, res, supabase, userId);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
   }
+}
+
+// Folded in from the old api/save-push-subscription.js — small enough not
+// to warrant its own function slot (Vercel Hobby caps a deployment at 12).
+async function savePushSubscription(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { subscription } = req.body || {};
+  if (!subscription?.endpoint || !subscription?.keys) return res.status(400).json({ error: 'Invalid subscription' });
+
+  const { error } = await supabase.from('push_subscriptions').upsert(
+    {
+      user_id: userId,
+      endpoint: subscription.endpoint,
+      p256dh: subscription.keys.p256dh,
+      auth: subscription.keys.auth,
+    },
+    { onConflict: 'endpoint' }
+  );
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ ok: true });
 }
 
 

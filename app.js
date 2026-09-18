@@ -215,7 +215,7 @@ async function ensureNotificationsEnabled() {
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
     });
-    await fetch('/api/save-push-subscription', {
+    await fetch('/api/assistant?action=savePushSubscription', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentSession?.access_token || ''}` },
       body: JSON.stringify({ subscription: sub.toJSON() }),
