@@ -121,7 +121,7 @@ document.querySelectorAll('.tabBtn').forEach((btn) => {
     target.classList.add('active', 'fadeIn');
     moveTabGlider(btn.dataset.tab);
     $('homeInputBar').classList.toggle('visible', btn.dataset.tab === 'home');
-    if (btn.dataset.tab === 'recent') loadCalls();
+    if (btn.dataset.tab === 'recent') { loadRecentChats(); loadCalls(); }
     if (btn.dataset.tab === 'profile') renderProfileHeader();
     if (btn.dataset.tab === 'home') startMessagePolling(); else stopMessagePolling();
   });
@@ -369,12 +369,14 @@ async function initHomeChat() {
   const displayName = data?.name || (currentUser.email || '').split('@')[0];
   $('homeIdleGreeting').textContent = greetingForNow(displayName);
 
-  const resp = await authedFetch('/api/assistant?action=messages');
-  if (resp.ok) {
-    const { messages, sessionId } = await resp.json();
-    currentChatSessionId = sessionId || null;
-    renderHomeMessages(messages || [], true);
-  }
+  // Home always opens to a fresh conversation, never the last one you were
+  // in — old chats live in Recent (openChatSession) instead of being
+  // auto-resumed here every time the app opens.
+  currentChatSessionId = null;
+  homeMessageIds.clear();
+  $('homeChat').innerHTML = '';
+  setHomeChatActive(false);
+
   startMessagePolling();
   resumeActiveCallIfAny();
 }
@@ -1316,10 +1318,97 @@ function renderCallsList(calls) {
   }
 }
 
+let recentSubTab = 'chats';
+let recentChatSessions = [];
+let recentChatMenuTargetId = null;
+
+document.querySelectorAll('.recentSubTabBtn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.recentSubTabBtn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    recentSubTab = btn.dataset.subtab;
+    $('recentChatsList').classList.toggle('hidden', recentSubTab !== 'chats');
+    $('callsList').classList.toggle('hidden', recentSubTab !== 'calls');
+    $('recentSearch').value = '';
+    $('recentSearch').placeholder = recentSubTab === 'chats' ? 'Search chats' : 'Search conversations';
+  });
+});
+
+async function loadRecentChats() {
+  const resp = await authedFetch('/api/assistant?action=sessions');
+  if (!resp.ok) return;
+  const { sessions } = await resp.json();
+  recentChatSessions = sessions || [];
+  renderRecentChatsList(recentChatSessions);
+}
+
+function renderRecentChatsList(sessions) {
+  const list = $('recentChatsList');
+  list.innerHTML = '';
+  if (!sessions?.length) {
+    list.innerHTML = `<div class="authHint" style="text-align:left;">No chats yet — start one from Home.</div>`;
+    return;
+  }
+  for (const s of sessions) {
+    const row = document.createElement('div');
+    row.className = 'savedChatRow';
+    row.innerHTML = `
+      <div class="savedChatTitle">${s.title}</div>
+      <div class="chatRowActions">
+        <div class="savedChatDate">${shortDateLabel(s.updated_at)}</div>
+        <button class="recentChatKebabBtn" aria-label="More"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg></button>
+      </div>`;
+    row.addEventListener('click', () => {
+      openChatSession(s.id);
+      document.querySelector('#tabBar .tabBtn[data-tab="home"]').click();
+    });
+    row.querySelector('.recentChatKebabBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openRecentChatMenu(e.currentTarget, s.id);
+    });
+    list.appendChild(row);
+  }
+}
+
+function openRecentChatMenu(anchorBtn, sessionId) {
+  recentChatMenuTargetId = sessionId;
+  const menu = $('recentChatMenu');
+  const rect = anchorBtn.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 6}px`;
+  menu.style.right = `${window.innerWidth - rect.right}px`;
+  menu.style.left = 'auto';
+  menu.classList.remove('hidden');
+}
+function closeRecentChatMenu() {
+  $('recentChatMenu').classList.add('hidden');
+  recentChatMenuTargetId = null;
+}
+document.addEventListener('click', (e) => {
+  if (!$('recentChatMenu').classList.contains('hidden') && !e.target.closest('#recentChatMenu')) closeRecentChatMenu();
+});
+$('recentChatMenu').querySelector('[data-action="archive"]').addEventListener('click', async () => {
+  if (!recentChatMenuTargetId) return;
+  const id = recentChatMenuTargetId;
+  closeRecentChatMenu();
+  await authedFetch('/api/assistant?action=archiveSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: id, archived: true }) });
+  loadRecentChats();
+});
+$('recentChatMenu').querySelector('[data-action="delete"]').addEventListener('click', async () => {
+  if (!recentChatMenuTargetId) return;
+  const id = recentChatMenuTargetId;
+  closeRecentChatMenu();
+  if (!confirm('Delete this chat? This can\'t be undone.')) return;
+  await authedFetch('/api/assistant?action=deleteSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: id }) });
+  loadRecentChats();
+});
+
 $('recentSearch').addEventListener('input', () => {
   const q = $('recentSearch').value.trim().toLowerCase();
-  if (!q) { renderCallsList(lastLoadedCalls); return; }
-  renderCallsList(lastLoadedCalls.filter((c) => (c.contact_name || c.to_number || '').toLowerCase().includes(q)));
+  if (recentSubTab === 'chats') {
+    renderRecentChatsList(!q ? recentChatSessions : recentChatSessions.filter((s) => (s.title || '').toLowerCase().includes(q)));
+  } else {
+    renderCallsList(!q ? lastLoadedCalls : lastLoadedCalls.filter((c) => (c.contact_name || c.to_number || '').toLowerCase().includes(q)));
+  }
 });
 
 async function loadCalls() {

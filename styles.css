@@ -201,6 +201,8 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .homeHeaderBtn{width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--icon-color); flex:none;}
 .homeHeaderBtn svg{width:20px; height:20px;}
 .homeHeaderBtn.recording{color:#ff6b6b;}
+#homeWaveBtn{width:44px; height:44px;}
+#homeWaveBtn svg{width:26px; height:26px;}
 
 .callChannelWrap{position:relative;}
 .callChannelMenu{
@@ -581,6 +583,21 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 }
 .savedChatTitle{font-size:14.5px; font-weight:650; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .savedChatDate{font-size:12.5px; color:var(--dim); flex:none;}
+
+/* ---------- Recent > Chats sub-tab ---------- */
+.recentSubTabs{display:flex; gap:6px; background:var(--glass-bg); border:1px solid var(--glass-border); border-radius:14px; padding:4px; margin:2px 0 14px;}
+.recentSubTabBtn{flex:1; border-radius:10px; padding:9px 0; font-size:13.5px; font-weight:650; color:var(--dim); background:none;}
+.recentSubTabBtn.active{background:var(--accent-grad); color:#fff;}
+.recentChatKebabBtn{width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--dim); flex:none;}
+.recentChatKebabBtn svg{width:18px; height:18px;}
+.recentChatMenu{
+  position:fixed; z-index:60; min-width:150px;
+  background:var(--glass-bg); backdrop-filter:blur(22px) saturate(160%); -webkit-backdrop-filter:blur(22px) saturate(160%);
+  border:1px solid var(--glass-border); border-radius:14px; padding:6px; box-shadow:0 10px 30px rgba(0,0,0,0.4);
+}
+.recentChatMenuItem{display:block; width:100%; text-align:left; padding:10px 12px; border-radius:9px; font-size:14px; font-weight:600; color:#fff;}
+.recentChatMenuItem.danger{color:#ff6b6b;}
+.recentChatMenuItem:active{background:rgba(255,255,255,0.08);}
 
 /* ---------- recent calls ---------- */
 .recentRow{
