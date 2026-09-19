@@ -791,8 +791,26 @@
     </div>
 
     <div id="whatsappQrWrap" class="hidden" style="margin-top:10px; text-align:center;">
-      <p class="hint">Open WhatsApp on your phone → Linked devices → Link a device, then scan:</p>
-      <img id="whatsappQrImg" alt="WhatsApp QR code" style="width:220px; height:220px; margin:10px auto; display:block; border-radius:12px; background:#fff; padding:8px;">
+      <div class="segmented" id="whatsappLinkModeGroup" style="margin-bottom:14px;">
+        <button class="segmentedBtn active" data-mode="qr">Scan QR code</button>
+        <button class="segmentedBtn" data-mode="phone">Enter phone number</button>
+      </div>
+
+      <div id="whatsappQrPane">
+        <p class="hint">Open WhatsApp on your phone → Linked devices → Link a device, then scan:</p>
+        <img id="whatsappQrImg" alt="WhatsApp QR code" style="width:220px; height:220px; margin:10px auto; display:block; border-radius:12px; background:#fff; padding:8px;">
+      </div>
+
+      <div id="whatsappPhonePane" class="hidden">
+        <div class="profileCard" style="text-align:left;">
+          <div class="cBody"><input class="plainInput" id="whatsappPhoneInput" type="tel" autocomplete="off" placeholder="Full number with country code, e.g. 2349038226059"></div>
+        </div>
+        <button class="secondaryBtn" id="whatsappPhoneSubmitBtn" style="margin-top:10px;">Get code</button>
+        <div id="whatsappPairingCodeWrap" class="hidden" style="margin-top:16px;">
+          <p class="hint">On your phone: WhatsApp → Linked devices → Link with phone number instead, then enter:</p>
+          <div class="codeCardValue" id="whatsappPairingCodeValue" style="font-size:26px; margin:10px 0 0;">— — — — — — — —</div>
+        </div>
+      </div>
     </div>
     <div class="authHint" id="whatsappLoginError" style="margin-top:8px;"></div>
   </div>

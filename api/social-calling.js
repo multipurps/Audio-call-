@@ -25,6 +25,7 @@ export default async function handler(req, res) {
       case 'telegram-verify': return await telegramVerify(req, res, userId);
       case 'telegram-disconnect': return await telegramDisconnect(req, res, userId);
       case 'whatsapp-start': return await whatsappStart(req, res, userId);
+      case 'whatsapp-start-phone': return await whatsappStartWithPhone(req, res, userId);
       case 'whatsapp-status': return await whatsappStatus(req, res, userId);
       case 'whatsapp-disconnect': return await whatsappDisconnect(req, res, userId);
       case 'call': return await placeCall(req, res, userId);
@@ -89,6 +90,12 @@ async function whatsappStart(req, res, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const data = await relayRequest('/whatsapp/start', { userId, method: 'POST' });
   return res.status(200).json(data); // { qr: '<data-url>' }
+}
+
+async function whatsappStartWithPhone(req, res, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const data = await relayRequest('/whatsapp/start-with-phone', { userId, method: 'POST', body: { phone: req.body?.phone } });
+  return res.status(200).json(data); // { status, pairingCode }
 }
 
 async function whatsappStatus(req, res, userId) {

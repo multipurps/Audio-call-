@@ -551,7 +551,7 @@ async function sendChatMessage(text, onReply, source = 'text', channel = null) {
       appendChatBubble({ id: `err-${Date.now()}`, role: 'assistant', content: errText, created_at: new Date().toISOString() });
       scrollHomeChatToBottom();
     }
-    if (onReply) onReply(errText);
+    if (onReply) await onReply(errText);
     return;
   }
   if (data.sessionId) currentChatSessionId = data.sessionId;
@@ -565,7 +565,7 @@ async function sendChatMessage(text, onReply, source = 'text', channel = null) {
     if (savedUserMsg) homeMessageIds.add(savedUserMsg.id);
     renderHomeMessages(replies, false);
   }
-  if (onReply) onReply(replies.map((m) => m.content).join(' ') || '');
+  if (onReply) await onReply(replies.map((m) => m.content).join(' ') || '');
 }
 
 async function sendBrief() {
@@ -749,6 +749,7 @@ async function postCallSummary() {
 }
 let assistantListening = false;
 let assistantMuted = false;
+let assistantSpeaking = false;
 
 function appendCallTranscriptLine(speaker, content) {
   const panel = $('transcriptPanel');
@@ -793,6 +794,14 @@ const AUDIO_BTN_HTML = '<div class="callBtnCircle"><svg viewBox="0 0 24 24" fill
 const MORE_BTN_HTML = '<div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg></div>\n          More';
 async function speakReply(text) {
   if (!text || !text.trim() || !assistantCallOpen) return;
+  // Guards startAssistantListening() (and the manual tap-to-talk path)
+  // from ever opening the mic while Emysa's own voice is still coming out
+  // of the speaker — without this, the mic picks up that audio as if the
+  // user said it (there's no real echo cancellation on raw AudioContext
+  // output — see the comment above getAssistantAudioCtx), which both
+  // mis-transcribes Emysa's own words as user speech and, if a reply to
+  // that gets spoken before this one finishes, plays two replies at once.
+  assistantSpeaking = true;
   try {
     const resp = await authedFetch('/api/assistant?action=speak', {
       method: 'POST',
@@ -821,6 +830,8 @@ async function speakReply(text) {
     // but it should be visible instead of vanishing silently.
     console.error('speakReply: request threw:', err);
     if (assistantCallOpen) appendCallTranscriptLine('ai', '[voice output failed: network error]');
+  } finally {
+    assistantSpeaking = false;
   }
 }
 
@@ -948,7 +959,7 @@ function openAssistantCallScreen() {
   $('callKeypadBtn').onclick = () => {};
   $('waveRow').onclick = () => {
     if (waveRecorder && waveRecorder.state === 'recording') waveRecorder.stop();
-    else if (!assistantListening) startAssistantListening();
+    else if (!assistantListening && !assistantSpeaking) startAssistantListening();
   };
 
   // Speak first, on connect — a real call has a greeting before it ever
@@ -963,9 +974,11 @@ function openAssistantCallScreen() {
 }
 
 async function startAssistantListening() {
-  if (assistantListening || assistantMuted || !assistantCallOpen) return;
+  if (assistantListening || assistantMuted || assistantSpeaking || !assistantCallOpen) return;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
     waveChunks = [];
     // Don't hardcode a mimeType — Safari/iOS doesn't support webm at all
     // and silently records something else regardless of what you ask for,
@@ -1928,28 +1941,79 @@ $('telegramVerifyBtn').addEventListener('click', async () => {
 });
 
 let whatsappPollTimer = null;
+
+function watchWhatsappStatus() {
+  clearInterval(whatsappPollTimer);
+  whatsappPollTimer = setInterval(async () => {
+    const r = await authedFetch('/api/social-calling?action=whatsapp-status');
+    const d = await r.json();
+    if (d.qr) $('whatsappQrImg').src = d.qr;
+    if (d.pairingCode) showWhatsappPairingCode(d.pairingCode);
+    if (d.status === 'connected') {
+      clearInterval(whatsappPollTimer);
+      $('whatsappQrWrap').classList.add('hidden');
+      loadSocialAccounts();
+    }
+  }, 3000);
+}
+
+function showWhatsappPairingCode(code) {
+  $('whatsappPairingCodeWrap').classList.remove('hidden');
+  $('whatsappPairingCodeValue').textContent = code.split('').join(' ');
+}
+
 async function startWhatsappLink() {
   $('whatsappLoginError').textContent = '';
   $('whatsappQrWrap').classList.remove('hidden');
+  $('whatsappLinkModeGroup').querySelectorAll('.segmentedBtn').forEach((b) => b.classList.toggle('active', b.dataset.mode === 'qr'));
+  $('whatsappQrPane').classList.remove('hidden');
+  $('whatsappPhonePane').classList.add('hidden');
+  $('whatsappPairingCodeWrap').classList.add('hidden');
   try {
     const resp = await authedFetch('/api/social-calling?action=whatsapp-start', { method: 'POST' });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || 'Could not start WhatsApp link');
     if (data.qr) $('whatsappQrImg').src = data.qr;
     if (data.status === 'connected') { $('whatsappQrWrap').classList.add('hidden'); loadSocialAccounts(); return; }
-    clearInterval(whatsappPollTimer);
-    whatsappPollTimer = setInterval(async () => {
-      const r = await authedFetch('/api/social-calling?action=whatsapp-status');
-      const d = await r.json();
-      if (d.qr) $('whatsappQrImg').src = d.qr;
-      if (d.status === 'connected') {
-        clearInterval(whatsappPollTimer);
-        $('whatsappQrWrap').classList.add('hidden');
-        loadSocialAccounts();
-      }
-    }, 3000);
+    watchWhatsappStatus();
   } catch (err) {
     $('whatsappLoginError').textContent = err.message;
+  }
+}
+
+$('whatsappLinkModeGroup').querySelectorAll('.segmentedBtn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    $('whatsappLinkModeGroup').querySelectorAll('.segmentedBtn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    $('whatsappQrPane').classList.toggle('hidden', btn.dataset.mode !== 'qr');
+    $('whatsappPhonePane').classList.toggle('hidden', btn.dataset.mode !== 'phone');
+  });
+});
+
+$('whatsappPhoneSubmitBtn').addEventListener('click', async () => {
+  const phone = $('whatsappPhoneInput').value.trim();
+  if (!phone) { $('whatsappLoginError').textContent = 'Enter a phone number first.'; return; }
+  $('whatsappLoginError').textContent = '';
+  $('whatsappPhoneSubmitBtn').disabled = true;
+  $('whatsappPhoneSubmitBtn').textContent = 'Requesting code…';
+  try {
+    const resp = await authedFetch('/api/social-calling?action=whatsapp-start-phone', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Could not get a pairing code');
+    if (data.status === 'connected') { $('whatsappQrWrap').classList.add('hidden'); loadSocialAccounts(); return; }
+    if (data.pairingCode) showWhatsappPairingCode(data.pairingCode);
+    watchWhatsappStatus();
+  } catch (err) {
+    $('whatsappLoginError').textContent = err.message;
+  } finally {
+    $('whatsappPhoneSubmitBtn').disabled = false;
+    $('whatsappPhoneSubmitBtn').textContent = 'Get code';
+  }
+});
   }
 }
 

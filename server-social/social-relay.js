@@ -348,13 +348,7 @@ async function useSupabaseAuthState(userId) {
   return { state: { creds, keys }, saveCreds: persist };
 }
 
-async function whatsappStart(userId) {
-  const { state, saveCreds } = await useSupabaseAuthState(userId);
-  const sock = makeWASocket({ auth: state, printQRInTerminal: false, syncFullHistory: false });
-  const entry = { sock, qrDataUrl: null, status: 'pending_qr' };
-  whatsappSessions.set(userId, entry);
-
-  sock.ev.on('creds.update', saveCreds);
+function wireWhatsappSocket(userId, sock, entry) {
   sock.ev.on('connection.update', async (update) => {
     const { connection, qr, lastDisconnect } = update;
     if (qr) {
@@ -383,10 +377,24 @@ async function whatsappStart(userId) {
       }
     }
   });
+}
 
-  // Give it a moment to produce a QR (or connect immediately from stored creds).
+async function whatsappStart(userId) {
+  const { state, saveCreds } = await useSupabaseAuthState(userId);
+  const sock = makeWASocket({ auth: state, printQRInTerminal: false, syncFullHistory: false });
+  const entry = { sock, qrDataUrl: null, pairingCode: null, status: 'pending_qr' };
+  whatsappSessions.set(userId, entry);
+  sock.ev.on('creds.update', saveCreds);
+  wireWhatsappSocket(userId, sock, entry);
+
+  // Give it a moment to produce a QR (or connect immediately from stored
+  // creds), but not too long — this whole request has to survive a cold
+  // Render instance waking up *and* Vercel's own function timeout on top of
+  // it, so keep this short and let the client's status-polling loop (every
+  // 3s, already in place) pick up the QR on a follow-up call if it's not
+  // ready yet rather than holding this request open for it.
   return new Promise((resolve) => {
-    const deadline = Date.now() + 15_000;
+    const deadline = Date.now() + 6_000;
     const poll = setInterval(() => {
       if (entry.qrDataUrl || entry.status === 'connected' || Date.now() > deadline) {
         clearInterval(poll);
@@ -396,9 +404,44 @@ async function whatsappStart(userId) {
   });
 }
 
+// Alternative to QR scanning: WhatsApp's "Link with phone number" flow.
+// Skips the QR entirely — Baileys asks WhatsApp's servers for an 8-char
+// code tied to this session, the user types that into their phone under
+// Linked Devices -> Link with phone number, and the socket connects the
+// same way a scanned QR would have.
+async function whatsappStartWithPhone(userId, phone) {
+  const digits = String(phone || '').replace(/[^\d]/g, '');
+  if (!/^[1-9]\d{7,14}$/.test(digits)) {
+    const err = new Error('Enter the full number with country code, e.g. 2349038226059 (no +).');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const { state, saveCreds } = await useSupabaseAuthState(userId);
+  const sock = makeWASocket({ auth: state, printQRInTerminal: false, syncFullHistory: false });
+  const entry = { sock, qrDataUrl: null, pairingCode: null, status: 'pending_code' };
+  whatsappSessions.set(userId, entry);
+  sock.ev.on('creds.update', saveCreds);
+  wireWhatsappSocket(userId, sock, entry);
+
+  if (sock.authState.creds.registered) {
+    // Already linked (stored creds are still valid) — no code needed,
+    // connection.update('open') above will fire on its own shortly.
+    return { status: entry.status, pairingCode: null };
+  }
+
+  // Baileys needs a beat after socket creation before requestPairingCode is
+  // ready to be called, or it can throw "Connection Closed".
+  await new Promise((r) => setTimeout(r, 2_000));
+  const code = await sock.requestPairingCode(digits);
+  entry.pairingCode = code;
+  await upsertWhatsappStatus(userId, { status: 'pending_code', last_error: null });
+  return { status: entry.status, pairingCode: code };
+}
+
 async function whatsappStatusCheck(userId) {
   const entry = whatsappSessions.get(userId);
-  if (entry) return { status: entry.status, qr: entry.qrDataUrl };
+  if (entry) return { status: entry.status, qr: entry.qrDataUrl, pairingCode: entry.pairingCode };
   const { data } = await supabase.from('whatsapp_accounts').select('status, display_name').eq('user_id', userId).maybeSingle();
   return { status: data?.status || 'disconnected', displayName: data?.display_name || null };
 }
@@ -497,6 +540,7 @@ app.post('/telegram/disconnect', wrap((req) => telegramDisconnect(req.userId)));
 app.post('/telegram/call', wrap((req) => telegramCall(req.userId, req.body?.to)));
 
 app.post('/whatsapp/start', wrap((req) => whatsappStart(req.userId)));
+app.post('/whatsapp/start-with-phone', wrap((req) => whatsappStartWithPhone(req.userId, req.body?.phone)));
 app.get('/whatsapp/status', wrap((req) => whatsappStatusCheck(req.userId)));
 app.post('/whatsapp/disconnect', wrap((req) => whatsappDisconnect(req.userId)));
 app.post('/whatsapp/call', wrap((req) => whatsappCall(req.userId, req.body?.to)));
