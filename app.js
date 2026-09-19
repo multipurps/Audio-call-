@@ -2014,8 +2014,6 @@ $('whatsappPhoneSubmitBtn').addEventListener('click', async () => {
     $('whatsappPhoneSubmitBtn').textContent = 'Get code';
   }
 });
-  }
-}
 
 // ---------- language ----------
 $('profileLanguage').addEventListener('change', async () => {
