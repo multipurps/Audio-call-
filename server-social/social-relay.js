@@ -57,11 +57,32 @@ function encrypt(plaintext) {
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return Buffer.concat([iv, tag, ciphertext]); // stored as bytea: iv(12) + tag(16) + ciphertext
+  const combined = Buffer.concat([iv, tag, ciphertext]); // iv(12) + tag(16) + ciphertext
+  // supabase-js sends this straight to PostgREST as JSON. A raw Node
+  // Buffer serializes via its own toJSON() as {"type":"Buffer","data":[...]}
+  // — not valid bytea input. Postgres/PostgREST's wire format for writing
+  // bytea is a hex string prefixed with \x, so that's what actually needs
+  // to go in the request body.
+  return '\\x' + combined.toString('hex');
 }
 
 function decrypt(bytea) {
-  const buf = Buffer.isBuffer(bytea) ? bytea : Buffer.from(bytea);
+  // Reading a bytea column back through PostgREST/supabase-js returns the
+  // same "\x<hex>" string form, not a Buffer. Buffer.from(str) (implicit
+  // utf8) on that string silently decodes to garbage bytes instead of
+  // throwing — which then fails GCM tag verification with Node's own
+  // "Unsupported state or unable to authenticate data", the exact error
+  // every "connected" Telegram/WhatsApp session was hitting on first use
+  // after this bug: the row really was there, decrypting it just always
+  // failed.
+  let buf;
+  if (Buffer.isBuffer(bytea)) {
+    buf = bytea;
+  } else if (typeof bytea === 'string' && bytea.startsWith('\\x')) {
+    buf = Buffer.from(bytea.slice(2), 'hex');
+  } else {
+    buf = Buffer.from(bytea); // last-resort fallback — shouldn't be reachable via PostgREST
+  }
   const key = Buffer.from(ENC_KEY, 'base64');
   const iv = buf.subarray(0, 12);
   const tag = buf.subarray(12, 28);
@@ -80,10 +101,16 @@ const telegramClients = new Map(); // userId -> connected TelegramClient
 const whatsappSessions = new Map(); // userId -> { sock, qrDataUrl, status }
 
 async function upsertTelegramStatus(userId, patch) {
-  await supabase.from('telegram_accounts').upsert({ user_id: userId, updated_at: new Date().toISOString(), ...patch }, { onConflict: 'user_id' });
+  const { error } = await supabase.from('telegram_accounts').upsert({ user_id: userId, updated_at: new Date().toISOString(), ...patch }, { onConflict: 'user_id' });
+  // Was previously silently ignored — a failed write here (e.g. the bytea
+  // encoding bug above) left status looking 'connected' in memory/response
+  // while nothing actually persisted, which is exactly how that bug hid
+  // for as long as it did. Surface it instead.
+  if (error) console.error(`upsertTelegramStatus(${userId}) failed:`, error.message);
 }
 async function upsertWhatsappStatus(userId, patch) {
-  await supabase.from('whatsapp_accounts').upsert({ user_id: userId, updated_at: new Date().toISOString(), ...patch }, { onConflict: 'user_id' });
+  const { error } = await supabase.from('whatsapp_accounts').upsert({ user_id: userId, updated_at: new Date().toISOString(), ...patch }, { onConflict: 'user_id' });
+  if (error) console.error(`upsertWhatsappStatus(${userId}) failed:`, error.message);
 }
 
 // ---------------------------------------------------------------------------
@@ -97,9 +124,21 @@ async function upsertWhatsappStatus(userId, patch) {
 // ---------------------------------------------------------------------------
 async function getOrRestoreTelegramClient(userId) {
   if (telegramClients.has(userId)) return telegramClients.get(userId);
-  const { data } = await supabase.from('telegram_accounts').select('session_encrypted, status').eq('user_id', userId).maybeSingle();
+  const { data, error } = await supabase.from('telegram_accounts').select('session_encrypted, status').eq('user_id', userId).maybeSingle();
+  if (error) throw new Error(`Could not read Telegram account: ${error.message}`);
   if (!data?.session_encrypted || data.status !== 'connected') return null;
-  const sessionString = decrypt(data.session_encrypted);
+  let sessionString;
+  try {
+    sessionString = decrypt(data.session_encrypted);
+  } catch (err) {
+    // A row written before the bytea-encoding fix above decrypts to
+    // garbage forever — no amount of retrying fixes it. Clear it and make
+    // the account look disconnected so the user gets a clean "please
+    // relink" instead of a bare crypto error on every call attempt.
+    console.error(`Telegram session for ${userId} failed to decrypt (likely a pre-fix row) — clearing it:`, err.message);
+    await upsertTelegramStatus(userId, { status: 'disconnected', session_encrypted: null, last_error: 'Session data was unreadable and had to be cleared — please reconnect Telegram.' });
+    return null;
+  }
   const client = new TelegramClient(new StringSession(sessionString), TELEGRAM_API_ID, TELEGRAM_API_HASH, { connectionRetries: 5 });
   await client.connect();
   telegramClients.set(userId, client);
@@ -263,10 +302,22 @@ async function telegramCall(userId, toUsernameOrPhone) {
 // behind WHATSAPP_CALLING_ENABLED, off by default. See README-social.md.
 // ---------------------------------------------------------------------------
 async function useSupabaseAuthState(userId) {
-  const { data } = await supabase.from('whatsapp_accounts').select('auth_state_encrypted').eq('user_id', userId).maybeSingle();
+  const { data, error } = await supabase.from('whatsapp_accounts').select('auth_state_encrypted').eq('user_id', userId).maybeSingle();
+  if (error) throw new Error(`Could not read WhatsApp account: ${error.message}`);
   let stored = null;
   if (data?.auth_state_encrypted) {
-    try { stored = JSON.parse(decrypt(data.auth_state_encrypted), BufferJSON.reviver); } catch { stored = null; }
+    try {
+      stored = JSON.parse(decrypt(data.auth_state_encrypted), BufferJSON.reviver);
+    } catch (err) {
+      // Same class of bug as the Telegram side (see decrypt() above) — a
+      // row written before the bytea-encoding fix can't be recovered.
+      // Fall back to a blank identity, which just means the next
+      // /whatsapp/start produces a fresh QR to re-pair, instead of the
+      // relay crashing or looping on this account forever.
+      console.error(`WhatsApp auth state for ${userId} failed to decrypt (likely a pre-fix row) — starting fresh:`, err.message);
+      await upsertWhatsappStatus(userId, { status: 'disconnected', auth_state_encrypted: null, last_error: 'Session data was unreadable and had to be cleared — please reconnect WhatsApp.' });
+      stored = null;
+    }
   }
   const creds = stored?.creds || initAuthCreds();
   const keysData = stored?.keys || {};
