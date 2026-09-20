@@ -406,10 +406,17 @@ async function sendMessage(req, res, supabase, userId) {
     } else if (!intent.phoneNumber) {
       const name = (intent.contactName || '').trim().toLowerCase();
       if (name) {
-        contact =
-          (contacts || []).find((c) => c.name.toLowerCase() === name) ||
-          (contacts || []).find((c) => c.name.toLowerCase().includes(name) || name.includes(c.name.toLowerCase())) ||
-          null;
+        const exact = (contacts || []).filter((c) => c.name.toLowerCase() === name);
+        const partial = (contacts || []).filter((c) => c.name.toLowerCase().includes(name) || name.includes(c.name.toLowerCase()));
+        const matches = exact.length ? exact : partial;
+        if (matches.length === 1) {
+          contact = matches[0];
+        } else if (matches.length > 1) {
+          // Ambiguous — ask instead of guessing which one to dial.
+          const list = matches.map((c) => c.name).join(', ');
+          newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I've got a few contacts named like that — ${list}. Who do you mean?`, null, msgSource));
+          return respond();
+        }
       }
     }
 
