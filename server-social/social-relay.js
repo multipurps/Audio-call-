@@ -350,31 +350,35 @@ async function useSupabaseAuthState(userId) {
 
 function wireWhatsappSocket(userId, sock, entry) {
   sock.ev.on('connection.update', async (update) => {
-    const { connection, qr, lastDisconnect } = update;
-    if (qr) {
-      entry.qrDataUrl = await QRCode.toDataURL(qr);
-      entry.status = 'pending_qr';
-      await upsertWhatsappStatus(userId, { status: 'pending_qr', last_error: null });
-    }
-    if (connection === 'open') {
-      entry.status = 'connected';
-      await upsertWhatsappStatus(userId, {
-        whatsapp_jid: sock.user?.id || null,
-        display_name: sock.user?.name || sock.user?.notify || null,
-        status: 'connected',
-        last_error: null,
-      });
-    }
-    if (connection === 'close') {
-      const statusCode = lastDisconnect?.error?.output?.statusCode;
-      if (statusCode === DisconnectReason.loggedOut) {
-        whatsappSessions.delete(userId);
-        await upsertWhatsappStatus(userId, { status: 'disconnected', auth_state_encrypted: null });
-      } else {
-        // Transient drop — leave status as-is; next /whatsapp/status or
-        // /whatsapp/call call will lazily reconnect via getOrRestoreWhatsapp().
-        whatsappSessions.delete(userId);
+    try {
+      const { connection, qr, lastDisconnect } = update;
+      if (qr) {
+        entry.qrDataUrl = await QRCode.toDataURL(qr);
+        entry.status = 'pending_qr';
+        await upsertWhatsappStatus(userId, { status: 'pending_qr', last_error: null });
       }
+      if (connection === 'open') {
+        entry.status = 'connected';
+        await upsertWhatsappStatus(userId, {
+          whatsapp_jid: sock.user?.id || null,
+          display_name: sock.user?.name || sock.user?.notify || null,
+          status: 'connected',
+          last_error: null,
+        });
+      }
+      if (connection === 'close') {
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        if (statusCode === DisconnectReason.loggedOut) {
+          whatsappSessions.delete(userId);
+          await upsertWhatsappStatus(userId, { status: 'disconnected', auth_state_encrypted: null });
+        } else {
+          // Transient drop — leave status as-is; next /whatsapp/status or
+          // /whatsapp/call call will lazily reconnect via getOrRestoreWhatsapp().
+          whatsappSessions.delete(userId);
+        }
+      }
+    } catch (err) {
+      console.error(`wireWhatsappSocket connection.update handler failed for user ${userId}:`, err);
     }
   });
 }
@@ -424,7 +428,7 @@ async function whatsappStartWithPhone(userId, phone) {
   sock.ev.on('creds.update', saveCreds);
   wireWhatsappSocket(userId, sock, entry);
 
-  if (sock.authState.creds.registered) {
+  if (state.creds.registered) {
     // Already linked (stored creds are still valid) — no code needed,
     // connection.update('open') above will fire on its own shortly.
     return { status: entry.status, pairingCode: null };
@@ -511,6 +515,22 @@ async function whatsappCall(userId, toJidOrPhone) {
 // HTTP surface
 // ---------------------------------------------------------------------------
 const app = express();
+
+// Every route here goes through wrap() below, which catches synchronous
+// errors and rejected promises from the route handler itself fine — but
+// Baileys/GramJS fire a lot of their own async work from event listeners
+// (sock.ev.on('connection.update', async (update) => {...}), etc.) that
+// aren't awaited by any request's try/catch at all. An error thrown in one
+// of those becomes an unhandled rejection, and Node's default behavior for
+// those is to crash the whole process — which is what actually produces a
+// 502 (the service is down, not "this one request failed") rather than a
+// normal error response. Log and survive instead of going down.
+process.on('unhandledRejection', (err) => {
+  console.error('[unhandledRejection]', err);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+});
 app.use(express.json());
 
 // Public — Render's health check hits this without the internal secret.
