@@ -1,6 +1,7 @@
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { relayRequest } from '../lib/socialRelayClient.js';
 import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsStartCall } from '../lib/wacallsClient.js';
+import { mpRelayRequest } from '../lib/mpRelayClient.js';
 
 // Telegram + WhatsApp account linking and calling, combined into one file
 // behind ?action=... — same reason as api/admin.js and api/call-answering.js:
@@ -8,12 +9,17 @@ import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete
 // app was already at that cap before this feature. Splitting Telegram and
 // WhatsApp into separate files would push it over.
 //
-// Telegram: this file never touches a session string — it forwards login
-// steps (phone, OTP, 2FA password) to the relay (server-social/social-relay.js
-// on Render), which is the only thing holding the encryption key for
-// telegram_accounts.session_encrypted.
+// Telegram: login (phone/OTP/2FA) now goes through mp-relay
+// (github.com/multipurps/mp-relay), a MadelineProto-based service, separate
+// Render deployment - not the old relay. The old relay's telegramCall sent
+// a real RequestCall but with a placeholder/random g_a_hash instead of an
+// actual Diffie-Hellman exchange (see that file's own comments); it could
+// never have produced a working call. This file still forwards Telegram
+// *call-placing* to that old relay for now (line ~181) - fixing login
+// first, call-placing is deliberately its own separate next step, not
+// bundled into this pass.
 //
-// WhatsApp: moved off that same relay (it used Baileys, which never
+// WhatsApp: moved off that same old relay (it used Baileys, which never
 // reliably paired) onto WaCalls (github.com/multipurps/WaCalls, a
 // whatsmeow-based Go service, separate Render deployment). WaCalls has no
 // concept of "which of our users is this" - only session ids - so this
@@ -72,25 +78,31 @@ async function telegramStart(req, res, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { phone } = req.body || {};
   if (!phone || !phone.trim()) return res.status(400).json({ error: 'phone required (with country code, e.g. +234...)' });
-  const data = await relayRequest('/telegram/start', { userId, method: 'POST', body: { phone: phone.trim() } });
-  return res.status(200).json(data); // { status: 'pending_otp' }
+  await mpRelayRequest(`/sessions/${userId}/start`, { method: 'POST', body: { phone: phone.trim() } });
+  return res.status(200).json({ status: 'pending_otp' });
 }
 
 async function telegramVerify(req, res, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { code, password } = req.body || {};
+  // The frontend calls this endpoint twice in the 2FA case: first with just
+  // the code, then again with just the password once it shows that field.
+  // mp-relay itself has two separate endpoints for this (verify, then 2fa)
+  // since they're genuinely different MadelineProto calls - this bridges
+  // that back to the single-endpoint shape the frontend already expects.
+  if (password && password.trim()) {
+    await mpRelayRequest(`/sessions/${userId}/2fa`, { method: 'POST', body: { password: password.trim() } });
+    return res.status(200).json({ status: 'connected' });
+  }
   if (!code || !code.trim()) return res.status(400).json({ error: 'code required' });
-  // password: only needed if the account has 2FA (cloud password) enabled —
-  // Telegram's login flow asks for it as a second step; the relay surfaces
-  // that as its own status rather than us guessing when to ask for it.
-  const data = await relayRequest('/telegram/verify', { userId, method: 'POST', body: { code: code.trim(), password } });
-  return res.status(200).json(data); // { status: 'connected' | 'needs_password', displayName }
+  const data = await mpRelayRequest(`/sessions/${userId}/verify`, { method: 'POST', body: { code: code.trim() } });
+  return res.status(200).json({ status: data.status === 'need_2fa' ? 'needs_password' : 'connected' });
 }
 
 async function telegramDisconnect(req, res, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const data = await relayRequest('/telegram/disconnect', { userId, method: 'POST' });
-  return res.status(200).json(data);
+  await mpRelayRequest(`/sessions/${userId}`, { method: 'DELETE' });
+  return res.status(200).json({ status: 'disconnected' });
 }
 
 // Every function below persists the WaCalls session id it's working with to
@@ -172,6 +184,11 @@ async function placeCall(req, res, supabase, userId) {
     const data = await wacallsStartCall(userId, row.wacalls_session_id, to.trim());
     return res.status(200).json(data); // { callId, status } - matches the shape the Telegram path already returns
   }
+  // Telegram call-placing still goes through the OLD relay here - it's the
+  // one with the placeholder/random g_a_hash instead of a real DH exchange
+  // (see this file's top comment and server-social/social-relay.js's own
+  // comments on telegramCall). Login was fixed first (mp-relay); this is
+  // deliberately still broken until that's done as its own next step.
   const data = await relayRequest(`/${platform}/call`, { userId, method: 'POST', body: { to: to.trim() } });
   return res.status(200).json(data); // { callId, status }
 }
