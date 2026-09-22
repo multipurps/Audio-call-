@@ -6,6 +6,10 @@
 // connection stays open for the whole call. Deploy this on Render, same as
 // the other single-file apps' backends.
 //
+// A call runs in one of two modes (calls.call_mode, switchable mid-call from
+// the app's call screen). Everything below describes AI mode, which is the
+// original and unchanged behaviour:
+//
 // Per call this does, in a loop:
 //   caller speaks -> buffered -> flushed to Groq Whisper (STT)
 //   -> transcript fed into the call's chat brain via fal.ai's OpenRouter
@@ -14,13 +18,27 @@
 //   -> reply text -> Fish Audio TTS -> mulaw/8000 audio
 //   -> streamed back to Twilio as 'media' frames
 //
+// Direct Caller Mode (calls.call_mode = 'direct') replaces the loop above
+// with a straight pipe and none of its steps:
+//
+//   user's mic (browser) -> w-okada/RVC voice conversion -> mulaw -> Twilio
+//   caller                -> Twilio -> mulaw decode      -> browser speaker
+//
+// No STT, no LLM, no TTS, no transcript. The browser's microphone socket
+// lands on /direct and is joined to this call's Twilio socket by
+// server/directBridge.js; the conversion itself is server/voiceChanger.js.
+// See server/AUDIO-PATH.md for the audio path this replaced and where the
+// single outgoing track actually is.
+//
 // This is the skeleton: the wiring is real and the API calls are correct,
 // but buffering thresholds (how much silence = "they're done talking") and
 // the call-objective/IVR-navigation logic in buildSystemPrompt() need
 // tuning against real calls before this is production-ready.
 
+import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { createClient } from '@supabase/supabase-js';
+import * as bridge from './directBridge.js';
 
 const PORT = process.env.PORT || 8080;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -31,10 +49,42 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
-const wss = new WebSocketServer({ port: PORT });
-console.log(`relay listening on :${PORT}`);
+// Two different clients connect to this process:
+//   * Twilio's media stream, on whatever path RELAY_WS_URL points at
+//     (api/calls-twiml.js builds `?callId=…` onto it) — the AI call audio.
+//   * the browser's microphone, on /direct — Direct Caller Mode.
+// Both are `ws`, so the upgrades are routed by pathname here rather than
+// giving the second client its own port. Any path that isn't /direct keeps
+// the original behaviour, so an existing RELAY_WS_URL still works unchanged.
+const httpServer = http.createServer(bridge.handleHttp);
+const twilioWss = new WebSocketServer({ noServer: true });
+const directWss = new WebSocketServer({ noServer: true });
 
-wss.on('connection', (ws, req) => {
+httpServer.on('upgrade', (req, socket, head) => {
+  const { pathname } = new URL(req.url, 'http://localhost');
+  if (pathname === '/direct') {
+    directWss.handleUpgrade(req, socket, head, (ws) => directWss.emit('connection', ws, req));
+    return;
+  }
+  twilioWss.handleUpgrade(req, socket, head, (ws) => twilioWss.emit('connection', ws, req));
+});
+
+httpServer.listen(PORT, () => console.log(`relay listening on :${PORT}`));
+
+// Browser microphone sockets. Auth is a short-lived HMAC ticket minted by
+// api/calls.js?action=directBridge — without it, anyone who learned a callId
+// could inject audio into a live call.
+directWss.on('connection', (ws, req) => {
+  const url = new URL(req.url, 'http://localhost');
+  bridge.attachBrowser(ws, {
+    callId: url.searchParams.get('callId'),
+    userId: url.searchParams.get('userId'),
+    exp: url.searchParams.get('exp'),
+    token: url.searchParams.get('token'),
+  });
+});
+
+twilioWss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://localhost');
   const callId = url.searchParams.get('callId');
   const state = {
@@ -49,14 +99,32 @@ wss.on('connection', (ws, req) => {
     history: [], // [{role:'user'|'assistant', content}]
     audioChunks: [],
     silenceTimer: null,
+    userId: null,
+    callMode: 'ai', // 'ai' | 'direct' — see server/directBridge.js
+    vcEnabled: true,
+    vcModelSlot: null,
   };
 
   ws.on('message', async (raw) => {
     const msg = JSON.parse(raw.toString());
 
     if (msg.event === 'start') {
-      state.streamSid = msg.start.streamSid;
-      await loadCallContext(state);
+      state.streamSid = msg.start?.streamSid || msg.streamSid;
+      try {
+        await loadCallContextWithTimeout(state);
+      } catch (err) {
+        // Existing deployments should have Supabase available; this guard is
+        // here so a transient metadata read failure doesn't kill the media
+        // WebSocket and leave the far end on a silent line. Defaults preserve
+        // the original AI mode, and Direct Mode can still be entered from the
+        // browser socket because the bridge matches by callId.
+        console.error(`relay: could not load call context for ${state.callId}:`, err.message);
+      }
+      // Register with the direct-call bridge before deciding whether to
+      // greet: in Direct Caller Mode there is no Emysa on this call, so a
+      // greeting would be the AI talking over the person who just picked up.
+      attachDirectBridge(ws, state);
+      if (state.callMode === 'direct') return;
       // Open with a natural greeting rather than dumping the objective —
       // matches the "exchange pleasantries first" requirement.
       await speak(ws, state, state.greetingOverride || greeting());
@@ -64,21 +132,78 @@ wss.on('connection', (ws, req) => {
     }
 
     if (msg.event === 'media') {
-      state.audioChunks.push(Buffer.from(msg.media.payload, 'base64'));
+      const callerAudio = Buffer.from(msg.media.payload, 'base64');
+      // Direct Caller Mode: the caller's audio goes to the user's ear, not
+      // to Whisper. Nothing below this line runs — no STT, no LLM, no TTS.
+      if (state.callMode === 'direct') {
+        bridge.onCallerAudio(state.callId, callerAudio);
+        return;
+      }
+      state.audioChunks.push(callerAudio);
       resetSilenceTimer(ws, state);
       return;
     }
 
     if (msg.event === 'stop') {
       clearTimeout(state.silenceTimer);
-      await finalizeCall(state);
+      bridge.detachTwilio(state.callId);
+      // A direct call has no transcript to summarise and no objective the AI
+      // was working on — running finalizeCall() on one would ask the model to
+      // summarise an empty conversation and overwrite the record with noise.
+      if (state.callMode !== 'direct') await finalizeCall(state);
       ws.close();
       return;
     }
   });
 
-  ws.on('close', () => clearTimeout(state.silenceTimer));
+  ws.on('close', () => {
+    clearTimeout(state.silenceTimer);
+    bridge.detachTwilio(state.callId);
+  });
 });
+
+// Wires this call's Twilio socket into the direct-call bridge. The two
+// callbacks are how Direct Caller Mode reaches back into the rest of the
+// process without the bridge importing the relay:
+//   * sendToTwilio is the same media-frame writer speak() uses, so converted
+//     microphone audio and AI speech go out on one identical code path.
+//   * onModeChange persists a mid-call mode flip and, when falling back to
+//     AI, notes it in the transcript the user is already watching.
+function attachDirectBridge(ws, state) {
+  bridge.attachTwilio({
+    callId: state.callId,
+    userId: state.userId,
+    ws,
+    streamSid: state.streamSid,
+    mode: state.callMode,
+    vcEnabled: state.vcEnabled,
+    modelSlot: state.vcModelSlot,
+    sendToTwilio: (mulawBuffer) => sendMulaw(ws, state, mulawBuffer),
+    onModeChange: async (mode, note) => {
+      // The in-memory switch happens first and unconditionally. The Supabase
+      // write is bookkeeping (it's what a later reconnect reads) and must not
+      // be able to take the call down: this callback is invoked without an
+      // await from the bridge, so a rejection here would surface as an
+      // unhandled rejection and kill the whole relay process.
+      state.callMode = mode;
+      state.audioChunks = [];
+      clearTimeout(state.silenceTimer);
+      try {
+        const patch = { call_mode: mode };
+        if (note) {
+          state.history.push({ speaker: 'ai', content: note });
+          patch.transcript = state.history;
+        }
+        await supabase.from('calls').update(patch).eq('id', state.callId);
+      } catch (err) {
+        console.error(`relay: could not persist call_mode for ${state.callId}:`, err.message);
+      }
+      // Coming back from direct mode with buffered audio from before the
+      // switch would feed stale caller speech into Whisper, which is why the
+      // two resets above run before the await rather than after it.
+    },
+  });
+}
 
 function greeting() {
   const h = new Date().getHours();
@@ -98,6 +223,19 @@ function resetSilenceTimer(ws, state) {
   state.silenceTimer = setTimeout(() => handleTurn(ws, state), 700);
 }
 
+async function loadCallContextWithTimeout(state) {
+  const timeoutMs = Number(process.env.CALL_CONTEXT_TIMEOUT_MS || 1500);
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`call context timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+  try {
+    return await Promise.race([loadCallContext(state), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function loadCallContext(state) {
   const { data: call } = await supabase.from('calls').select('*').eq('id', state.callId).maybeSingle();
   if (!call) return;
@@ -106,6 +244,14 @@ async function loadCallContext(state) {
   state.userId = call.user_id;
   state.contactId = call.contact_id || null;
   state.direction = call.direction || 'outbound';
+
+  // Direct Caller Mode (sql/013_direct_mode.sql): the call is handed to the
+  // user's own microphone instead of the AI. Falls back to 'ai' for any call
+  // row written before the column existed, so existing calls behave exactly
+  // as they did.
+  state.callMode = call.call_mode === 'direct' ? 'direct' : 'ai';
+  state.vcEnabled = call.vc_enabled !== false;
+  state.vcModelSlot = call.vc_model_slot ?? null;
 
   if (state.direction === 'inbound') {
     const { data: answering } = await supabase.from('call_answering_settings').select('greeting').eq('user_id', call.user_id).maybeSingle();
@@ -118,8 +264,10 @@ async function loadCallContext(state) {
   const { data: voice } = await supabase.from('voice_profiles').select('*').eq('user_id', call.user_id).maybeSingle();
   if (voice?.status === 'ready') state.voiceId = voice.provider_voice_id;
 
-  const { data: profile } = await supabase.from('profiles').select('name').eq('user_id', call.user_id).maybeSingle();
+  const { data: profile } = await supabase.from('profiles').select('name, vc_model_slot').eq('user_id', call.user_id).maybeSingle();
   state.userName = profile?.name || '';
+  // No voice picked for this specific call -> use the account's default.
+  if (state.vcModelSlot == null && profile?.vc_model_slot != null) state.vcModelSlot = profile.vc_model_slot;
 
   // Recent memories (Profile -> Memories) — contact-specific ones first,
   // since those are the most likely to actually be relevant to this call.
@@ -146,6 +294,11 @@ async function loadCallContext(state) {
 
 async function handleTurn(ws, state) {
   if (state.audioChunks.length === 0) return;
+  // The mode can flip to Direct Caller Mode at any moment, including while a
+  // turn is in flight — the STT/LLM awaits below span seconds. Bail out at
+  // the top and again right before speaking so a mid-turn switch can't have
+  // the AI answer over the top of the user talking to the caller.
+  if (state.callMode === 'direct') return;
   const audio = Buffer.concat(state.audioChunks);
   state.audioChunks = [];
 
@@ -165,6 +318,7 @@ async function handleTurn(ws, state) {
   state.history.push({ speaker: 'ai', content: reply.text });
   await pushTranscript(state);
 
+  if (state.callMode === 'direct') return; // switched mid-turn — see the guard at the top
   await speak(ws, state, reply.text);
 
   if (reply.shouldEnd) {
@@ -275,11 +429,19 @@ async function speak(ws, state, text) {
   });
   if (!resp.ok) return;
   const audioBuf = Buffer.from(await resp.arrayBuffer());
+  sendMulaw(ws, state, audioBuf);
+}
 
-  // Twilio expects base64 mulaw in ~20ms (160-byte) frames.
+// The single writer for everything the person on the other end of the line
+// hears. Was inlined in speak() until Direct Caller Mode needed to put
+// converted microphone audio out on the exact same wire — both now frame and
+// send through here, so there is one definition of "audio leaving this call"
+// (base64 mulaw, ~20 ms / 160-byte frames, as Twilio Media Streams expects).
+function sendMulaw(ws, state, mulawBuffer) {
+  if (!mulawBuffer || mulawBuffer.length === 0) return;
   const frameSize = 160;
-  for (let i = 0; i < audioBuf.length; i += frameSize) {
-    const frame = audioBuf.subarray(i, i + frameSize);
+  for (let i = 0; i < mulawBuffer.length; i += frameSize) {
+    const frame = mulawBuffer.subarray(i, i + frameSize);
     ws.send(JSON.stringify({
       event: 'media',
       streamSid: state.streamSid,

@@ -357,6 +357,48 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 #callScreen.assistantMode .callControlsRow{display:contents;}
 #callScreen.assistantMode .callBtn{margin:0 28px;}
 
+/* ---------- Direct Caller Mode (voice mode switch + voice changer) ---------- */
+/* The switch sits inside the call sheet so it reads as part of the call, not
+   as a settings screen. Hidden on the Emysa assistant call, where there is
+   no human on the line to hand over to. */
+.voiceModeBar{
+  flex:none; display:flex; gap:4px; margin:0 18px 10px; padding:4px; border-radius:999px;
+  background:var(--glass-bg); border:1px solid var(--glass-border);
+  backdrop-filter:blur(14px) saturate(150%); -webkit-backdrop-filter:blur(14px) saturate(150%);
+}
+.voiceModeBtn{
+  flex:1; padding:9px 6px; border:none; border-radius:999px; background:transparent;
+  color:var(--dim); font-size:13px; font-weight:600; letter-spacing:0.01em;
+}
+.voiceModeBtn.active{background:var(--accent); color:var(--coffee);}
+#callScreen.assistantMode .voiceModeBar{display:none;}
+
+.directPanel{
+  flex:1; min-height:0; overflow-y:auto; overscroll-behavior-y:contain;
+  padding:18px 18px 10px; display:flex; flex-direction:column; gap:10px;
+}
+.directPanelHead{display:flex; align-items:center; gap:9px; margin-bottom:2px;}
+.directPanelTitle{font-size:14px; font-weight:600; color:#fff;}
+.directDot{width:9px; height:9px; border-radius:50%; flex:none; background:var(--dim); transition:background 0.2s ease;}
+.directDot.live{background:var(--accent); box-shadow:0 0 0 4px rgba(255,255,255,0.12);}
+.directDot.warn{background:#e8a916;}
+
+/* Mic level. Purely a confidence signal that audio is actually leaving the
+   phone — the single most common "is this working?" question on a call. */
+.directMeter{height:5px; border-radius:3px; background:rgba(255,255,255,0.1); overflow:hidden; margin-bottom:4px;}
+.directMeterFill{height:100%; width:0%; border-radius:3px; background:var(--accent); transition:width 0.09s linear;}
+
+.directRow{padding:11px 13px; margin:0;}
+.directRow .hint{font-size:12px; color:var(--dim); margin-top:3px; line-height:1.35; text-transform:none; letter-spacing:0;}
+.directRow .cSelect{margin-top:8px;}
+.directStatus{font-size:12px; color:var(--dim); line-height:1.45; padding:2px 4px 4px; min-height:16px;}
+
+/* Direct Voice replaces the transcript rather than sitting under it: there is
+   no transcription happening, so an empty panel would just look broken. */
+#callScreen.directMode .transcriptPanel{display:none;}
+#callScreen.directMode .waveRow{display:none;}
+#callScreen.directMode .callBtn.hideInDirect{display:none;}
+
 /* ---------- admin ---------- */
 .hidden{display:none !important;}
 .tabBtn.hidden{display:none;}

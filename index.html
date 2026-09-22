@@ -430,6 +430,50 @@
     <div class="callSheet">
       <div class="transcriptPanel" id="transcriptPanel"></div>
 
+      <!-- Who is talking on this call. Shown on a real phone call only (not
+           on the Emysa assistant call, which is always the AI). Switching
+           here is live: the relay drops the STT/LLM/TTS loop the moment
+           Direct Voice is picked and starts piping the microphone instead. -->
+      <div class="voiceModeBar hidden" id="voiceModeBar" role="group" aria-label="Call voice mode">
+        <button type="button" class="voiceModeBtn active" id="voiceModeAi" data-voice-mode="ai">AI Voice</button>
+        <button type="button" class="voiceModeBtn" id="voiceModeDirect" data-voice-mode="direct">Direct Voice</button>
+      </div>
+
+      <!-- Direct Caller Mode controls. Replaces the transcript: there is
+           nothing to transcribe, because nothing is being transcribed. -->
+      <div class="directPanel hidden" id="directPanel">
+        <div class="directPanelHead">
+          <span class="directDot" id="directDot"></span>
+          <span class="directPanelTitle" id="directPanelTitle">Connecting your microphone…</span>
+        </div>
+        <div class="directMeter" id="directMeter"><div class="directMeterFill" id="directMeterFill"></div></div>
+
+        <div class="profileCard directRow">
+          <div class="cBody">
+            <div class="cValue">Voice changer</div>
+            <div class="hint" id="vcHint">Convert your voice before the caller hears it</div>
+          </div>
+          <div class="toggleSwitch" id="vcToggle"></div>
+        </div>
+
+        <div class="profileCard directRow">
+          <div class="cBody">
+            <div class="cValue">Voice</div>
+            <select class="cSelect" id="vcModelSelect"><option value="">Loading voices…</option></select>
+          </div>
+        </div>
+
+        <div class="profileCard directRow">
+          <div class="cBody">
+            <div class="cValue">Hear the caller here</div>
+            <div class="hint">Turn off if you're on another phone or headphones</div>
+          </div>
+          <div class="toggleSwitch on" id="directMonitorToggle"></div>
+        </div>
+
+        <div class="directStatus" id="directStatus"></div>
+      </div>
+
       <div class="waveRow" id="waveRow"><span></span><span></span><span></span><span></span><span></span></div>
 
       <div class="callControls">
@@ -937,6 +981,29 @@
       <button class="segmentedBtn" data-value="35">35s</button>
       <button class="segmentedBtn" data-value="45">45s</button>
     </div>
+
+    <div class="sectionLabel">Who talks on the call</div>
+    <div class="segmented" id="callModeGroup">
+      <button class="segmentedBtn" data-value="ai">AI Voice</button>
+      <button class="segmentedBtn" data-value="direct">Direct Voice</button>
+    </div>
+    <p class="profileSub">AI Voice: Emysa handles the conversation. Direct Voice: your own microphone goes into the call and Emysa stays out of it — no transcription, no AI replies. You can still switch on the call screen.</p>
+
+    <div class="sectionLabel">Voice changer</div>
+    <div class="profileCard">
+      <div class="cBody">
+        <div class="cValue">On by default</div>
+        <div class="hint">Only applies in Direct Voice mode. Off sends your normal microphone audio.</div>
+      </div>
+      <div class="toggleSwitch" id="vcDefaultToggle"></div>
+    </div>
+    <div class="profileCard">
+      <div class="cBody">
+        <div class="cValue">Default voice</div>
+        <select class="cSelect" id="vcDefaultSelect"><option value="">Not configured</option></select>
+      </div>
+    </div>
+    <div class="authHint" id="vcSettingsStatus" style="margin:-8px 0 14px 4px;"></div>
   </div>
 </div>
 

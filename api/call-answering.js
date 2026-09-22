@@ -35,7 +35,7 @@ async function callSettings(req, res, supabase, userId) {
   if (req.method === 'GET') {
     const { data, error } = await supabase
       .from('profiles')
-      .select('auto_retry, record_calls, ring_seconds')
+      .select('auto_retry, record_calls, ring_seconds, default_call_mode, vc_enabled, vc_model_slot')
       .eq('user_id', userId)
       .maybeSingle();
     if (error) return res.status(500).json({ error: error.message });
@@ -43,14 +43,24 @@ async function callSettings(req, res, supabase, userId) {
       auto_retry: data?.auto_retry ?? true,
       record_calls: data?.record_calls ?? true,
       ring_seconds: data?.ring_seconds ?? 25,
+      // Direct Caller Mode defaults (sql/013_direct_mode.sql). Read by
+      // api/calls.js and api/assistant.js when a call is placed.
+      default_call_mode: data?.default_call_mode === 'direct' ? 'direct' : 'ai',
+      vc_enabled: data?.vc_enabled !== false,
+      vc_model_slot: data?.vc_model_slot ?? null,
     });
   }
   if (req.method === 'POST') {
-    const { auto_retry, record_calls, ring_seconds } = req.body || {};
+    const { auto_retry, record_calls, ring_seconds, default_call_mode, vc_enabled, vc_model_slot } = req.body || {};
     const patch = { user_id: userId, updated_at: new Date().toISOString() };
     if (typeof auto_retry === 'boolean') patch.auto_retry = auto_retry;
     if (typeof record_calls === 'boolean') patch.record_calls = record_calls;
     if (typeof ring_seconds === 'number' && ring_seconds >= 10 && ring_seconds <= 60) patch.ring_seconds = ring_seconds;
+    if (default_call_mode === 'ai' || default_call_mode === 'direct') patch.default_call_mode = default_call_mode;
+    if (typeof vc_enabled === 'boolean') patch.vc_enabled = vc_enabled;
+    if (Number.isFinite(Number(vc_model_slot)) && vc_model_slot !== null && vc_model_slot !== undefined) {
+      patch.vc_model_slot = Number(vc_model_slot);
+    }
     const { error } = await supabase.from('profiles').upsert(patch, { onConflict: 'user_id' });
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ ok: true });

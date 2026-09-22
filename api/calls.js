@@ -1,4 +1,5 @@
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
+import { relayRequest } from '../lib/relayClient.js';
 
 export default async function handler(req, res) {
   const supabase = getServiceClient();
@@ -12,6 +13,10 @@ export default async function handler(req, res) {
     case 'hangup': return hangupCall(req, res, supabase, userId);
     case 'mute': return muteCall(req, res, supabase, userId);
     case 'list': return listCalls(req, res, supabase, userId);
+    case 'directBridge': return directBridge(req, res, supabase, userId);
+    case 'mode': return modeCall(req, res, supabase, userId);
+    case 'vcState': return vcState(req, res);
+    case 'vcSet': return vcSet(req, res, supabase, userId);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
   }
 }
@@ -40,6 +45,17 @@ async function createCall(req, res, supabase, userId) {
     return res.status(500).json({ error: 'Telephony not configured' });
   }
 
+  // Who talks on this call: Emysa ('ai') or the user's own microphone
+  // ('direct'). Explicit request value wins; otherwise the account default
+  // from Profile -> Call Settings. Anything unrecognised falls back to 'ai',
+  // which is the behaviour every caller of this endpoint has always got.
+  const { data: prefs } = await supabase
+    .from('profiles')
+    .select('default_call_mode, vc_enabled, vc_model_slot')
+    .eq('user_id', userId)
+    .maybeSingle();
+  const callMode = resolveCallMode(req.body?.callMode, prefs?.default_call_mode);
+
   const { data: call, error: insertErr } = await supabase
     .from('calls')
     .insert({
@@ -48,6 +64,9 @@ async function createCall(req, res, supabase, userId) {
       to_number: toNumber.trim(),
       objective: objective.trim(),
       status: 'queued',
+      call_mode: callMode,
+      vc_enabled: typeof req.body?.vcEnabled === 'boolean' ? req.body.vcEnabled : prefs?.vc_enabled !== false,
+      vc_model_slot: req.body?.vcModelSlot ?? prefs?.vc_model_slot ?? null,
     })
     .select()
     .single();
@@ -150,4 +169,129 @@ async function listCalls(req, res, supabase, userId) {
   const calls = (data || []).map((c) => ({ ...c, contact_name: c.contact_id ? namesById.get(c.contact_id) || null : null }));
 
   return res.status(200).json({ calls });
+}
+
+// ---------------------------------------------------------------------------
+// Direct Caller Mode
+// ---------------------------------------------------------------------------
+
+/**
+ * 'direct' only when explicitly asked for — by the request, or by the
+ * account default. Anything else is 'ai', which is what every caller of this
+ * endpoint has always got. (api/assistant.js has the same two lines inlined;
+ * importing one serverless function into another isn't worth saving them.)
+ */
+function resolveCallMode(requested, fallback) {
+  if (requested === 'direct' || requested === 'ai') return requested;
+  return fallback === 'direct' ? 'direct' : 'ai';
+}
+
+/**
+ * Hands the browser everything it needs to open the direct microphone socket
+ * on the relay: where to connect, and a short-lived ticket that proves this
+ * user owns this call.
+ *
+ * The ticket is minted by the relay, not here. That keeps the signing key in
+ * exactly one process — this function runs on Vercel, the relay runs on
+ * Render, and duplicating the HMAC between them is how the two silently stop
+ * agreeing after a key rotation.
+ */
+async function directBridge(req, res, supabase, userId) {
+  const callId = req.query?.callId || req.body?.callId;
+  if (!callId) return res.status(400).json({ error: 'callId required' });
+
+  const { data: call } = await supabase
+    .from('calls')
+    .select('id, status, call_mode, vc_enabled, vc_model_slot')
+    .eq('id', callId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!call) return res.status(404).json({ error: 'Call not found' });
+  if (!['queued', 'ringing', 'in_progress'].includes(call.status)) {
+    return res.status(409).json({ error: 'Call is not live' });
+  }
+
+  // The user's tap means "hand this call to my microphone". Persist that
+  // before Twilio necessarily connects so an early tap during ringing is not
+  // lost when the relay later loads the call row.
+  await supabase.from('calls').update({ call_mode: 'direct' }).eq('id', callId).eq('user_id', userId);
+
+  const relayUrl = process.env.RELAY_WS_URL;
+  if (!relayUrl) return res.status(500).json({ error: 'Call relay not configured' });
+
+  let ticket;
+  try {
+    ticket = await relayRequest('/direct/ticket', { method: 'POST', body: { callId, userId } });
+  } catch (err) {
+    return res.status(err.statusCode || 502).json({ error: err.message });
+  }
+
+  const ws = new URL(relayUrl);
+  ws.pathname = '/direct';
+  ws.search = '';
+  ws.searchParams.set('callId', call.id);
+  ws.searchParams.set('userId', userId);
+  ws.searchParams.set('exp', String(ticket.exp));
+  ws.searchParams.set('token', ticket.token);
+
+  return res.status(200).json({
+    wsUrl: ws.toString(),
+    callId: call.id,
+    mode: call.call_mode || 'ai',
+    vcEnabled: call.vc_enabled !== false,
+    vcModelSlot: call.vc_model_slot ?? null,
+    streamRate: ticket.streamRate,
+    playRate: ticket.playRate,
+    expiresAt: ticket.exp,
+  });
+}
+
+/** Which RVC voices the w-okada server can speak with right now. */
+async function modeCall(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { callId, mode } = req.body || {};
+  if (!callId || (mode !== 'ai' && mode !== 'direct')) {
+    return res.status(400).json({ error: 'callId and mode required' });
+  }
+  const { error } = await supabase.from('calls').update({ call_mode: mode }).eq('id', callId).eq('user_id', userId);
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ ok: true });
+}
+
+async function vcState(req, res) {
+  if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
+  try {
+    const data = await relayRequest('/vc/state');
+    return res.status(200).json(data);
+  } catch (err) {
+    return res.status(err.statusCode || 502).json({ error: err.message });
+  }
+}
+
+/**
+ * Select a voice. Two writes happen: the w-okada server loads the model into
+ * its active slot (affecting conversions immediately), and the user's profile
+ * remembers the choice as their default. The profile write happens even if
+ * the load failed, so a voice picked while the GPU box is asleep is still
+ * there once it wakes.
+ */
+async function vcSet(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { slot } = req.body || {};
+  const slotNum = Number(slot);
+  if (!Number.isFinite(slotNum)) return res.status(400).json({ error: 'slot required' });
+
+  const patch = { user_id: userId, vc_model_slot: slotNum, updated_at: new Date().toISOString() };
+  if (typeof req.body?.enabled === 'boolean') patch.vc_enabled = req.body.enabled;
+  const { error } = await supabase.from('profiles').upsert(patch, { onConflict: 'user_id' });
+  if (error) return res.status(500).json({ error: error.message });
+
+  try {
+    await relayRequest('/vc/model', { method: 'POST', body: { slot: slotNum } });
+    return res.status(200).json({ ok: true, slot: slotNum });
+  } catch (err) {
+    // Saved, but not live yet — the caller needs to know which of the two
+    // happened, since the UI shows the voice as active either way otherwise.
+    return res.status(202).json({ ok: false, slot: slotNum, saved: true, error: err.message });
+  }
 }

@@ -25,12 +25,46 @@ Android/Web app -> Vercel api/*.js -> Supabase (users, callers, calls, usage)
 
 Twilio call audio -> server/relay.js (Render) -> Groq (brain + Whisper STT)
                                                 -> Fish Audio (TTS)
+
+Direct Caller Mode (no AI):
+Browser mic -> server/relay.js -> w-okada/voice-changer (RVC) -> Twilio call
+Twilio caller audio -> server/relay.js -> Browser speaker (untouched)
 ```
 
 All provider keys (Twilio, Groq, Fish Audio) live server-side only, in env
 vars — the app owns the accounts, users never see or provide their own keys.
 Per-user monthly minute limits are enforced in `api/calls-create.js` before
 Twilio is ever touched.
+
+### Direct Caller Mode / realtime voice changer
+
+Emysa now has two separate phone-call modes:
+
+- **AI Voice** is the original pipeline: caller audio goes to Whisper + the
+  LLM, and Emysa's reply is spoken with Fish Audio. This path is unchanged and
+  is never routed through the user's microphone voice changer.
+- **Direct Voice** bypasses the AI completely. The browser opens a microphone
+  WebSocket to `server/relay.js` (`/direct`), and the relay streams that audio
+  into the already-active Twilio media stream. If the voice changer is on,
+  the relay sends the mic PCM to a running `w-okada/voice-changer` server
+  (`VOICE_CHANGER_URL`) with an RVC model loaded, receives converted PCM back,
+  and frames it as Twilio μ-law. If the voice changer is off, the mic goes
+  straight to Twilio after sample-rate/μ-law conversion. Incoming caller audio
+  is decoded and sent back to the browser untouched.
+
+Operational notes:
+
+- Deploy `server/` with `npm start` (now `node relay.js`) for Direct Voice.
+  `npm run start:patter` is kept for the experimental Patter relay, but it
+  does not contain the Direct Voice bridge.
+- `VOICE_CHANGER_URL` must point at VCClient/w-okada's server. A single
+  w-okada process has one active `modelSlotIndex`, so high-concurrency or
+  multi-tenant voice selection needs one VC instance per active voice/model
+  pool. The app exposes model slots as the selectable voices.
+- Set `DIRECT_BRIDGE_SECRET` on both Vercel and the relay, or reuse
+  `SOCIAL_RELAY_INTERNAL_SECRET` for both sides. This signs short-lived
+  browser tickets for the microphone WebSocket; the browser never talks to
+  the w-okada server directly.
 
 ## Design
 

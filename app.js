@@ -489,7 +489,7 @@ async function openCallFromMessage(callId) {
   const { calls } = await resp.json();
   const call = (calls || []).find((c) => c.id === callId);
   if (!call || !['queued', 'ringing', 'in_progress'].includes(call.status)) return; // call's over, nothing live to show
-  openCallScreen(call.id, call.to_number, call.contact_name);
+  openCallScreen(call.id, call.to_number, call.contact_name, call.call_mode);
 }
 
 // ---------- Header logo: shows a spinning ring while a call placed from
@@ -498,8 +498,8 @@ async function openCallFromMessage(callId) {
 let activeHeaderCall = null; // { id, toNumber, contactName } | null
 let headerCallChannel = null;
 
-function trackActiveCall(callId, toNumber, contactName) {
-  activeHeaderCall = { id: callId, toNumber, contactName };
+function trackActiveCall(callId, toNumber, contactName, callMode) {
+  activeHeaderCall = { id: callId, toNumber, contactName, callMode: callMode || 'ai' };
   $('homeHeaderLogoWrap').classList.add('calling');
   if (headerCallChannel) supabase.removeChannel(headerCallChannel);
   headerCallChannel = supabase
@@ -524,11 +524,11 @@ async function resumeActiveCallIfAny() {
   if (!resp.ok) return;
   const { calls } = await resp.json();
   const live = (calls || []).find((c) => ['queued', 'ringing', 'in_progress'].includes(c.status));
-  if (live) trackActiveCall(live.id, live.to_number, live.contact_name);
+  if (live) trackActiveCall(live.id, live.to_number, live.contact_name, live.call_mode);
 }
 
 $('homeHeaderLogoWrap').addEventListener('click', () => {
-  if (activeHeaderCall) openCallScreen(activeHeaderCall.id, activeHeaderCall.toNumber, activeHeaderCall.contactName);
+  if (activeHeaderCall) openCallScreen(activeHeaderCall.id, activeHeaderCall.toNumber, activeHeaderCall.contactName, activeHeaderCall.callMode);
 });
 
 async function sendChatMessage(text, onReply, source = 'text', channel = null) {
@@ -924,6 +924,11 @@ function openAssistantCallScreen() {
   callTranscriptForSummary = [];
   $('callScreen').classList.remove('hidden');
   $('callScreen').classList.add('assistantMode');
+  // Belt and braces alongside the assistantMode CSS: this screen is the AI
+  // conversation and has no phone call to hand over, so the Direct Voice
+  // switch must never be reachable from it.
+  $('voiceModeBar').classList.add('hidden');
+  $('directPanel').classList.add('hidden');
   $('callAudioBtn').innerHTML = MORE_BTN_HTML;
   $('callAudioBtn').onclick = () => openCallMoreMenu();
   $('callContactAvatar').style.display = 'none';
@@ -1183,8 +1188,191 @@ $('addContactBtn').addEventListener('click', async () => {
 let activeCallChannel = null;
 let callTimerInterval = null;
 let callAiMuted = false;
+let activeCallId = null; // the phone call currently on screen, for the mode switch
 
-function openCallScreen(callId, toNumber, contactName) {
+// ---------- Direct Caller Mode ----------
+// Loaded lazily: the module pulls in two AudioWorklet files and only matters
+// once someone actually picks Direct Voice, so there's no reason to parse it
+// on every app start. Cached so repeated switches don't re-fetch.
+let DirectCallAudioCtor = null;
+async function getDirectCallAudio() {
+  if (!DirectCallAudioCtor) {
+    const mod = await import('./client/directCallAudio.js');
+    DirectCallAudioCtor = mod.DirectCallAudio;
+  }
+  return DirectCallAudioCtor;
+}
+
+let directAudio = null;
+let directCallId = null;
+let directStarting = false;
+let directMonitorOn = true;
+let vcModelsCache = null;
+let vcActiveSlot = null; // slot the w-okada server currently has loaded
+
+function setDirectStatus(text) {
+  const el = $('directStatus');
+  if (el) el.textContent = text || '';
+}
+
+function setDirectDot(state) {
+  const dot = $('directDot');
+  if (!dot) return;
+  dot.classList.toggle('live', state === 'live');
+  dot.classList.toggle('warn', state === 'warn');
+}
+
+/**
+ * Turn this call over to the user's own microphone.
+ *
+ * The relay does the switching: telling it mode:'direct' stops it buffering
+ * caller audio for Whisper and stops it speaking, and starts accepting mic
+ * frames on the /direct socket. Nothing here touches the AI pipeline in
+ * app.js — the assistant call screen (openAssistantCallScreen) is a
+ * completely separate code path and is unaffected either way.
+ */
+async function enterDirectMode(callId) {
+  if (directStarting || (directAudio && directCallId === callId)) return;
+  directStarting = true;
+  $('callScreen').classList.add('directMode');
+  $('directPanel').classList.remove('hidden');
+  $('directPanelTitle').textContent = 'Connecting your microphone…';
+  setDirectDot('warn');
+  setDirectStatus('');
+
+  try {
+    const resp = await authedFetch(`/api/calls?action=directBridge&callId=${encodeURIComponent(callId)}`);
+    const data = await resp.json();
+    if (!resp.ok) {
+      setDirectStatus(data.error || 'Could not start the direct call.');
+      setDirectDot('warn');
+      return;
+    }
+
+    const Ctor = await getDirectCallAudio();
+    directCallId = callId;
+    directAudio = new Ctor({
+      wsUrl: data.wsUrl,
+      streamRate: data.streamRate,
+      playRate: data.playRate,
+      onStatus: (s) => {
+        if (!directAudio) return;
+        const vcOn = s.vc.enabled && s.vc.configured;
+        $('directPanelTitle').textContent = !s.connected
+          ? 'Reconnecting…'
+          : vcOn
+            ? 'Your converted voice is going to the caller'
+            : 'Your own voice is going to the caller';
+        setDirectDot(s.connected ? 'live' : 'warn');
+        $('vcToggle').classList.toggle('on', s.vc.enabled);
+        if (!s.vc.configured) {
+          $('vcHint').textContent = 'No voice changer is configured on this account';
+        } else if (s.vc.failedOver) {
+          $('vcHint').textContent = 'Voice changer unreachable — sending your own voice';
+        } else {
+          $('vcHint').textContent = s.vc.enabled
+            ? 'Convert your voice before the caller hears it'
+            : 'Off — the caller hears your normal microphone';
+        }
+        // Keep the mute button in step with the mic when the socket reconnects.
+        $('callMuteBtn').classList.toggle('active', s.muted);
+      },
+      onStats: (s) => {
+        if (!directAudio) return;
+        if (typeof s.level === 'number') {
+          // Mic RMS is small; scale it so ordinary speech fills the bar.
+          const pct = Math.max(0, Math.min(100, Math.round(s.level * 320)));
+          $('directMeterFill').style.width = `${pct}%`;
+        }
+        if (typeof s.rttMs === 'number') {
+          const extra = s.dropped ? ` · ${s.dropped} chunk${s.dropped === 1 ? '' : 's'} dropped` : '';
+          setDirectStatus(`Conversion latency ${s.rttMs} ms${extra}`);
+        }
+      },
+      onError: (message, meta) => {
+        if (meta?.fatal) {
+          setDirectStatus(message);
+          setDirectDot('warn');
+        } else {
+          setDirectStatus(message);
+        }
+      },
+    });
+
+    await directAudio.start();
+    directAudio.setVoiceChanger(data.vcEnabled !== false, data.vcModelSlot ?? undefined);
+    if (data.vcModelSlot != null) $('vcModelSelect').value = String(data.vcModelSlot);
+    loadVoiceModels(data.vcModelSlot);
+  } catch (err) {
+    // getUserMedia rejection lands here — the single most likely failure, and
+    // it needs to say "microphone" rather than a stack trace.
+    setDirectStatus(err?.name === 'NotAllowedError'
+      ? 'Microphone access is needed for Direct Voice.'
+      : `Could not start Direct Voice: ${err?.message || err}`);
+    setDirectDot('warn');
+  } finally {
+    directStarting = false;
+  }
+}
+
+async function exitDirectMode() {
+  const callId = directCallId || activeCallId;
+  const audio = directAudio;
+  directAudio = null;
+  directCallId = null;
+  if (audio) {
+    // Tell the relay first so it resumes the AI loop before the socket goes
+    // away — otherwise the relay treats the close as a dropped call and
+    // falls back to AI on its own with a note in the transcript.
+    audio.setMode('ai');
+    await audio.stop().catch(() => {});
+  }
+  if (callId) {
+    authedFetch('/api/calls?action=mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callId, mode: 'ai' }),
+    }).catch(() => {});
+  }
+  $('callScreen').classList.remove('directMode');
+  $('directPanel').classList.add('hidden');
+  $('directMeterFill').style.width = '0%';
+  setDirectStatus('');
+}
+
+async function loadVoiceModels(selectedSlot) {
+  const select = $('vcModelSelect');
+  let activeSlot = null;
+  if (!vcModelsCache) {
+    const resp = await authedFetch('/api/calls?action=vcState');
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.configured) {
+      select.innerHTML = `<option value="">${data.error ? 'Voice changer unavailable' : 'Not configured'}</option>`;
+      select.disabled = true;
+      $('vcToggle').classList.remove('on');
+      return;
+    }
+    if (!data.models?.length) {
+      select.innerHTML = '<option value="">No voices installed</option>';
+      select.disabled = true;
+      return;
+    }
+    vcModelsCache = data.models;
+    vcActiveSlot = data.activeSlot;
+  }
+  select.disabled = false;
+  select.innerHTML = vcModelsCache
+    .map((m) => `<option value="${m.slot}">${escapeHtml(m.name)}${m.type ? ` (${escapeHtml(m.type)})` : ''}</option>`)
+    .join('');
+
+  // Preference order: this call's slot, then the account default, then the
+  // slot the VC server already has loaded, then the first installed voice.
+  // Never leave the selector on a value that would load nothing.
+  activeSlot = selectedSlot ?? vcActiveSlot ?? vcModelsCache[0].slot;
+  if (vcModelsCache.some((m) => m.slot === activeSlot)) select.value = String(activeSlot);
+}
+
+function openCallScreen(callId, toNumber, contactName, callMode) {
   $('callScreen').classList.remove('hidden');
   $('callScreen').classList.remove('assistantMode');
   $('callAudioBtn').innerHTML = AUDIO_BTN_HTML;
@@ -1203,6 +1391,16 @@ function openCallScreen(callId, toNumber, contactName) {
   callAiMuted = false;
   $('callMuteBtn').classList.remove('active');
 
+  // Voice mode selector: shown on real phone calls only. The Emysa
+  // assistant call has no human on the line, so handing over the microphone
+  // there would be meaningless — openAssistantCallScreen() leaves this bar
+  // hidden and never touches any of the direct-call state below.
+  const initialMode = callMode === 'direct' ? 'direct' : 'ai';
+  activeCallId = callId;
+  $('voiceModeBar').classList.remove('hidden');
+  setVoiceModeUi(initialMode);
+  if (initialMode === 'direct') enterDirectMode(callId);
+
   const startedAt = Date.now();
   clearInterval(callTimerInterval);
   callTimerInterval = setInterval(() => {
@@ -1216,6 +1414,15 @@ function openCallScreen(callId, toNumber, contactName) {
   activeCallChannel = supabase
     .channel(`call-${callId}`)
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'calls', filter: `id=eq.${callId}` }, (payload) => {
+      // The relay writes call_mode when it takes the call back from Direct
+      // Voice (mic socket dropped, phone lost signal). Follow it, or the
+      // screen keeps showing a direct call that is actually the AI now.
+      if (payload.new.call_mode === 'ai' && $('callScreen').classList.contains('directMode')) {
+        setVoiceModeUi('ai');
+        teardownDirectMode();
+        $('directPanel').classList.add('hidden');
+        setDirectStatus('');
+      }
       renderTranscript(payload.new.transcript || []);
       if (['completed', 'failed', 'no_answer'].includes(payload.new.status)) closeCallScreen();
     })
@@ -1232,6 +1439,17 @@ function openCallScreen(callId, toNumber, contactName) {
   };
 
   $('callMuteBtn').onclick = async () => {
+    // Two different mutes on the same button, because two different things
+    // are being silenced. In Direct Voice it's your microphone; in AI Voice
+    // it's Emysa's voice, and the AI keeps listening either way (that's the
+    // existing behaviour, unchanged).
+    if ($('callScreen').classList.contains('directMode')) {
+      const muted = !$('callMuteBtn').classList.contains('active');
+      $('callMuteBtn').classList.toggle('active', muted);
+      directAudio?.setMuted(muted);
+      setDirectStatus(muted ? 'Microphone muted — the caller can\'t hear you' : '');
+      return;
+    }
     callAiMuted = !callAiMuted;
     $('callMuteBtn').classList.toggle('active', callAiMuted);
     await authedFetch('/api/calls?action=mute', {
@@ -1252,9 +1470,85 @@ function openCallScreen(callId, toNumber, contactName) {
 function closeCallScreen() {
   clearInterval(callTimerInterval);
   if (activeCallChannel) { supabase.removeChannel(activeCallChannel); activeCallChannel = null; }
+  // Release the microphone before hiding anything. Leaving the capture track
+  // running behind a hidden screen would keep the browser's recording
+  // indicator lit for the rest of the session.
+  teardownDirectMode();
   $('callScreen').classList.add('hidden');
+  $('voiceModeBar').classList.add('hidden');
+  $('directPanel').classList.add('hidden');
+  $('directMeterFill').style.width = '0%';
+  setDirectStatus('');
   loadCalls();
 }
+
+/** Stops direct-call audio without telling the relay anything. */
+function teardownDirectMode() {
+  const audio = directAudio;
+  directAudio = null;
+  directCallId = null;
+  $('callScreen').classList.remove('directMode');
+  if (audio) audio.stop().catch(() => {});
+}
+
+function setVoiceModeUi(mode) {
+  $('voiceModeAi').classList.toggle('active', mode === 'ai');
+  $('voiceModeDirect').classList.toggle('active', mode === 'direct');
+}
+
+/**
+ * Wires the mode switch and the voice-changer controls once, at load. The
+ * buttons live in the call screen's static markup, so this doesn't need to
+ * run per call — only the state they act on changes.
+ */
+function initDirectVoiceControls() {
+  $('voiceModeAi').addEventListener('click', () => {
+    if (!$('callScreen').classList.contains('directMode')) return;
+    setVoiceModeUi('ai');
+    exitDirectMode();
+  });
+
+  $('voiceModeDirect').addEventListener('click', () => {
+    if ($('callScreen').classList.contains('directMode')) return;
+    setVoiceModeUi('direct');
+    // Same iOS rule the assistant call follows: unlocking audio has to happen
+    // synchronously inside the tap, before the network round trip.
+    const ctx = getAssistantAudioCtx();
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    if ('audioSession' in navigator) { try { navigator.audioSession.type = 'play-and-record'; } catch {} }
+    enterDirectMode(activeCallId);
+  });
+
+  $('vcToggle').addEventListener('click', () => {
+    if (!directAudio) return;
+    const next = !$('vcToggle').classList.contains('on');
+    $('vcToggle').classList.toggle('on', next);
+    directAudio.setVoiceChanger(next);
+  });
+
+  $('vcModelSelect').addEventListener('change', (e) => {
+    const slot = Number(e.target.value);
+    if (!Number.isFinite(slot) || !directAudio) return;
+    directAudio.setModel(slot);
+    setDirectStatus('Loading that voice…');
+    // Remember it as the account default, so the next call starts here.
+    authedFetch('/api/calls?action=vcSet', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slot }),
+    }).then((resp) => resp.json().catch(() => ({})).then((d) => {
+      if (!resp.ok || d.error) setDirectStatus(d.error || 'Voice saved, but it could not be loaded yet.');
+    }));
+  });
+
+  $('directMonitorToggle').addEventListener('click', () => {
+    directMonitorOn = !$('directMonitorToggle').classList.contains('on');
+    $('directMonitorToggle').classList.toggle('on', directMonitorOn);
+    directAudio?.setMonitor(directMonitorOn);
+  });
+}
+
+initDirectVoiceControls();
 
 function renderTranscript(history) {
   const panel = $('transcriptPanel');
@@ -1672,7 +1966,79 @@ async function loadCallSettings() {
   document.querySelectorAll('#ringSecondsGroup .segmentedBtn').forEach((btn) => {
     btn.classList.toggle('active', Number(btn.dataset.value) === data.ring_seconds);
   });
+  document.querySelectorAll('#callModeGroup .segmentedBtn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.value === data.default_call_mode);
+  });
+  setToggle($('vcDefaultToggle'), data.vc_enabled);
+  loadDefaultVoiceSelect(data.vc_model_slot);
 }
+
+// Same voice list as the in-call selector, but populated from the profile's
+// stored default rather than from a live call. Fails soft: the voice changer
+// is an optional extra, and Call Settings has to keep working when the GPU
+// box behind it is asleep or not set up at all.
+async function loadDefaultVoiceSelect(storedSlot) {
+  const select = $('vcDefaultSelect');
+  const status = $('vcSettingsStatus');
+  let models = vcModelsCache;
+  if (!models) {
+    const resp = await authedFetch('/api/calls?action=vcState');
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.configured || !data.models?.length) {
+      select.innerHTML = '<option value="">Not configured</option>';
+      select.disabled = true;
+      status.textContent = data.error || 'No voice changer is connected, so Direct Voice will send your own microphone audio.';
+      return;
+    }
+    models = data.models;
+    vcModelsCache = models;
+    vcActiveSlot = data.activeSlot;
+  }
+  status.textContent = '';
+  select.disabled = false;
+  select.innerHTML = models
+    .map((m) => `<option value="${m.slot}">${escapeHtml(m.name)}${m.type ? ` (${escapeHtml(m.type)})` : ''}</option>`)
+    .join('');
+  const want = storedSlot ?? vcActiveSlot ?? models[0].slot;
+  if (models.some((m) => m.slot === want)) select.value = String(want);
+}
+
+document.querySelectorAll('#callModeGroup .segmentedBtn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#callModeGroup .segmentedBtn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    authedFetch('/api/call-answering?action=settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ default_call_mode: btn.dataset.value }),
+    });
+  });
+});
+$('vcDefaultToggle').addEventListener('click', () => {
+  const on = !$('vcDefaultToggle').classList.contains('on');
+  setToggle($('vcDefaultToggle'), on);
+  authedFetch('/api/call-answering?action=settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vc_enabled: on }),
+  });
+});
+$('vcDefaultSelect').addEventListener('change', (e) => {
+  const slot = Number(e.target.value);
+  if (!Number.isFinite(slot)) return;
+  // Goes through vcSet rather than the settings endpoint: that one also asks
+  // the relay to load the model now, so the first direct call doesn't wait on
+  // a cold model load.
+  authedFetch('/api/calls?action=vcSet', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slot }),
+  }).then((resp) => resp.json().catch(() => ({})).then((d) => {
+    $('vcSettingsStatus').textContent = resp.ok && !d.error
+      ? 'Saved.'
+      : `Saved as your default, but it isn't loaded yet: ${d.error || 'voice changer unreachable'}`;
+  }));
+});
 $('autoRetryToggle').addEventListener('click', () => {
   const on = !$('autoRetryToggle').classList.contains('on');
   setToggle($('autoRetryToggle'), on);

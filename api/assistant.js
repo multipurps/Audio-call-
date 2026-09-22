@@ -473,7 +473,7 @@ async function sendMessage(req, res, supabase, userId) {
 
     const verb = intent.action === 'retry' ? 'again now' : 'now';
     newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I'm calling ${label} ${verb}.`, placed.call.id, msgSource));
-    return respond({ callId: placed.call.id, toNumber, contactName: contact?.name || null });
+    return respond({ callId: placed.call.id, toNumber, contactName: contact?.name || null, callMode: placed.call.call_mode || 'ai' });
   }
 
   newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', intent.reply || 'Got it.', null, msgSource));
@@ -496,9 +496,13 @@ async function placeCall(supabase, userId, { toNumber, objective, contactId, cal
   const appUrl = process.env.PUBLIC_APP_URL;
   if (!accountSid || !authToken || !fromNumber || !appUrl) return { error: 'telephony not configured yet' };
 
-  const { data: settings } = await supabase.from('profiles').select('record_calls, ring_seconds').eq('user_id', userId).maybeSingle();
+  const { data: settings } = await supabase.from('profiles').select('record_calls, ring_seconds, default_call_mode, vc_enabled, vc_model_slot').eq('user_id', userId).maybeSingle();
   const recordCalls = settings?.record_calls ?? true;
   const ringSeconds = settings?.ring_seconds ?? 25;
+  // Direct Caller Mode default. A call the assistant places on your behalf is
+  // AI mode unless the account says otherwise — the relay reads this off the
+  // calls row when the media stream opens.
+  const callMode = settings?.default_call_mode === 'direct' ? 'direct' : 'ai';
 
   const { data: call, error: insertErr } = await supabase
     .from('calls')
@@ -510,6 +514,9 @@ async function placeCall(supabase, userId, { toNumber, objective, contactId, cal
       status: 'queued',
       contact_id: contactId || null,
       session_id: sessionId || null,
+      call_mode: callMode,
+      vc_enabled: settings?.vc_enabled !== false,
+      vc_model_slot: settings?.vc_model_slot ?? null,
     })
     .select()
     .single();
