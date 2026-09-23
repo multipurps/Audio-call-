@@ -1,5 +1,5 @@
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
-import { relayRequest } from '../lib/socialRelayClient.js';
+import { wacallsStartCall } from '../lib/wacallsClient.js';
 
 const LANGUAGE_NAMES = { en: 'English', es: 'Spanish', fr: 'French', pt: 'Portuguese', de: 'German', ha: 'Hausa', yo: 'Yoruba', ig: 'Igbo', sw: 'Swahili', ar: 'Arabic', hi: 'Hindi', zh: 'Chinese' };
 
@@ -449,13 +449,23 @@ async function sendMessage(req, res, supabase, userId) {
         newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `That number needs a country code to call on ${channelName} — e.g. +2349038226059, not ${toNumber}.`, null, msgSource));
         return respond();
       }
+      if (callChannel === 'telegram') {
+        // Telegram login (mp-relay) is real and working; call-placing was
+        // deliberately never built yet, on purpose, rather than repeat the
+        // old relay's mistake of pretending to ring with a fake DH
+        // exchange. Refusing honestly here, not routing through that.
+        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "Telegram calling isn't finished yet — your account is linked, but I can't actually place a call through it.", null, msgSource));
+        return respond();
+      }
       try {
         // Social calls live in their own table (social_calls) with their own
         // relay and status vocabulary — kept separate from Twilio's `calls`,
         // so there's no callId here to attach for the header's live-call
         // ring / transcript screen yet, same as this channel doesn't have
         // that UI built out on the client side yet either.
-        await relayRequest(`/${callChannel}/call`, { userId, method: 'POST', body: { to: digitsOnly } });
+        const { data: waRow } = await supabase.from('whatsapp_accounts').select('wacalls_session_id').eq('user_id', userId).maybeSingle();
+        if (!waRow?.wacalls_session_id) throw new Error('WhatsApp not connected for this user');
+        await wacallsStartCall(userId, waRow.wacalls_session_id, digitsOnly);
         const verb = intent.action === 'retry' ? 'again now' : 'now';
         newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `Calling ${label} on ${channelName} ${verb}.`, null, msgSource));
       } catch (err) {

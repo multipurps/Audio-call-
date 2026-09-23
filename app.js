@@ -1044,7 +1044,7 @@ async function startAssistantListening() {
                 callTranscriptForSummary.push({ role: 'assistant', content: reply });
                 await speakReply(reply);
               }
-            }, 'call');
+            }, 'call', selectedCallChannel);
           } else if (!resp.ok) {
             const errText = data.detail ? `${data.error}: ${data.detail}`.slice(0, 300) : (data.error || "Sorry, I didn't catch that.");
             // Errors are shown in the transcript, never spoken — Emysa's voice
@@ -1165,18 +1165,23 @@ $('addContactBtn').addEventListener('click', async () => {
   const name = $('newContactName').value.trim();
   const phoneNumber = $('newContactPhone').value.trim();
   if (!name || !phoneNumber) { $('contactStatus').textContent = 'Name and phone number are both required.'; return; }
+  $('addContactBtn').disabled = true;
   $('contactStatus').textContent = 'Saving…';
-  const resp = await authedFetch('/api/contacts', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, phoneNumber }),
-  });
-  const data = await resp.json();
-  if (!resp.ok) { $('contactStatus').textContent = data.error || 'Could not save contact.'; return; }
-  $('newContactName').value = '';
-  $('newContactPhone').value = '';
-  $('contactStatus').textContent = 'Contact added.';
-  loadContacts();
+  try {
+    const resp = await authedFetch('/api/contacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, phoneNumber }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { $('contactStatus').textContent = data.error || 'Could not save contact.'; return; }
+    $('newContactName').value = '';
+    $('newContactPhone').value = '';
+    $('contactStatus').textContent = 'Contact added.';
+    loadContacts();
+  } finally {
+    $('addContactBtn').disabled = false;
+  }
 });
 
 // ---------- active call screen ----------
@@ -1579,7 +1584,7 @@ $('referralsBtn').addEventListener('click', () => { loadReferrals(); openSheet('
 $('callAnsweringBtn').addEventListener('click', () => { loadCallAnswering(); openSheet('sheet-call-answering'); });
 $('memoriesBtn').addEventListener('click', () => { loadMemories(); openSheet('sheet-memories'); });
 $('callSettingsBtn').addEventListener('click', () => { loadCallSettings(); openSheet('sheet-call-settings'); });
-$('contactsBtn').addEventListener('click', () => openSheet('sheet-contacts'));
+$('contactsBtn').addEventListener('click', () => { openSheet('sheet-contacts'); loadContacts(); });
 $('archiveBtn').addEventListener('click', () => { loadArchivedChats(); openSheet('sheet-archive'); });
 $('getStartedBtn').addEventListener('click', () => openSheet('sheet-get-started'));
 
