@@ -1,0 +1,72 @@
+# Render Blueprint for the audio-call assistant (Pipecat) service.
+#
+# Deploy: Render dashboard -> New -> Blueprint -> point at this repo. Render
+# reads the `rootDir` below, so the repo root does not need its own render.yaml
+# (the existing `server/` and `server-social/` relays are configured in the
+# dashboard and are deliberately not managed here -- adding them would risk
+# changing how the working Twilio relay is built).
+#
+# This is a **Web Service**, not a Background Worker:
+#   * it must accept inbound WebSocket connections from the PHP relay, and
+#     Background Workers cannot accept inbound traffic at all;
+#   * it exposes /healthz and /readyz, which Render's health checks and any
+#     load balancer need to reach over HTTP.
+#
+# The free plan spins an instance down after inactivity. A cold start during a
+# live call drops the call, so a paid always-on plan is required for anything
+# beyond testing.
+
+services:
+  - type: web
+    name: audio-call-assistant
+    runtime: python
+    plan: starter          # must be always-on; see the note above
+    region: oregon
+    rootDir: pipecat-service
+    buildCommand: pip install -r requirements.txt
+    # `python -m app.main` reads PORT from the environment itself and binds
+    # 0.0.0.0, which Render requires (binding 127.0.0.1 is unreachable from
+    # Render's proxy).
+    startCommand: python -m app.main
+    healthCheckPath: /healthz
+    # Long-lived WebSocket connections need the longest graceful window the
+    # plan allows: Render sends SIGTERM, and app/main.py's lifespan handler
+    # uses that time to tell each in-flight carrier the call is ending.
+    autoDeploy: true
+    envVars:
+      # --- Set these in the dashboard; placeholders only here --------------
+      # Never commit real values. `sync: false` makes Render prompt for them
+      # rather than reading them from this file.
+      - key: ASSISTANT_BRIDGE_SECRET
+        sync: false          # shared with mp-relay; generate with:
+                             # python -c "import secrets;print(secrets.token_urlsafe(32))"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: FISH_API_KEY
+        sync: false
+
+      # --- Non-secret configuration ---------------------------------------
+      - key: ASSISTANT_STT_PROVIDER
+        value: groq
+      - key: ASSISTANT_LLM_PROVIDER
+        value: groq
+      - key: ASSISTANT_TTS_PROVIDER
+        value: fish
+      - key: ASSISTANT_BRIDGE_SAMPLE_RATE
+        value: "16000"
+      - key: ASSISTANT_IDLE_TIMEOUT_SECS
+        value: "30"
+      - key: ASSISTANT_HEARTBEAT_INTERVAL_SECS
+        value: "10"
+      - key: ASSISTANT_MAX_CALL_SECONDS
+        value: "1800"
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      # Persistent memory is OFF by default. Turning it on stores user data
+      # across calls, so it is a deliberate opt-in:
+      #   - key: ASSISTANT_ENABLE_PERSISTENT_MEMORY
+      #     value: "true"
+      #   - key: SUPABASE_URL
+      #     sync: false
+      #   - key: SUPABASE_SERVICE_ROLE_KEY
+      #     sync: false

@@ -1,0 +1,41 @@
+# Audio Call Assistant (Pipecat) -- runtime dependencies.
+#
+# Deployed on Render as a Web Service, from the `pipecat-service` directory.
+# See docs/ASSISTANT-DEPLOYMENT.md.
+
+# --- Pipecat and its provider extras ---------------------------------------
+# Pinned to the version this service was built and tested against. Pipecat is
+# pre-2.0 and its APIs have moved between releases (for example
+# `FishAudioTTSService.InputParams` was deprecated for `Settings`, and
+# `PipelineTask` moved under `pipecat.workers`). An unpinned range would let a
+# minor bump break call audio with no code change here.
+pipecat-ai[fish,groq,openai,silero,websocket]==1.11.0
+
+# --- HTTP / ASGI -----------------------------------------------------------
+# FastAPI and uvicorn serve the ACAF bridge WebSocket and the health endpoints.
+# Both are already Pipecat's `[websocket]` extra dependencies; listed
+# explicitly so the runtime contract is visible in one place.
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+
+# --- Structured logging ----------------------------------------------------
+loguru==0.7.3
+
+# --- NOT required ----------------------------------------------------------
+# Deliberately absent, and worth recording because their absence is a design
+# decision rather than an oversight:
+#
+#   * No Opus codec (pyogg / opuslib / discord.py's opus). Pipecat 1.11 ships
+#     no Opus decoder, and Telegram's Opus is decoded on the PHP side where
+#     MadelineProto's pure-PHP OGG muxer already exists. Adding one here would
+#     pull a native libopus build into a service that otherwise needs no codec.
+#
+#   * No FFmpeg, no libopus, no libgmp, no ext-ffi. All of that belongs to the
+#     Telegram side (mp-relay), which has its own Dockerfile.
+#
+#   * No twilio SDK. Twilio Media Streams are WebSocket JSON and are parsed
+#     directly; the REST API is called from the Vercel functions, not here.
+#
+#   * No numpy / scipy. Pipecat pulls them in transitively, but this service's
+#     own code (app/audio.py, app/protocol.py) is standard-library only, which
+#     is what lets the codec tests run with nothing installed.

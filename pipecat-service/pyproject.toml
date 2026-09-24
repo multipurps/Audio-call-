@@ -1,0 +1,14 @@
+# Minimal project metadata. Configuration is by environment variable
+# (app/config.py); this file exists so tooling and Render's Python detection
+# have something to read, not to add a build system.
+[project]
+name = "audio-call-assistant"
+version = "1.0.0"
+description = "Pipecat-based AI voice assistant for Telegram and Twilio calls"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+addopts = "-q --tb=short"
