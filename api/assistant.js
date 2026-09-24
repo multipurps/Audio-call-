@@ -1,5 +1,6 @@
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { wacallsStartCall } from '../lib/wacallsClient.js';
+import { mpRelayRequest } from '../lib/mpRelayClient.js';
 
 const LANGUAGE_NAMES = { en: 'English', es: 'Spanish', fr: 'French', pt: 'Portuguese', de: 'German', ha: 'Hausa', yo: 'Yoruba', ig: 'Igbo', sw: 'Swahili', ar: 'Arabic', hi: 'Hindi', zh: 'Chinese' };
 
@@ -276,10 +277,14 @@ async function sendMessage(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { text, callerId, sessionId: incomingSessionId, source, channel } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
-  // Which line to call out on — 'phone' (Twilio, default) or 'whatsapp'/
-  // 'telegram' (the linked personal account, via the always-on relay).
-  // Selected from the dropdown under the Home header's call-channel button.
-  const callChannel = ['whatsapp', 'telegram'].includes(channel) ? channel : 'phone';
+  // Which line to call out on — 'phone' (Twilio), or 'whatsapp'/'telegram'
+  // (the user's linked personal account). Selected from the dropdown under
+  // the Home header's call-channel button and sent explicitly with every
+  // message. There is deliberately NO default here: a missing/unknown
+  // channel used to silently mean Twilio, which is how a WhatsApp/Telegram
+  // request could end up as a phone call. Twilio is only ever used when the
+  // client says 'phone'.
+  const callChannel = ['phone', 'whatsapp', 'telegram'].includes(channel) ? channel : null;
   // 'call' = a live voice turn on the call screen — kept out of the home
   // chat list (which is meant to read as "what I typed / what got decided",
   // not a transcript of speaking out loud), but still written to
@@ -386,23 +391,46 @@ async function sendMessage(req, res, supabase, userId) {
     let retryToNumber = null;
     let retryObjective = null;
 
+    if (!callChannel) {
+      // Never guess a line. Twilio placing a real phone call when the user
+      // meant WhatsApp/Telegram is worse than asking.
+      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', 'Which line should I call on — Phone, WhatsApp or Telegram? Pick one from the call button and tell me again.', null, msgSource));
+      return respond();
+    }
+
     if (intent.action === 'retry') {
-      // Previously only found a "last call" when it was to a saved contact
-      // (`.not('contact_id','is',null)`), so retrying a raw phone number you
-      // just dialed found nothing. Now it remembers the last call either way.
-      const { data: lastCall } = await supabase
-        .from('calls')
-        .select('contact_id,to_number,objective')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (lastCall?.contact_id) {
-        const { data: c } = await supabase.from('contacts').select('*').eq('id', lastCall.contact_id).maybeSingle();
-        contact = c;
+      // Retry looks at the call history of the *chosen* line only. Twilio
+      // calls live in `calls`; WhatsApp/Telegram calls live in
+      // `social_calls`. Retrying on WhatsApp must never pick up (and
+      // re-dial) the last Twilio call, or vice versa.
+      if (callChannel === 'phone') {
+        const { data: lastCall } = await supabase
+          .from('calls')
+          .select('contact_id,to_number,objective')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (lastCall?.contact_id) {
+          const { data: c } = await supabase.from('contacts').select('*').eq('id', lastCall.contact_id).maybeSingle();
+          contact = c;
+        }
+        retryToNumber = lastCall?.to_number || null;
+        retryObjective = lastCall?.objective || null;
+      } else {
+        const { data: lastSocial } = await supabase
+          .from('social_calls')
+          .select('peer_identifier')
+          .eq('user_id', userId)
+          .eq('platform', callChannel)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        retryToNumber = lastSocial?.peer_identifier || null;
+        if (retryToNumber) {
+          contact = (contacts || []).find((c) => (c.phone_number || '').replace(/[\s()-]/g, '') === retryToNumber) || null;
+        }
       }
-      retryToNumber = lastCall?.to_number || null;
-      retryObjective = lastCall?.objective || null;
     } else if (!intent.phoneNumber) {
       const name = (intent.contactName || '').trim().toLowerCase();
       if (name) {
@@ -446,31 +474,49 @@ async function sendMessage(req, res, supabase, userId) {
       // to guess a country code for a bare local-format number.
       const digitsOnly = toNumber.replace(/[\s()-]/g, '');
       if (!/^\+[1-9]\d{7,14}$/.test(digitsOnly)) {
-        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `That number needs a country code to call on ${channelName} — e.g. +2349038226059, not ${toNumber}.`, null, msgSource));
+        const who = contact?.name ? `${contact.name}'s saved number (${toNumber})` : `That number (${toNumber})`;
+        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `${who} needs a country code to call on ${channelName} — e.g. +2349038226059. Update the contact or give me the full number.`, null, msgSource));
         return respond();
       }
-      if (callChannel === 'telegram') {
-        // Telegram login (mp-relay) is real and working; call-placing was
-        // deliberately never built yet, on purpose, rather than repeat the
-        // old relay's mistake of pretending to ring with a fake DH
-        // exchange. Refusing honestly here, not routing through that.
-        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "Telegram calling isn't finished yet — your account is linked, but I can't actually place a call through it.", null, msgSource));
-        return respond();
-      }
+      // Social calls live in their own table (social_calls), separate from
+      // Twilio's `calls`, so there's no callId to attach for the live-call
+      // ring / transcript screen. The row is what makes "call again" work
+      // on this line.
+      const recordSocialCall = async (status) => {
+        const { error } = await supabase.from('social_calls').insert({ user_id: userId, platform: callChannel, peer_identifier: digitsOnly, status });
+        if (error) console.error('social_calls insert failed:', error.message);
+      };
+      const verb = intent.action === 'retry' ? 'again now' : 'now';
       try {
-        // Social calls live in their own table (social_calls) with their own
-        // relay and status vocabulary — kept separate from Twilio's `calls`,
-        // so there's no callId here to attach for the header's live-call
-        // ring / transcript screen yet, same as this channel doesn't have
-        // that UI built out on the client side yet either.
-        const { data: waRow } = await supabase.from('whatsapp_accounts').select('wacalls_session_id').eq('user_id', userId).maybeSingle();
-        if (!waRow?.wacalls_session_id) throw new Error('WhatsApp not connected for this user');
-        await wacallsStartCall(userId, waRow.wacalls_session_id, digitsOnly);
-        const verb = intent.action === 'retry' ? 'again now' : 'now';
+        if (callChannel === 'whatsapp') {
+          const { data: waRow } = await supabase.from('whatsapp_accounts').select('wacalls_session_id').eq('user_id', userId).maybeSingle();
+          if (!waRow?.wacalls_session_id) throw new Error('WhatsApp is not connected — link it in Profile first.');
+          await wacallsStartCall(userId, waRow.wacalls_session_id, digitsOnly);
+        } else {
+          // Telegram goes through mp-relay (MadelineProto), never through
+          // the old relay's fake-DH stub and never through Twilio. If the
+          // deployed mp-relay has no call route yet, say exactly that.
+          const { data: tgRow } = await supabase.from('telegram_accounts').select('status').eq('user_id', userId).maybeSingle();
+          if (tgRow?.status !== 'connected') throw new Error('Telegram is not connected — link it in Profile first.');
+          try {
+            await mpRelayRequest('/calls', { method: 'POST', body: { userId, to: digitsOnly } });
+          } catch (err) {
+            if (err.statusCode === 404) throw new Error("the Telegram call service (mp-relay) doesn't have call support deployed yet.");
+            throw err;
+          }
+        }
+        await recordSocialCall('ringing');
         newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `Calling ${label} on ${channelName} ${verb}.`, null, msgSource));
       } catch (err) {
+        await recordSocialCall('failed');
         newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${label} on ${channelName}: ${err.message}`, null, msgSource));
       }
+      return respond();
+    }
+
+    // Belt and braces: Twilio is only reachable on an explicit 'phone' line.
+    if (callChannel !== 'phone') {
+      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "I couldn't work out which line to call on. Pick Phone, WhatsApp or Telegram and try again.", null, msgSource));
       return respond();
     }
 
