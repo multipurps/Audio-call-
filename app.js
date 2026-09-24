@@ -542,7 +542,7 @@ async function sendChatMessage(text, onReply, source = 'text', channel = null) {
   const resp = await authedFetch('/api/assistant?action=send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, sessionId: currentChatSessionId, source, channel }),
+    body: JSON.stringify({ text, sessionId: currentChatSessionId, source, channel: channel || currentCallChannel() }),
   });
   const data = await resp.json();
   if (!resp.ok) {
@@ -574,11 +574,10 @@ async function sendBrief() {
   $('sendBtn').disabled = true;
   $('briefInput').value = '';
   $('briefInput').style.height = 'auto';
-  const channelForThisSend = selectedCallChannel;
-  await sendChatMessage(text, null, 'text', channelForThisSend);
-  // One-shot: the channel picker sets the line for the *next* thing you
-  // send, then falls back to the default (phone) once that's been sent.
-  if (channelForThisSend) setCallChannel('phone');
+  // The chosen line is sticky: it stays until the user picks another one.
+  // It used to reset to Phone (Twilio) after one send, so any follow-up
+  // ("which Juicy?", "call again") silently went out as a phone call.
+  await sendChatMessage(text, null, 'text', currentCallChannel());
   $('sendBtn').disabled = false;
 }
 
@@ -1044,7 +1043,7 @@ async function startAssistantListening() {
                 callTranscriptForSummary.push({ role: 'assistant', content: reply });
                 await speakReply(reply);
               }
-            }, 'call', selectedCallChannel);
+            }, 'call', currentCallChannel());
           } else if (!resp.ok) {
             const errText = data.detail ? `${data.error}: ${data.detail}`.slice(0, 300) : (data.error || "Sorry, I didn't catch that.");
             // Errors are shown in the transcript, never spoken — Emysa's voice
@@ -1072,7 +1071,14 @@ async function startAssistantListening() {
 }
 
 // ---------- Call channel: Emysa (voice) / WhatsApp / Telegram / Phone ----------
-let selectedCallChannel = null; // null = default (phone/Twilio)
+const CALL_CHANNEL_KEY = 'emysa.callChannel';
+let selectedCallChannel = null; // null = Phone (Twilio); otherwise 'whatsapp' | 'telegram'
+try {
+  const saved = localStorage.getItem(CALL_CHANNEL_KEY);
+  if (saved === 'whatsapp' || saved === 'telegram') selectedCallChannel = saved;
+} catch {}
+// Always an explicit value — the server refuses to guess a line.
+function currentCallChannel() { return selectedCallChannel || 'phone'; }
 
 const CHANNEL_META = {
   whatsapp: { label: 'WhatsApp', placeholder: 'Paste a number to call on WhatsApp…' },
@@ -1080,14 +1086,17 @@ const CHANNEL_META = {
   phone: { label: null, placeholder: 'Message' },
 };
 
-function setCallChannel(channel) {
+function setCallChannel(channel, { focus = true } = {}) {
   selectedCallChannel = channel === 'phone' ? null : channel;
+  try { localStorage.setItem(CALL_CHANNEL_KEY, currentCallChannel()); } catch {}
   const meta = CHANNEL_META[channel] || CHANNEL_META.phone;
   $('briefInput').placeholder = meta.placeholder;
   $('channelBadge').classList.toggle('visible', !!meta.label);
   if (meta.label) $('channelBadgeText').textContent = `Calling on ${meta.label}`;
-  $('briefInput').focus();
+  if (focus) $('briefInput').focus();
 }
+// Restore the persisted line's badge/placeholder on load (without opening the keyboard).
+if (selectedCallChannel) setCallChannel(selectedCallChannel, { focus: false });
 
 $('homeWaveBtn').addEventListener('click', (e) => {
   e.stopPropagation();
