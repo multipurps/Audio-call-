@@ -1,0 +1,14 @@
+# Audio Call Assistant -- test/dev dependencies. Not installed on Render.
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   python -m pytest
+
+-r requirements.txt
+
+pytest==9.1.1
+# `asyncio_mode = auto` in pytest.ini removes the need for an
+# @pytest.mark.asyncio decorator on every async test.
+pytest-asyncio==1.4.0
+# Needed by fastapi.testclient's WebSocket support, which the bridge
+# integration tests drive the real app through.
+httpx==0.28.1
