@@ -206,9 +206,12 @@ async function insertMessage(supabase, userId, sessionId, role, content, callId 
 }
 
 // Handles a photo sent from the call screen's "More" menu (Camera/Photos).
-// Uses Groq's qwen/qwen3.8-27b, a vision-capable model on the same free
-// tier already used for Whisper transcription in this file - no separate
-// paid account needed for this feature.
+// Uses Groq's qwen/qwen3-32b (real Groq model id - the previous
+// 'qwen/qwen3.8-27b' does not exist on Groq and was silently failing
+// every single request, not just calls, recovered only when Groq's
+// 400 error happened to include a usable failed_generation payload).
+// Free tier, same account already used for Whisper transcription in this
+// file - no separate paid account needed for this feature.
 async function sendImage(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { imageBase64, mimeType, caption, sessionId: incomingSessionId, source } = req.body || {};
@@ -240,7 +243,7 @@ async function sendImage(req, res, supabase, userId) {
       method: 'POST',
       headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'qwen/qwen3.8-27b',
+        model: 'qwen/qwen3-32b',
         messages: [
           {
             role: 'system',
@@ -354,7 +357,7 @@ async function sendMessage(req, res, supabase, userId) {
       method: 'POST',
       headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'qwen/qwen3.8-27b',
+        model: 'qwen/qwen3-32b',
         messages: chatMessages,
         temperature: 0.3,
         response_format: { type: 'json_object' },
@@ -623,7 +626,7 @@ async function summarizeCall(req, res, supabase, userId) {
       method: 'POST',
       headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'qwen/qwen3.8-27b',
+        model: 'qwen/qwen3-32b',
         messages: [
           { role: 'system', content: 'Summarize this voice call with an assistant in ONE short, plain sentence, third person, as if logging what the user did. No quotes, no preamble.' },
           { role: 'user', content: transcript.slice(0, 4000) },
