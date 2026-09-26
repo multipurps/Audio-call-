@@ -556,6 +556,14 @@ async function sendChatMessage(text, onReply, source = 'text', channel = null) {
   }
   if (data.sessionId) currentChatSessionId = data.sessionId;
   if (data.callId && data.toNumber) trackActiveCall(data.callId, data.toNumber, data.contactName);
+  // The server can pick a different line than the UI's sticky selection -
+  // e.g. the user typed "call him on WhatsApp" while the badge still said
+  // Telegram from an earlier message. When that happens, pull the picker
+  // and badge into line with what was actually used, so they're not stuck
+  // showing a line that isn't the one in effect.
+  if (data.channelUsed && data.channelUsed !== currentCallChannel()) {
+    setCallChannel(data.channelUsed, { focus: false });
+  }
   const replies = (data.messages || []).filter((m) => m.role !== 'user');
   if (!isCall) {
     // The optimistic user bubble above already shows this turn; mark the
