@@ -111,9 +111,27 @@ async function telegramDisconnect(req, res, userId) {
 // to live on our side, and it has to survive a serverless function ending
 // between one request and the next (session creation and pairing are
 // necessarily two separate requests).
+//
+// That stored id can go stale - it did for every existing user the moment
+// WaCalls' session storage moved off local disk onto Postgres, since the
+// old disk-backed sessions weren't (couldn't be) carried over. Blindly
+// trusting the stored id and forwarding it to WaCalls is exactly what
+// produced "no such session": WaCalls 404s, and this file used to let that
+// 404 bubble straight to the frontend instead of noticing the id is dead
+// and minting a new one. Only a confirmed 404 counts as "dead" - a
+// timeout, a 5xx, or the relay being unreachable must NOT clear a
+// perfectly good mapping just because of a blip.
 async function getOrCreateWacallsSession(supabase, userId, phone) {
   const { data: row } = await supabase.from('whatsapp_accounts').select('wacalls_session_id').eq('user_id', userId).maybeSingle();
-  if (row?.wacalls_session_id) return row.wacalls_session_id;
+  if (row?.wacalls_session_id) {
+    try {
+      await wacallsDetail(userId, row.wacalls_session_id);
+      return row.wacalls_session_id;
+    } catch (err) {
+      if (err.statusCode !== 404) throw err;
+      // fall through and mint a fresh session below
+    }
+  }
   const created = await wacallsCreateSession(userId, `user-${userId}`, phone);
   await supabase.from('whatsapp_accounts').upsert(
     { user_id: userId, wacalls_session_id: created.id, status: 'pending_qr' },
@@ -135,6 +153,14 @@ async function whatsappStartWithPhone(req, res, supabase, userId) {
   if (!phone) return res.status(400).json({ error: 'phone required (with country code, e.g. +234...)' });
   const { data: row } = await supabase.from('whatsapp_accounts').select('wacalls_session_id').eq('user_id', userId).maybeSingle();
   let sessionId = row?.wacalls_session_id;
+  if (sessionId) {
+    try {
+      await wacallsDetail(userId, sessionId);
+    } catch (err) {
+      if (err.statusCode !== 404) throw err;
+      sessionId = null; // stale - relay has no memory of this id, mint a fresh one below
+    }
+  }
   let detail;
   if (!sessionId) {
     const created = await wacallsCreateSession(userId, `user-${userId}`, phone);
@@ -151,7 +177,16 @@ async function whatsappStartWithPhone(req, res, supabase, userId) {
 async function whatsappStatus(req, res, supabase, userId) {
   const { data: row } = await supabase.from('whatsapp_accounts').select('wacalls_session_id, display_name').eq('user_id', userId).maybeSingle();
   if (!row?.wacalls_session_id) return res.status(200).json({ status: 'disconnected' });
-  const detail = await wacallsDetail(userId, row.wacalls_session_id);
+  let detail;
+  try {
+    detail = await wacallsDetail(userId, row.wacalls_session_id);
+  } catch (err) {
+    if (err.statusCode !== 404) throw err;
+    // Dead id (e.g. relay storage was reset) - clear it so the next
+    // "Connect" click mints a fresh session instead of repeating this.
+    await supabase.from('whatsapp_accounts').update({ wacalls_session_id: null, status: 'disconnected', display_name: null }).eq('user_id', userId);
+    return res.status(200).json({ status: 'disconnected' });
+  }
   const status = detail.paired ? 'connected' : detail.state === 'code' ? 'pending_code' : detail.state === 'qr' ? 'pending_qr' : 'disconnected';
   if (detail.paired && detail.jid && detail.jid !== row.display_name) {
     await supabase.from('whatsapp_accounts').update({ status: 'connected', display_name: detail.jid }).eq('user_id', userId);
@@ -181,8 +216,22 @@ async function placeCall(req, res, supabase, userId) {
       err.statusCode = 400;
       throw err;
     }
-    const data = await wacallsStartCall(userId, row.wacalls_session_id, to.trim());
-    return res.status(200).json(data); // { callId, status } - matches the shape the Telegram path already returns
+    try {
+      const data = await wacallsStartCall(userId, row.wacalls_session_id, to.trim());
+      return res.status(200).json(data); // { callId, status } - matches the shape the Telegram path already returns
+    } catch (err) {
+      if (err.statusCode === 404) {
+        // Stored id is dead (e.g. relay storage was reset since pairing) -
+        // clear it so the account shows "disconnected" instead of silently
+        // failing every call, and say so plainly rather than surfacing the
+        // relay's internal "no such session" wording.
+        await supabase.from('whatsapp_accounts').update({ wacalls_session_id: null, status: 'disconnected', display_name: null }).eq('user_id', userId);
+        const staleErr = new Error('WhatsApp session expired - please reconnect WhatsApp and try again');
+        staleErr.statusCode = 409;
+        throw staleErr;
+      }
+      throw err;
+    }
   }
   // Telegram call-placing still goes through the OLD relay here - it's the
   // one with the placeholder/random g_a_hash instead of a real DH exchange
