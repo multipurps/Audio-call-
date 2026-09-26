@@ -27,6 +27,15 @@ import { mpRelayRequest } from '../lib/mpRelayClient.js';
 // auth_state_encrypted is the old Baileys column and is no longer written.
 export default async function handler(req, res) {
   const supabase = getServiceClient();
+
+  // Server-to-server callback from mp-relay reporting a Telegram call's
+  // outcome (see mp-relay's CallBridge::reportOutcome) - not a
+  // user-authenticated browser request, so this runs before the
+  // getAuthedUserId gate below and checks its own shared secret instead.
+  if ((req.query?.action || req.body?.action) === 'relay-call-status') {
+    return relayCallStatus(req, res, supabase);
+  }
+
   const userId = await getAuthedUserId(req, supabase);
   if (!userId) return res.status(401).json({ error: 'Not signed in' });
 
@@ -49,6 +58,50 @@ export default async function handler(req, res) {
     // throw with statusCode set for anything the relay itself reported.
     return res.status(err.statusCode || 500).json({ error: err.message || 'Social calling request failed' });
   }
+}
+
+// mp-relay's reportOutcome doesn't have this app's calls.id (it never gets
+// one back from POST /calls - see that handler), so the in-flight call is
+// matched the same way a person would: this user's most recent still-ringing
+// Telegram call to that same number. Set RELAY_CALLBACK_SECRET the same on
+// both mp-relay and here for this to be checked, and APP_API_URL on mp-relay
+// to this app's real deployed domain.
+async function relayCallStatus(req, res, supabase) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const secret = process.env.RELAY_CALLBACK_SECRET;
+  if (!secret || req.headers['x-relay-secret'] !== secret) return res.status(401).json({ error: 'unauthorized' });
+
+  const { userId, sessionId, status: callStatus, peerIdentifier, contactName } = req.body || {};
+  if (!userId || !peerIdentifier || !callStatus) return res.status(400).json({ error: 'userId, peerIdentifier and status required' });
+
+  const { data: call } = await supabase
+    .from('calls')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('platform', 'telegram')
+    .eq('to_number', peerIdentifier)
+    .in('status', ['ringing', 'in_progress'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (call) {
+    await supabase.from('calls').update({ status: callStatus }).eq('id', call.id);
+  }
+  await supabase.from('social_calls').insert({ user_id: userId, platform: 'telegram', peer_identifier: peerIdentifier, status: callStatus });
+
+  // Same natural "the call ended" chat message Twilio calls get, posted
+  // into whichever chat session placed the call - if sessionId wasn't
+  // passed (an older mp-relay build, or the call was placed some other
+  // way), there's no thread to post into, so this is skipped rather than
+  // guessed at.
+  if (sessionId) {
+    const who = contactName || peerIdentifier;
+    const text = callStatus === 'completed' ? `Finished the call with ${who} on Telegram.` : `Couldn't complete the call with ${who} on Telegram.`;
+    await supabase.from('assistant_messages').insert({ user_id: userId, session_id: sessionId, role: 'assistant', content: text, source: 'text' });
+    await supabase.from('chat_sessions').update({ updated_at: new Date().toISOString() }).eq('id', sessionId);
+  }
+  return res.status(200).json({ ok: true });
 }
 
 // Status is read straight from Supabase (fast, no relay round trip) — the

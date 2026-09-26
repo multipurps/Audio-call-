@@ -1,4 +1,6 @@
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
+import { wacallsHangup } from '../lib/wacallsClient.js';
+import { mpRelayRequest } from '../lib/mpRelayClient.js';
 
 export default async function handler(req, res) {
   const supabase = getServiceClient();
@@ -98,6 +100,30 @@ async function hangupCall(req, res, supabase, userId) {
 
   const { data: call } = await supabase.from('calls').select('*').eq('id', callId).eq('user_id', userId).maybeSingle();
   if (!call) return res.status(404).json({ error: 'Call not found' });
+
+  if (call.platform === 'whatsapp') {
+    if (call.platform_call_id) {
+      const { data: waRow } = await supabase.from('whatsapp_accounts').select('wacalls_session_id').eq('user_id', userId).maybeSingle();
+      if (waRow?.wacalls_session_id) {
+        await wacallsHangup(userId, waRow.wacalls_session_id, call.platform_call_id).catch((err) => {
+          console.error('wacallsHangup failed:', err.message); // best-effort - still mark completed below
+        });
+      }
+    }
+    await supabase.from('calls').update({ status: 'completed' }).eq('id', callId);
+    return res.status(200).json({ ok: true });
+  }
+
+  if (call.platform === 'telegram') {
+    if (call.platform_call_id) {
+      await mpRelayRequest(`/calls/${call.platform_call_id}`, { method: 'DELETE' }).catch((err) => {
+        console.error('mp-relay hangup failed:', err.message); // best-effort - still mark completed below
+      });
+    }
+    await supabase.from('calls').update({ status: 'completed' }).eq('id', callId);
+    return res.status(200).json({ ok: true });
+  }
+
   if (!call.twilio_call_sid) return res.status(400).json({ error: 'Call has no active Twilio sid' });
 
   const accountSid = process.env.TWILIO_ACCOUNT_SID;

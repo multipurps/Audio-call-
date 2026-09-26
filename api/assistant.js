@@ -493,20 +493,34 @@ async function sendMessage(req, res, supabase, userId) {
         newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `${who} needs a country code to call on ${channelName} — e.g. +2349038226059. Update the contact or give me the full number.`, null, msgSource));
         return respond();
       }
-      // Social calls live in their own table (social_calls), separate from
-      // Twilio's `calls`, so there's no callId to attach for the live-call
-      // ring / transcript screen. The row is what makes "call again" work
-      // on this line.
-      const recordSocialCall = async (status) => {
-        const { error } = await supabase.from('social_calls').insert({ user_id: userId, platform: callChannel, peer_identifier: digitsOnly, status });
-        if (error) console.error('social_calls insert failed:', error.message);
+      // Social calls get their own row in `calls` (not just social_calls) so
+      // they use the SAME header-spinner / call-screen UI Twilio calls
+      // already get - the frontend only needs a callId + toNumber to open
+      // it (see openCallFromMessage/trackActiveCall in app.js), and doesn't
+      // care which platform placed the call.
+      const recordSocialCall = async (status, platformCallId) => {
+        await supabase.from('social_calls').insert({ user_id: userId, platform: callChannel, peer_identifier: digitsOnly, status })
+          .then(({ error }) => { if (error) console.error('social_calls insert failed:', error.message); });
+        const { data: callRow, error: callErr } = await supabase.from('calls').insert({
+          user_id: userId,
+          contact_id: contact?.id || null,
+          to_number: digitsOnly,
+          objective,
+          platform: callChannel,
+          platform_call_id: platformCallId || null,
+          status,
+        }).select().single();
+        if (callErr) console.error('calls insert failed:', callErr.message);
+        return callRow;
       };
       const verb = intent.action === 'retry' ? 'again now' : 'now';
       try {
+        let platformCallId = null;
         if (callChannel === 'whatsapp') {
           const { data: waRow } = await supabase.from('whatsapp_accounts').select('wacalls_session_id').eq('user_id', userId).maybeSingle();
           if (!waRow?.wacalls_session_id) throw new Error('WhatsApp is not connected — link it in Profile first.');
-          await wacallsStartCall(userId, waRow.wacalls_session_id, digitsOnly);
+          const result = await wacallsStartCall(userId, waRow.wacalls_session_id, digitsOnly);
+          platformCallId = result?.callId || null;
         } else {
           // Telegram goes through mp-relay (MadelineProto), never through
           // the old relay's fake-DH stub and never through Twilio. If the
@@ -514,19 +528,21 @@ async function sendMessage(req, res, supabase, userId) {
           const { data: tgRow } = await supabase.from('telegram_accounts').select('status').eq('user_id', userId).maybeSingle();
           if (tgRow?.status !== 'connected') throw new Error('Telegram is not connected — link it in Profile first.');
           try {
-            await mpRelayRequest('/calls', { method: 'POST', body: { userId, to: digitsOnly } });
+            const result = await mpRelayRequest('/calls', { method: 'POST', body: { userId, to: digitsOnly, sessionId, contactName: contact?.name || null } });
+            platformCallId = result?.callId || null;
           } catch (err) {
             if (err.statusCode === 404) throw new Error("the Telegram call service (mp-relay) doesn't have call support deployed yet.");
             throw err;
           }
         }
-        await recordSocialCall('ringing');
+        const callRow = await recordSocialCall('ringing', platformCallId);
         newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `Calling ${label} on ${channelName} ${verb}.`, null, msgSource));
+        return respond({ channelUsed: callChannel, callId: callRow?.id || null, toNumber: digitsOnly, contactName: contact?.name || null });
       } catch (err) {
-        await recordSocialCall('failed');
+        await recordSocialCall('failed', null);
         newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${label} on ${channelName}: ${err.message}`, null, msgSource));
+        return respond({ channelUsed: callChannel });
       }
-      return respond({ channelUsed: callChannel });
     }
 
     // Belt and braces: Twilio is only reachable on an explicit 'phone' line.
