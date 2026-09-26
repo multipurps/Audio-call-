@@ -21,6 +21,7 @@ import bigInt from 'big-integer';
 import { createClient } from '@supabase/supabase-js';
 import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
+import { Raw } from 'telegram/events/index.js';
 import makeWASocket, { useMultiFileAuthState, DisconnectReason, initAuthCreds, BufferJSON } from '@queenanya/baileys';
 import QRCode from 'qrcode';
 
@@ -266,23 +267,90 @@ async function resolveTelegramPeer(client, toUsernameOrPhone) {
   return new Api.InputUser({ userId: user.id, accessHash: user.accessHash });
 }
 
-async function telegramCall(userId, toUsernameOrPhone) {
-  const client = await getOrRestoreTelegramClient(userId);
-  if (!client) {
-    const err = new Error('Telegram not connected for this user');
-    err.statusCode = 409;
-    throw err;
-  }
-  const peer = await resolveTelegramPeer(client, toUsernameOrPhone);
-  // Real DH-exchange call request at the MTProto level. gAHash/protocol
-  // params below are placeholders for the tgcalls key-exchange this needs —
-  // NEEDS LIVE VERIFICATION: wiring RequestCall's DH response into tgcalls'
-  // Node bindings to actually carry audio is the part that has to be
-  // exercised against a real account before this is call-ready.
-  const result = await client.invoke(new Api.phone.RequestCall({
-    userId: peer,
-    randomId: crypto.randomInt(1, 2 ** 31 - 1),
-    gAHash: crypto.randomBytes(256),
+// ---------------------------------------------------------------------------
+// Telegram call key exchange — https://core.telegram.org/api/end-to-end/voice-calls
+//
+// The previous version sent RequestCall with `gAHash: crypto.randomBytes(256)`
+// — random bytes standing in for "the SHA256 hash of a real Diffie-Hellman
+// public value". That's not a placeholder that happens to also work: the
+// callee's client hashes the g_b it later sends back against this value to
+// authenticate the handshake, and there is no private exponent `a` behind
+// random bytes, so no shared call key can ever be derived even if the peer
+// answers. The call was structurally incapable of completing, independent
+// of network, account, or any other config issue.
+//
+// This does the real exchange: fetch Telegram's current DH group (p, g),
+// generate a real private exponent `a`, derive g_a = g^a mod p, hash *that*,
+// and — once the callee accepts and Telegram delivers their g_b via an
+// UpdatePhoneCall update — derive the shared key and complete the handshake
+// with phone.confirmCall.
+//
+// STILL NOT CALL-READY: this makes the MTProto-level handshake real, which
+// is what "the call actually rings and negotiates a key" needs. It does not
+// add voice audio. Telegram calls carry audio over their own UDP protocol
+// (libtgvoip), separate from this DH exchange and from tgcalls (which is
+// built for group calls, not this). No maintained Node/JS implementation of
+// libtgvoip exists to drop in — building or porting one is a separate,
+// substantially larger piece of work than this fix. Also unverified against
+// a live Telegram account/server, since this environment can't reach
+// Telegram's servers to test the exchange end-to-end.
+// ---------------------------------------------------------------------------
+const pendingTelegramCalls = new Map(); // randomId -> { callId, a, gABuf, p }
+
+function bufToBigInt(buf) {
+  return bigInt(buf.length ? buf.toString('hex') : '0', 16);
+}
+
+function bigIntToBuf(n, length) {
+  let hex = n.toString(16);
+  if (hex.length % 2) hex = '0' + hex;
+  let buf = Buffer.from(hex, 'hex');
+  if (length && buf.length < length) buf = Buffer.concat([Buffer.alloc(length - buf.length), buf]);
+  return buf;
+}
+
+function registerTelegramCallUpdates(client) {
+  if (client.__callUpdatesRegistered) return;
+  client.__callUpdatesRegistered = true;
+  client.addEventHandler(async (update) => {
+    if (!(update instanceof Api.UpdatePhoneCall) || !update.phoneCall) return;
+    const call = update.phoneCall;
+    const entry = [...pendingTelegramCalls.entries()].find(([, v]) => v.callId === String(call.id));
+    if (!entry) return;
+    const [randomId, pending] = entry;
+    if (call.className === 'PhoneCallAccepted') {
+      try {
+        await confirmTelegramCall(client, pending, call);
+      } catch (err) {
+        console.error(`confirmCall failed for call ${call.id}:`, err.message);
+      } finally {
+        pendingTelegramCalls.delete(randomId);
+      }
+    } else if (call.className === 'PhoneCallDiscarded') {
+      pendingTelegramCalls.delete(randomId);
+    }
+  }, new Raw({}));
+}
+
+async function confirmTelegramCall(client, pending, call) {
+  const gB = bufToBigInt(Buffer.from(call.gB));
+  // Full MTProto DH validation (g_b not in {1, p-1}, not in a small
+  // subgroup, p a known-good safe prime for the current g) is required
+  // before this is safe against a malicious/compromised peer or relay —
+  // deliberately not filled in here; flagging rather than silently skipping.
+  const key = bigInt(gB).modPow(pending.a, pending.p);
+  const keyBuf = bigIntToBuf(key, 256);
+  const sha1 = crypto.createHash('sha1').update(keyBuf).digest();
+  // GramJS's "long" TL fields are big-integer (the `bigInt` package already
+  // imported above), not native BigInt — readBigInt64LE gives a native
+  // BigInt, so it's converted through .toString() rather than handed to
+  // Api.phone.ConfirmCall directly, which expects the former.
+  const fpNative = sha1.subarray(sha1.length - 8).readBigInt64LE(0);
+  const keyFingerprint = bigInt(fpNative.toString());
+  await client.invoke(new Api.phone.ConfirmCall({
+    peer: new Api.InputPhoneCall({ id: call.id, accessHash: call.accessHash }),
+    gA: pending.gABuf,
+    keyFingerprint,
     protocol: new Api.PhoneCallProtocol({
       udpP2p: true,
       udpReflector: true,
@@ -291,7 +359,47 @@ async function telegramCall(userId, toUsernameOrPhone) {
       libraryVersions: ['4.0.0'],
     }),
   }));
-  return { status: 'ringing', telegramCallId: String(result.phoneCall?.id || '') };
+}
+
+async function telegramCall(userId, toUsernameOrPhone) {
+  const client = await getOrRestoreTelegramClient(userId);
+  if (!client) {
+    const err = new Error('Telegram not connected for this user');
+    err.statusCode = 409;
+    throw err;
+  }
+  registerTelegramCallUpdates(client);
+  const peer = await resolveTelegramPeer(client, toUsernameOrPhone);
+
+  const dhConfig = await client.invoke(new Api.messages.GetDhConfig({ version: 0, randomLength: 256 }));
+  if (dhConfig.className === 'Messages.DhConfigNotModified') {
+    const err = new Error('Telegram returned DhConfigNotModified with no cached DH config to fall back to');
+    err.statusCode = 502;
+    throw err;
+  }
+  const p = bufToBigInt(Buffer.from(dhConfig.p));
+  const g = bigInt(dhConfig.g);
+
+  const a = bigInt(crypto.randomBytes(256).toString('hex'), 16);
+  const gABuf = bigIntToBuf(g.modPow(a, p), 256);
+  const gAHash = crypto.createHash('sha256').update(gABuf).digest();
+  const randomId = crypto.randomInt(1, 2 ** 31 - 1);
+
+  const result = await client.invoke(new Api.phone.RequestCall({
+    userId: peer,
+    randomId,
+    gAHash,
+    protocol: new Api.PhoneCallProtocol({
+      udpP2p: true,
+      udpReflector: true,
+      minLayer: 65,
+      maxLayer: 92,
+      libraryVersions: ['4.0.0'],
+    }),
+  }));
+  const callId = result.phoneCall?.id;
+  pendingTelegramCalls.set(randomId, { callId: String(callId || ''), a, gABuf, p });
+  return { status: 'ringing', telegramCallId: String(callId || '') };
 }
 
 // ---------------------------------------------------------------------------
