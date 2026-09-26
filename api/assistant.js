@@ -206,12 +206,13 @@ async function insertMessage(supabase, userId, sessionId, role, content, callId 
 }
 
 // Handles a photo sent from the call screen's "More" menu (Camera/Photos).
-// Uses Groq's qwen/qwen3-32b (real Groq model id - the previous
-// 'qwen/qwen3.8-27b' does not exist on Groq and was silently failing
-// every single request, not just calls, recovered only when Groq's
-// 400 error happened to include a usable failed_generation payload).
-// Free tier, same account already used for Whisper transcription in this
-// file - no separate paid account needed for this feature.
+// Uses Groq's qwen/qwen3.8-27b, a vision-capable model on the same free
+// tier already used for Whisper transcription in this file - no separate
+// paid account needed for this feature.
+// (Note: a previous change here briefly swapped this to 'qwen/qwen3-32b',
+// on the wrong assumption that qwen3.8-27b didn't exist. It does - that
+// was a bad fix and has been reverted. If Groq requests are still failing,
+// the cause is something else; see the richer error surfaced below.)
 async function sendImage(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { imageBase64, mimeType, caption, sessionId: incomingSessionId, source } = req.body || {};
@@ -243,7 +244,7 @@ async function sendImage(req, res, supabase, userId) {
       method: 'POST',
       headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'qwen/qwen3-32b',
+        model: 'qwen/qwen3.8-27b',
         messages: [
           {
             role: 'system',
@@ -287,7 +288,7 @@ async function sendMessage(req, res, supabase, userId) {
   // channel used to silently mean Twilio, which is how a WhatsApp/Telegram
   // request could end up as a phone call. Twilio is only ever used when the
   // client says 'phone'.
-  const callChannel = ['phone', 'whatsapp', 'telegram'].includes(channel) ? channel : null;
+  const uiChannel = ['phone', 'whatsapp', 'telegram'].includes(channel) ? channel : null;
   // 'call' = a live voice turn on the call screen — kept out of the home
   // chat list (which is meant to read as "what I typed / what got decided",
   // not a transcript of speaking out loud), but still written to
@@ -339,8 +340,8 @@ async function sendMessage(req, res, supabase, userId) {
     "About the app, for when the user asks (answer naturally and conversationally in \"reply\" — don't deflect these to a phone-number prompt): this app lets you tell Emysa (you) who to call and what to say, then Emysa places a real phone call and carries the conversation. You can call any phone number or a saved contact, ask for the same person again with something like \"call him again\", and Emysa remembers context from past calls to inform future ones.",
     '',
     'Reply with ONLY a JSON object, no other text, matching this shape:',
-    '{"action":"call"|"retry"|"reply","phoneNumber":string|null,"contactName":string|null,"objective":string|null,"reply":string|null}',
-    '- action "call": the user wants you to call someone new. If they gave you an actual phone number in their message, put the digits (with country code if given, e.g. "+15551234567") in phoneNumber. Otherwise, if they named someone from the saved contacts list, put your best guess at that name in contactName. objective is a short phrase describing what to say or ask on the call — if they also gave any tone or manner direction (stay calm, keep it light, let it flow naturally, be quick about it, etc.), include that in objective too, don\'t drop it.',
+    '{"action":"call"|"retry"|"reply","phoneNumber":string|null,"contactName":string|null,"objective":string|null,"channel":"phone"|"whatsapp"|"telegram"|null,"reply":string|null}',
+    '- action "call": the user wants you to call someone new. If they gave you an actual phone number in their message, put the digits (with country code if given, e.g. "+15551234567") in phoneNumber. Otherwise, if they named someone from the saved contacts list, put your best guess at that name in contactName. objective is a short phrase describing what to say or ask on the call — if they also gave any tone or manner direction (stay calm, keep it light, let it flow naturally, be quick about it, etc.), include that in objective too, don\'t drop it. If they explicitly named which line to call on in this message (e.g. "on WhatsApp", "call him on Telegram", "use my phone line"), put that in channel - phone/whatsapp/telegram. If they did not name a line in THIS message, leave channel null; do not guess or reuse a line from earlier in the conversation, since the app\'s own line selector already carries that forward and takes over whenever this is null.',
     '- action "retry": the user wants you to call the same person again (e.g. "call him again", "try it again").',
     '- action "reply": anything else — general conversation, questions about you or the app, small talk, or a call request with no number/contact given yet. Answer naturally and helpfully in "reply". Only ask for a phone number or contact name if they\'ve actually expressed intent to make a call but haven\'t said who.',
     'Every single response, with no exceptions, must be that one JSON object and nothing else - never plain conversational text, never text before or after the JSON, even for casual chat or small talk. Put the conversational reply itself inside the "reply" field.',
@@ -357,7 +358,7 @@ async function sendMessage(req, res, supabase, userId) {
       method: 'POST',
       headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'qwen/qwen3-32b',
+        model: 'qwen/qwen3.8-27b',
         messages: chatMessages,
         temperature: 0.3,
         response_format: { type: 'json_object' },
@@ -384,10 +385,21 @@ async function sendMessage(req, res, supabase, userId) {
       intent = { action: 'reply', reply: recovered };
     } else {
       console.error('assistant intent parse failed:', err);
-      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "Sorry, I couldn't process that — try again in a moment.", null, msgSource));
+      // TEMPORARY: showing the real error text in-app (truncated) because
+      // there's no access to Vercel's function logs from here to see why a
+      // request failed. Ask to have this reverted to a plain generic
+      // message once the assistant is reliably working again.
+      const detail = String(err?.message || err).slice(0, 220);
+      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `Sorry, I couldn't process that. (debug: ${detail})`, null, msgSource));
       return respond();
     }
   }
+
+  // A platform named explicitly in this message (e.g. "call him on
+  // WhatsApp") wins over the sticky line picker in the UI - naming it IS
+  // choosing it, and should not be silently overridden by whatever the
+  // button happened to be left on.
+  const callChannel = (['phone', 'whatsapp', 'telegram'].includes(intent.channel) ? intent.channel : null) || uiChannel;
 
   if (intent.action === 'call' || intent.action === 'retry') {
     let contact = null;
@@ -514,7 +526,7 @@ async function sendMessage(req, res, supabase, userId) {
         await recordSocialCall('failed');
         newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${label} on ${channelName}: ${err.message}`, null, msgSource));
       }
-      return respond();
+      return respond({ channelUsed: callChannel });
     }
 
     // Belt and braces: Twilio is only reachable on an explicit 'phone' line.
@@ -532,7 +544,7 @@ async function sendMessage(req, res, supabase, userId) {
 
     const verb = intent.action === 'retry' ? 'again now' : 'now';
     newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I'm calling ${label} ${verb}.`, placed.call.id, msgSource));
-    return respond({ callId: placed.call.id, toNumber, contactName: contact?.name || null });
+    return respond({ callId: placed.call.id, toNumber, contactName: contact?.name || null, channelUsed: callChannel });
   }
 
   newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', intent.reply || 'Got it.', null, msgSource));
@@ -626,7 +638,7 @@ async function summarizeCall(req, res, supabase, userId) {
       method: 'POST',
       headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'qwen/qwen3-32b',
+        model: 'qwen/qwen3.8-27b',
         messages: [
           { role: 'system', content: 'Summarize this voice call with an assistant in ONE short, plain sentence, third person, as if logging what the user did. No quotes, no preamble.' },
           { role: 'user', content: transcript.slice(0, 4000) },
