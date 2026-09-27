@@ -590,7 +590,7 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .recentChatMenuItem:active{background:rgba(255,255,255,0.08);}
 
 /* ---------- recent calls — exact copy of the reference iOS screenshot ---------- */
-#screen-recent{display:flex; flex-direction:column; background:#000;}
+#screen-recent.active{display:flex; flex-direction:column; background:#000;}
 #screen-recent h1.pageTitle{font-size:34px; font-weight:800; color:#fff; padding-top:4px; margin-bottom:14px;}
 #screen-recent .recentSubTabs{
   order:-1; display:flex; gap:0; background:#3a3a3c; border:none; border-radius:9px; padding:2px;
