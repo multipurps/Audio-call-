@@ -102,7 +102,7 @@ document.querySelectorAll('.tabBtn').forEach((btn) => {
     document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active', 'fadeIn'));
     const target = $(`screen-${btn.dataset.tab}`);
     target.classList.add('active', 'fadeIn');
-    if (btn.dataset.tab === 'contacts') loadContacts();
+    if (btn.dataset.tab === 'contacts') { loadContacts(); renderMyCard(); }
     $('homeInputBar').classList.toggle('visible', btn.dataset.tab === 'home');
     if (btn.dataset.tab === 'recent') { loadRecentChats(); loadCalls(); }
     if (btn.dataset.tab === 'profile') renderProfileHeader();
@@ -1178,37 +1178,8 @@ async function loadContacts() {
     const { contacts } = await resp.json();
     savedContacts = contacts || [];
     contactsLoaded = true;
-    list.innerHTML = '';
-    if (!savedContacts.length) list.textContent = 'No contacts yet. Add someone or open the keypad below.';
-    for (const c of savedContacts) {
-      const el = document.createElement('div');
-      el.className = 'profileCard contactRow';
-      el.innerHTML = '<div class="cIcon"></div><div class="cBody"><div class="cValue"></div><div class="cLabel"></div></div>';
-      el.querySelector('.cIcon').textContent = (c.name || '?')[0].toUpperCase();
-      el.querySelector('.cValue').textContent = c.name;
-      el.querySelector('.cLabel').textContent = c.phone_number;
-      const call = document.createElement('button');
-      call.className = 'contactCallBtn';
-      call.setAttribute('aria-label', `Call ${c.name}`);
-      call.setAttribute('aria-haspopup', 'dialog');
-      call.innerHTML = PHONE_ICON;
-      call.onclick = (e) => openContactMethods(c, e.currentTarget);
-      const del = document.createElement('button');
-      del.className = 'contactRemoveBtn';
-      del.textContent = '×';
-      del.setAttribute('aria-label', `Remove ${c.name}`);
-      del.onclick = async () => {
-        if (!confirm(`Remove ${c.name} from contacts?`)) return;
-        del.disabled = true;
-        try {
-          await callApi('/api/contacts', { id: c.id }, 'DELETE');
-          await loadContacts();
-        } catch (err) { $('contactStatus').textContent = err.message; }
-        finally { del.disabled = false; }
-      };
-      el.append(call, del);
-      list.appendChild(el);
-    }
+    $('contactsSearch').value = '';
+    renderContactsList(savedContacts);
     updateDialMatch();
   } catch (err) {
     contactsLoaded = false;
@@ -1217,6 +1188,94 @@ async function loadContacts() {
     list.textContent = err.message || 'Could not load contacts. Tap Contacts to retry.';
   }
 }
+
+function renderContactRow(c) {
+  const el = document.createElement('div');
+  el.className = 'contactRow';
+  const name = document.createElement('div');
+  name.className = 'cValue';
+  name.textContent = c.name;
+  const call = document.createElement('button');
+  call.className = 'contactCallBtn';
+  call.setAttribute('aria-label', `Call ${c.name}`);
+  call.setAttribute('aria-haspopup', 'dialog');
+  call.innerHTML = PHONE_ICON;
+  call.onclick = (e) => { e.stopPropagation(); openContactMethods(c, e.currentTarget); };
+  const del = document.createElement('button');
+  del.className = 'contactRemoveBtn';
+  del.textContent = '×';
+  del.setAttribute('aria-label', `Remove ${c.name}`);
+  del.onclick = async (e) => {
+    e.stopPropagation();
+    if (!confirm(`Remove ${c.name} from contacts?`)) return;
+    del.disabled = true;
+    try {
+      await callApi('/api/contacts', { id: c.id }, 'DELETE');
+      await loadContacts();
+    } catch (err) { $('contactStatus').textContent = err.message; }
+    finally { del.disabled = false; }
+  };
+  el.append(name, call, del);
+  return el;
+}
+
+// Groups contacts by first letter (A-Z), everything else under "#", so the
+// list can render iOS-style section headers plus a jump-to-letter index.
+function renderContactsList(contacts) {
+  const list = $('contactsList');
+  const azIndex = $('azIndex');
+  list.innerHTML = '';
+  azIndex.innerHTML = '';
+  if (!contacts.length) {
+    list.textContent = savedContacts.length ? 'No matches.' : 'No contacts yet. Add someone or open the keypad below.';
+    return;
+  }
+  const sorted = [...contacts].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const groups = new Map();
+  for (const c of sorted) {
+    const first = (c.name || '#').trim()[0]?.toUpperCase() || '#';
+    const key = /[A-Z]/.test(first) ? first : '#';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(c);
+  }
+  const ordered = [...groups.entries()].sort(([a], [b]) => (a === '#' ? 1 : b === '#' ? -1 : a.localeCompare(b)));
+  for (const [letter, items] of ordered) {
+    const label = document.createElement('div');
+    label.className = 'contactsSectionLabel';
+    label.id = `contactsSection-${letter}`;
+    label.textContent = letter;
+    list.appendChild(label);
+    for (const c of items) list.appendChild(renderContactRow(c));
+  }
+  const present = new Set(groups.keys());
+  for (const letter of '#ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = letter;
+    btn.className = 'azIndexBtn';
+    if (!present.has(letter)) btn.disabled = true;
+    btn.onclick = () => $(`contactsSection-${letter}`)?.scrollIntoView({ block: 'start' });
+    azIndex.appendChild(btn);
+  }
+}
+
+$('contactsSearch').addEventListener('input', () => {
+  const q = $('contactsSearch').value.trim().toLowerCase();
+  renderContactsList(!q ? savedContacts : savedContacts.filter((c) => (c.name || '').toLowerCase().includes(q) || (c.phone_number || '').includes(q)));
+});
+
+function renderMyCard() {
+  const name = ($('profileEmailDisplay').textContent || 'You').trim() || 'You';
+  $('myCardName').textContent = name;
+  const avatarEl = $('myCardAvatar');
+  if (userAvatarUrl) avatarEl.innerHTML = `<img src="${userAvatarUrl}" alt="">`;
+  else avatarEl.textContent = name[0].toUpperCase();
+}
+$('myCardRow').addEventListener('click', () => document.querySelector('[data-tab=profile]').click());
+$('contactsAddBtn').addEventListener('click', () => {
+  $('contactEditor').open = !$('contactEditor').open;
+  if ($('contactEditor').open) $('newContactName').focus();
+});
 
 $('addContactBtn').addEventListener('click', async () => {
   const name = $('newContactName').value.trim();
