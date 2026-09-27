@@ -144,6 +144,20 @@ class FishAudioTelephonyTTS {
     this.carrier = carrier; // 'twilio' — informational only, we only ever emit mulaw@8kHz
   }
 
+  // Patter's format-detection (resolveTtsSourceFormat) does NOT infer the
+  // source format from setTelephonyCarrier — it only checks, in order,
+  // sourceAudioFormat(), an `outputFormat` string, or a `sampleRate` number.
+  // Without one of these it assumes 16kHz PCM (LEGACY_PIPELINE_TTS_FORMAT)
+  // and runs our already-mulaw-8kHz bytes through a PCM resample + mulaw
+  // re-encode meant for raw PCM, corrupting the audio into unplayable noise.
+  // This is the actual cause of "the call connects but is dead silent."
+  // Declaring the real format here makes formatsMatch() true against
+  // Twilio's mulaw/8000 wire format, so Patter takes the bit-clean bypass
+  // path instead.
+  sourceAudioFormat() {
+    return { encoding: 'mulaw', sampleRate: 8000 };
+  }
+
   setVoice(voiceId) {
     this.voiceId = voiceId || undefined;
   }
