@@ -1192,7 +1192,7 @@ async function loadContacts() {
       call.setAttribute('aria-label', `Call ${c.name}`);
       call.setAttribute('aria-haspopup', 'dialog');
       call.innerHTML = PHONE_ICON;
-      call.onclick = () => openContactMethods(c);
+      call.onclick = (e) => openContactMethods(c, e.currentTarget);
       const del = document.createElement('button');
       del.className = 'contactRemoveBtn';
       del.textContent = '×';
@@ -1367,11 +1367,27 @@ function updateCallPlanAction(plan, node) {
 }
 
 let contactCallTarget = null;
-function openContactMethods(contact) {
+function openContactMethods(contact, anchorEl) {
   contactCallTarget = contact;
-  $('contactCallTitle').textContent = `Call ${contact.name}`;
+  $('contactCallTitle').textContent = contact.name;
   $('contactCallNumber').textContent = contact.phone_number;
-  $('contactCallDialog').showModal();
+  const dialog = $('contactCallDialog');
+  dialog.showModal();
+  positionActionSheet(dialog, anchorEl);
+}
+function positionActionSheet(dialog, anchorEl) {
+  if (!anchorEl) { dialog.style.top = ''; dialog.style.left = ''; dialog.style.transform = ''; return; }
+  const anchor = anchorEl.getBoundingClientRect();
+  dialog.style.transform = 'none';
+  const sheet = dialog.getBoundingClientRect();
+  const margin = 10;
+  let top = anchor.bottom + margin;
+  if (top + sheet.height > window.innerHeight - margin) top = anchor.top - sheet.height - margin;
+  let left = anchor.right - sheet.width;
+  left = Math.min(Math.max(left, margin), window.innerWidth - sheet.width - margin);
+  top = Math.max(top, margin);
+  dialog.style.top = `${top}px`;
+  dialog.style.left = `${left}px`;
 }
 document.querySelectorAll('[data-method]').forEach((btn) => btn.addEventListener('click', () => {
   if (!contactCallTarget) return;
