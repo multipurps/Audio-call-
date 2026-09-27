@@ -99,19 +99,19 @@ img{display:block; max-width:100%;}
 .screen.fadeIn{animation:screenFadeIn 0.25s ease both;}
 @keyframes screenFadeIn{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);}}
 
-/* Independent floating capsules; the group has no background or padding. */
+/* Bare icons — no pill/capsule background around each item. */
 #tabBar{
   position:absolute; left:50%; bottom:16px; transform:translateX(-50%); z-index:10;
-  display:flex; align-items:center; gap:10px; padding:0; border:0; background:none;
+  display:flex; align-items:center; gap:22px; padding:0; border:0; background:none;
 }
 .tabBtn{
-  flex:none; width:62px; height:58px; display:flex; flex-direction:column;
-  align-items:center; justify-content:center; gap:4px; border:0; border-radius:30px;
-  color:var(--dim); background:var(--coffee-light); font-size:10px; font-weight:600;
-  box-shadow:0 6px 18px rgba(0,0,0,.3); transition:background .2s,color .2s;
+  flex:none; width:52px; height:52px; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:4px; border:0; border-radius:0;
+  color:var(--dim); background:none; font-size:10px; font-weight:600;
+  box-shadow:none; transition:color .2s;
 }
-.tabBtn.active{background:var(--accent-grad); color:#fff;}
-.tabBtn svg{width:21px; height:21px;}
+.tabBtn.active{background:none; color:var(--accent);}
+.tabBtn svg{width:23px; height:23px;}
 button:focus-visible, summary:focus-visible{outline:2px solid var(--accent); outline-offset:4px;}
 button:disabled{opacity:.5; cursor:default;}
 
@@ -704,7 +704,7 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 /* Preserve the existing peach theme while keeping foreground text legible. */
 [data-theme="ss3"] #screens{background:linear-gradient(180deg,rgba(13,9,7,.78),rgba(13,9,7,.35) 65%,transparent);}
 [data-theme="ss3"], [data-theme="midnight-cyan"], [data-theme="forest-gold"]{--on-accent:#141414;}
-.tabBtn.active,.keypadFab,.dialCallBtn,.callNowBtn{color:var(--on-accent,#fff);}
+.keypadFab,.dialCallBtn,.callNowBtn{color:var(--on-accent,#fff);}
 #keypadDialog .dialStatus:empty,#dialStatus:empty{display:none;}
 @media(max-height:700px){
   #keypadDialog{max-height:96dvh;padding:10px 24px 12px;}
