@@ -260,6 +260,7 @@ async function sendImage(req, res, supabase, userId) {
           },
         ],
         temperature: 0.5,
+        max_tokens: 150,
       }),
     });
     if (!resp.ok) {
@@ -361,6 +362,9 @@ async function sendMessage(req, res, supabase, userId) {
         model: 'qwen/qwen3.8-27b',
         messages: chatMessages,
         temperature: 0.3,
+        max_tokens: 250, // this only ever needs to emit one small JSON object - qwen3.8-27b
+                         // reasons at length before answering, and with no cap it was
+                         // requesting 1300+ output tokens against a 1000/min tier limit
         response_format: { type: 'json_object' },
       }),
     });
@@ -543,6 +547,14 @@ async function sendMessage(req, res, supabase, userId) {
             platformCallId = result?.callId || null;
           } catch (err) {
             if (err.statusCode === 404) throw new Error("the Telegram call service (mp-relay) doesn't have call support deployed yet.");
+            if (err.statusCode === 401) {
+              // mp-relay confirmed the account's auth key is dead (logged
+              // out / revoked, not just a network blip) - clear the cached
+              // "connected" row so the Connected Accounts screen stops
+              // lying about it, same self-heal as the WhatsApp path.
+              await supabase.from('telegram_accounts').update({ status: 'disconnected', display_name: null }).eq('user_id', userId);
+              throw new Error('your Telegram session expired - reconnect Telegram in Profile and try again');
+            }
             throw err;
           }
         }
