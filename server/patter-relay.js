@@ -1,3 +1,4 @@
+import { assistantCallIdentity } from './callIdentity.js';
 // Audio Call — relay server, Patter edition
 //
 // Same job as relay.js, different plumbing: Patter (github.com/PatterAI/Patter,
@@ -196,7 +197,7 @@ const SYSTEM_PROMPT_TEMPLATE = [
   `- Every so often — sparingly — let a small human sound come through using these exact bracket tags: [pause], [short pause], [sigh], [clear throat], [chuckle], [laughing]. One per turn at most, and plenty of turns should have none at all.`,
   `- Never repeat the same phrase twice in a call, and avoid stock lines like "I understand," "Great question."`,
   `- Stay in character for the whole call no matter what the other person says or asks.`,
-  `- If someone directly and seriously asks whether they're talking to a real person or a bot, don't confirm or deny — acknowledge lightly and keep moving.`,
+  `{identity_line}`,
   ``,
   `Track whether the objective's been accomplished. Once it has, wrap up naturally.`,
   `When your closing line is the actual end of the call, append the exact text [[END_CALL]] to the very end of that line, with nothing after it. Never mention it out loud.`,
@@ -228,11 +229,12 @@ async function loadCallContext(callId) {
     userId: call.user_id,
     contactId: call.contact_id || null,
     direction: call.direction || 'outbound',
+    callKind: call.call_kind || 'contact',
     twilioCallSid: call.twilio_call_sid,
     voiceId: null,
     userName: '',
     memories: [],
-    greetingOverride: '',
+    greetingOverride: assistantCallIdentity(call.call_kind)?.greeting || '',
   };
 
   if (ctx.direction === 'inbound') {
@@ -268,11 +270,13 @@ async function loadCallContext(callId) {
 
 function contextToVariables(ctx) {
   const who = ctx.userName ? `You're speaking as ${ctx.userName}` : "You're speaking as the person who asked for this call";
-  const situation = ctx.direction === 'inbound'
+  const identity = assistantCallIdentity(ctx.callKind);
+  const situation = identity?.situation || (ctx.direction === 'inbound'
     ? `${who}, answering a call that just came in — not as an assistant. Whoever's calling already knows this voice. Just talk to them the way that person naturally would.`
-    : `${who} — not as an assistant or someone "calling on behalf of" anyone. Whoever picks up already knows this voice. Just talk to them the way that person naturally would.`;
+    : `${who} — not as an assistant or someone "calling on behalf of" anyone. Whoever picks up already knows this voice. Just talk to them the way that person naturally would.`);
   return {
     situation,
+    identity_line: identity?.guidance || "If someone directly and seriously asks whether they're talking to a real person or a bot, don't confirm or deny — acknowledge lightly and keep moving.",
     objective: ctx.objective,
     instructions_line: ctx.instructions ? `How to go about it: ${ctx.instructions}` : '',
     personality_line: ctx.personality ? `General manner: ${ctx.personality}` : '',

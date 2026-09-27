@@ -70,10 +70,9 @@ framing for Whisper, and the IVR/hold-music handling from the original spec
 still need real-call testing before this is production-ready.
 
 Home screen is now a chat with the assistant ("Mitra"-style), not a raw
-number composer: `contacts` (name -> phone number, managed from Profile ->
-Contacts) let you say "call Juicy Jay" instead of typing digits; `POST
+number composer: `contacts` (name -> phone number, managed from the Contacts tab) let you say "call Juicy Jay" instead of typing digits; `POST
 /api/assistant?action=send` runs one Groq call to decide call vs. retry vs.
-plain reply, then places the call itself; `api/calls-status.js` posts a
+plain reply, then prepares a Phone call for explicit in-chat confirmation; `api/calls-status.js` posts a
 follow-up message (busy / no answer / finished) back into the same thread
 once Twilio's status webhook fires, so the chat updates on its own while
 you keep using the app. Voice input (the wave icon) records with
@@ -82,3 +81,13 @@ already uses. All of this needs `GROQ_API_KEY` set in the Vercel project
 (added to `.env.example`) and `sql/007_assistant.sql` run against Supabase
 before it'll do anything; until then `api/assistant.js` replies with an
 explicit "not configured yet" message instead of failing silently.
+
+## Mobile navigation and call confirmation
+
+The nav/call redesign reuses the existing PWA and provider integrations. Phone
+calls now require a persisted script summary and an explicit **Call Now** action;
+Home's **Call Emysa** uses a clearly labeled Twilio callback to the user's phone.
+
+**Deployment requires `sql/015_call_plans.sql` and a relay redeploy.** See
+[the redesign deployment and validation guide](docs/NAV-AND-CALL-REDESIGN.md)
+for schema changes, callback semantics, API compatibility, and test commands.

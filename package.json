@@ -5,5 +5,12 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
     "web-push": "^3.6.7"
+  },
+  "scripts": {
+    "test": "node --experimental-vm-modules --test tests/*.test.mjs",
+    "test:mobile": "node --experimental-vm-modules tests/mobile.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }

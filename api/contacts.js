@@ -1,3 +1,4 @@
+import { normalizePhone } from '../lib/phoneNumbers.js';
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 
 export default async function handler(req, res) {
@@ -16,22 +17,20 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    const { name, phoneNumber } = req.body || {};
-    if (!name || !name.trim()) return res.status(400).json({ error: 'Name required' });
-    if (!phoneNumber || !phoneNumber.trim()) return res.status(400).json({ error: 'Phone number required' });
+    const { name, phoneNumber: rawNumber } = req.body || {};
+    const phoneNumber = normalizePhone(rawNumber);
+    if (typeof name !== 'string' || !name.trim() || name.length > 120) return res.status(400).json({ error: 'Name required' });
+    if (!phoneNumber || !phoneNumber.trim()) return res.status(400).json({ error: 'Phone number with country code required (for example +14155552671)' });
     // Was a plain insert() with no check for an existing contact at this
     // number first - saving the same contact twice (or a slow double-tap
     // on the button) created a duplicate row every single time. Now
     // updates the existing one for this user+number instead of adding
     // another.
-    const { data: existing } = await supabase
-      .from('contacts')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('phone_number', phoneNumber.trim())
-      .maybeSingle();
+    const { data: contacts, error: readError } = await supabase.from('contacts').select('id,phone_number').eq('user_id', userId);
+    if (readError) return res.status(500).json({ error: readError.message });
+    const existing = (contacts || []).find((c) => normalizePhone(c.phone_number) === phoneNumber);
     const { data, error } = existing
-      ? await supabase.from('contacts').update({ name: name.trim() }).eq('id', existing.id).select().single()
+      ? await supabase.from('contacts').update({ name: name.trim(), phone_number: phoneNumber }).eq('id', existing.id).eq('user_id', userId).select().single()
       : await supabase.from('contacts').insert({ user_id: userId, name: name.trim(), phone_number: phoneNumber.trim() }).select().single();
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ contact: data });

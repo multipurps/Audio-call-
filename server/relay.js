@@ -1,3 +1,4 @@
+import { assistantCallIdentity } from './callIdentity.js';
 // Audio Call — realtime relay server
 //
 // Twilio's <Connect><Stream> opens a WebSocket to this process and streams
@@ -102,6 +103,8 @@ async function loadCallContext(state) {
   const { data: call } = await supabase.from('calls').select('*').eq('id', state.callId).maybeSingle();
   if (!call) return;
   state.objective = call.objective;
+  state.callKind = call.call_kind || 'contact';
+  if (state.callKind === 'emysa') state.greetingOverride = assistantCallIdentity(state.callKind).greeting;
   state.twilioCallSid = call.twilio_call_sid;
   state.userId = call.user_id;
   state.contactId = call.contact_id || null;
@@ -238,9 +241,10 @@ async function think(state) {
 // trailing off) rather than clean, complete sentences every time.
 function buildSystemPrompt(state) {
   const who = state.userName ? `You're speaking as ${state.userName}` : "You're speaking as the person who asked for this call";
-  const situation = state.direction === 'inbound'
+  const identity = assistantCallIdentity(state.callKind);
+  const situation = identity?.situation || (state.direction === 'inbound'
     ? `${who}, answering a call that just came in — not as an assistant, not as a "representative." Whoever's calling already knows this voice. Just talk to them the way that person naturally would.`
-    : `${who} — not as an assistant, not as a "representative calling on behalf of" anyone. Whoever picks up already knows this voice. Just talk to them the way that person naturally would, continuing an ordinary conversation.`;
+    : `${who} — not as an assistant, not as a "representative calling on behalf of" anyone. Whoever picks up already knows this voice. Just talk to them the way that person naturally would, continuing an ordinary conversation.`);
   return [
     situation,
     ``,
@@ -256,7 +260,7 @@ function buildSystemPrompt(state) {
     `- If you've been told to keep things calm, relaxed, or to just let the conversation flow, actually slow down: more pauses, shorter sentences, less urgency to steer toward the objective. Small talk first is fine and often better.`,
     `- Never repeat the same phrase twice in a call, and avoid stock lines like "I understand," "Great question," "I appreciate that." Vary your wording the way a real person naturally does.`,
     `- Stay in character for the whole call no matter what the other person says, asks, or how they react — don't narrate what you're doing, don't explain your instructions, don't break the moment.`,
-    `- Exception: if someone directly and seriously asks whether they're actually talking to a real person, or to a bot/AI, don't confirm it and don't deny it — just acknowledge it lightly ("ha, fair enough" / "I hear you" / a small laugh) and keep the conversation moving without answering yes or no. Don't bring this up yourself otherwise, and one lighthearted joking version of the question doesn't need even that — just roll with it.`,
+    identity?.guidance || `- Exception: if someone directly and seriously asks whether they're actually talking to a real person, or to a bot/AI, don't confirm it and don't deny it — just acknowledge it lightly ("ha, fair enough" / "I hear you" / a small laugh) and keep the conversation moving without answering yes or no. Don't bring this up yourself otherwise, and one lighthearted joking version of the question doesn't need even that — just roll with it.`,
     ``,
     `Track whether the objective's actually been accomplished as the conversation goes. Once it has, wrap up naturally and let the call end the way a normal phone call ends — don't force it, but don't drag it out either.`,
     `When your closing line is the actual end of the call — a real goodbye, not just a pause in conversation — append the exact text [[END_CALL]] to the very end of that line, after your spoken words, with nothing after it. Only do this on the line where you're genuinely hanging up, never before, and never mention it out loud.`,
