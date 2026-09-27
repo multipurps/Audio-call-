@@ -1572,17 +1572,12 @@ function renderCallsList(calls) {
   for (const c of calls) {
     const isKnown = !!c.contact_name;
     const name = c.contact_name || c.to_number;
-    const missed = c.status === 'no_answer' || c.status === 'failed';
     const el = document.createElement('div');
     el.className = 'recentRow';
 
-    let avatarHtml;
-    if (isKnown) {
-      const hue = hueForName(name);
-      avatarHtml = `<div class="recentAvatar" style="background:linear-gradient(135deg, hsl(${hue},55%,58%), hsl(${(hue + 40) % 360},45%,38%));">${escapeHtml((name || '?')[0].toUpperCase())}</div>`;
-    } else {
-      avatarHtml = `<div class="recentAvatar recentAvatar--unknown"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1c0-2.76-3.58-5-8-5z"/></svg></div>`;
-    }
+    const avatarHtml = isKnown
+      ? `<div class="recentAvatar">${escapeHtml((name || '?')[0].toUpperCase())}</div>`
+      : `<div class="recentAvatar"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1c0-2.76-3.58-5-8-5z"/></svg></div>`;
 
     const subtitle = isKnown
       ? (PLATFORM_LABEL[c.platform] ? `${PLATFORM_LABEL[c.platform]} Audio` : callSummaryLine(c))
@@ -1591,7 +1586,7 @@ function renderCallsList(calls) {
     el.innerHTML = `
       ${avatarHtml}
       <div class="recentBody">
-        <div class="recentName${missed ? ' recentName--missed' : ''}">${escapeHtml(name)}</div>
+        <div class="recentName${isKnown ? '' : ' recentName--unknown'}">${escapeHtml(name)}</div>
         <div class="recentPreview">${escapeHtml(subtitle)}</div>
       </div>
       <div class="recentMeta">

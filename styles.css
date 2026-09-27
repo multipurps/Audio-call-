@@ -589,34 +589,40 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .recentChatMenuItem.danger{color:#ff6b6b;}
 .recentChatMenuItem:active{background:rgba(255,255,255,0.08);}
 
-/* ---------- recent calls (flat iOS-style list) ---------- */
+/* ---------- recent calls — exact copy of the reference iOS screenshot ---------- */
+#screen-recent{display:flex; flex-direction:column; background:#000;}
+#screen-recent h1.pageTitle{font-size:34px; font-weight:800; color:#fff; padding-top:4px; margin-bottom:14px;}
+#screen-recent .recentSubTabs{
+  order:-1; display:flex; gap:0; background:#3a3a3c; border:none; border-radius:9px; padding:2px;
+  margin:max(env(safe-area-inset-top,0px),46px) 0 18px; width:min(320px, 100%); align-self:center;
+}
+#screen-recent .recentSubTabBtn{flex:1; border-radius:7px; padding:7px 0; font-size:14px; font-weight:500; color:#fff; background:none;}
+#screen-recent .recentSubTabBtn.active{background:#636366; font-weight:600;}
+#screen-recent .searchBar{background:#1c1c1e; border:none; border-radius:11px; color:#8e8e93;}
+#screen-recent .searchBar svg{color:#8e8e93;}
+#screen-recent .searchBar input{color:#fff; font-size:16px;}
+#screen-recent .searchBar input::placeholder{color:#8e8e93;}
+
 .recentRow{
-  display:flex; align-items:center; gap:12px;
-  background:none; border:none; border-radius:0; padding:11px 2px;
-  border-bottom:1px solid rgba(255,255,255,0.09); margin-bottom:0;
+  display:flex; align-items:center; gap:14px;
+  background:none; border:none; border-radius:0; padding:12px 0;
+  border-bottom:1px solid #262628; margin-bottom:0;
 }
 .recentRow:last-child{border-bottom:none;}
-.recentAvatar{width:48px; height:48px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:16px; color:#fff; flex:none;}
-.recentAvatar--unknown{background:#48484a; color:#a8a8ad;}
-.recentAvatar--unknown svg{width:26px; height:26px;}
-.recentBody{flex:1; min-width:0;}
-.recentName{font-size:16.5px; font-weight:600; margin-bottom:2px; color:#fff;}
-.recentName--missed{color:#ff453a;}
-.recentPreview{font-size:13px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-.recentMeta{display:flex; align-items:center; gap:6px; flex:none;}
-.recentDate{font-size:13px; color:var(--dim); flex:none;}
-.recentInfoBtn{width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#0a84ff; flex:none;}
-.recentInfoBtn svg{width:20px; height:20px;}
-.recentInfoBtn:disabled{opacity:0.35;}
-
-#screen-recent h1.pageTitle{font-size:32px; padding-top:6px; margin-bottom:4px;}
-#screen-recent .recentSubTabs{
-  order:-1; background:rgba(120,120,128,0.24); border:none; border-radius:9px; padding:2px;
-  margin:max(env(safe-area-inset-top,0px),44px) 0 16px;
+.recentAvatar{
+  width:58px; height:58px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font-weight:600; font-size:24px; color:#fff; background:#8e8e93; flex:none;
 }
-#screen-recent{display:flex; flex-direction:column;}
-#screen-recent .recentSubTabBtn{border-radius:7px; padding:6px 0; font-size:13px;}
-#screen-recent .recentSubTabBtn.active{background:rgba(255,255,255,0.14); color:#fff;}
+.recentAvatar svg{width:34px; height:34px; color:#fff;}
+.recentBody{flex:1; min-width:0;}
+.recentName{font-size:19px; font-weight:600; margin-bottom:3px; color:#fff;}
+.recentName--unknown{color:#ff453a;}
+.recentPreview{font-size:15px; color:#8e8e93; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.recentMeta{display:flex; align-items:center; gap:7px; flex:none;}
+.recentDate{font-size:15px; color:#8e8e93; flex:none;}
+.recentInfoBtn{width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#0a84ff; flex:none;}
+.recentInfoBtn svg{width:22px; height:22px;}
+.recentInfoBtn:disabled{opacity:0.35;}
 
 /* ---------- ss3 theme: peach-to-black gradient with a drifting glow, from Mitra's onboarding screen ---------- */
 [data-theme="ss3"]{
