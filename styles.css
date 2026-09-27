@@ -591,37 +591,37 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 
 /* ---------- recent calls — exact copy of the reference iOS screenshot ---------- */
 #screen-recent.active{display:flex; flex-direction:column; background:#000;}
-#screen-recent h1.pageTitle{font-size:34px; font-weight:800; color:#fff; padding-top:4px; margin-bottom:14px;}
+#screen-recent h1.pageTitle{font-size:27px; font-weight:800; color:#fff; padding-top:4px; margin-bottom:12px;}
 #screen-recent .recentSubTabs{
   order:-1; display:flex; gap:0; background:#3a3a3c; border:none; border-radius:9px; padding:2px;
-  margin:max(env(safe-area-inset-top,0px),46px) 0 18px; width:min(320px, 100%); align-self:center;
+  margin:max(env(safe-area-inset-top,0px),46px) 0 16px; width:min(320px, 100%); align-self:center;
 }
-#screen-recent .recentSubTabBtn{flex:1; border-radius:7px; padding:7px 0; font-size:14px; font-weight:500; color:#fff; background:none;}
+#screen-recent .recentSubTabBtn{flex:1; border-radius:7px; padding:6px 0; font-size:13px; font-weight:500; color:#fff; background:none;}
 #screen-recent .recentSubTabBtn.active{background:#636366; font-weight:600;}
 #screen-recent .searchBar{background:#1c1c1e; border:none; border-radius:11px; color:#8e8e93;}
 #screen-recent .searchBar svg{color:#8e8e93;}
-#screen-recent .searchBar input{color:#fff; font-size:16px;}
+#screen-recent .searchBar input{color:#fff; font-size:14px;}
 #screen-recent .searchBar input::placeholder{color:#8e8e93;}
 
 .recentRow{
-  display:flex; align-items:center; gap:14px;
-  background:none; border:none; border-radius:0; padding:12px 0;
+  display:flex; align-items:center; gap:12px;
+  background:none; border:none; border-radius:0; padding:10px 0;
   border-bottom:1px solid #262628; margin-bottom:0;
 }
 .recentRow:last-child{border-bottom:none;}
 .recentAvatar{
-  width:58px; height:58px; border-radius:50%; display:flex; align-items:center; justify-content:center;
-  font-weight:600; font-size:24px; color:#fff; background:#8e8e93; flex:none;
+  width:48px; height:48px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font-weight:600; font-size:19px; color:#fff; background:#8e8e93; flex:none;
 }
-.recentAvatar svg{width:34px; height:34px; color:#fff;}
+.recentAvatar svg{width:27px; height:27px; color:#fff;}
 .recentBody{flex:1; min-width:0;}
-.recentName{font-size:19px; font-weight:600; margin-bottom:3px; color:#fff;}
+.recentName{font-size:16px; font-weight:600; margin-bottom:2px; color:#fff;}
 .recentName--unknown{color:#ff453a;}
-.recentPreview{font-size:15px; color:#8e8e93; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.recentPreview{font-size:13px; color:#8e8e93; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .recentMeta{display:flex; align-items:center; gap:7px; flex:none;}
-.recentDate{font-size:15px; color:#8e8e93; flex:none;}
-.recentInfoBtn{width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#0a84ff; flex:none;}
-.recentInfoBtn svg{width:22px; height:22px;}
+.recentDate{font-size:13px; color:#8e8e93; flex:none;}
+.recentInfoBtn{width:21px; height:21px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#0a84ff; flex:none;}
+.recentInfoBtn svg{width:19px; height:19px;}
 .recentInfoBtn:disabled{opacity:0.35;}
 
 /* ---------- ss3 theme: peach-to-black gradient with a drifting glow, from Mitra's onboarding screen ---------- */
@@ -657,17 +657,33 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 #callScreen.assistantMode .waveRow{display:none;}
 #callScreen.assistantMode .waveRow span{width:4px;}
 
-/* ---------- mobile contacts and pre-call setup ---------- */
-#screen-contacts{padding-bottom:180px;}
-.contactsIntro{color:var(--dim); font-size:14px; margin:-4px 0 22px;}
-#contactEditor{margin-bottom:22px;}
-#contactEditor summary{color:var(--accent); font-weight:650; padding:14px 0; cursor:pointer;}
-.contactRow .cBody{min-width:0;}
-.contactRow .cValue{overflow-wrap:anywhere;}
-.contactCallBtn,.contactRemoveBtn{flex:none; width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center;}
-.contactCallBtn{background:var(--glass-bg); color:var(--accent);}
-.contactCallBtn svg{width:21px; height:21px;}
-.contactRemoveBtn{color:var(--dim); font-size:24px;}
+/* ---------- mobile contacts and pre-call setup — exact copy of the reference iOS screenshot ---------- */
+.visuallyHidden{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;}
+#screen-contacts.active{display:flex; flex-direction:column; background:#000; padding-bottom:180px; padding-right:34px;}
+#screen-contacts h1.pageTitle{font-size:27px; font-weight:800; color:#fff; padding-top:0;}
+.contactsHeaderRow{display:flex; align-items:center; justify-content:space-between; margin:max(env(safe-area-inset-top,0px),46px) 0 14px;}
+.contactsAddBtn{flex:none; width:34px; height:34px; display:flex; align-items:center; justify-content:center; color:#0a84ff;}
+.contactsAddBtn svg{width:22px; height:22px;}
+#screen-contacts .searchBar{background:#1c1c1e; border:none; border-radius:11px; color:#8e8e93; margin-bottom:18px;}
+#screen-contacts .searchBar svg{color:#8e8e93;}
+#screen-contacts .searchBar input{color:#fff; font-size:14px;}
+#screen-contacts .searchBar input::placeholder{color:#8e8e93;}
+.myCardRow{display:flex; align-items:center; gap:14px; width:100%; text-align:left; padding:8px 0 18px; border-bottom:1px solid #262628; margin-bottom:6px;}
+.myCardAvatar{width:52px; height:52px; border-radius:50%; overflow:hidden; background:#8e8e93; color:#fff; display:flex; align-items:center; justify-content:center; font-size:20px; font-weight:600; flex:none;}
+.myCardAvatar img{width:100%; height:100%; object-fit:cover;}
+.myCardName{font-size:17px; font-weight:600; color:#fff;}
+.myCardSub{font-size:13px; color:#8e8e93; margin-top:1px;}
+#contactEditor{margin-bottom:6px;}
+.contactsSectionLabel{font-size:13px; font-weight:600; color:#8e8e93; padding:10px 0 4px;}
+.contactRow{display:flex; align-items:center; gap:10px; padding:11px 0; border-bottom:1px solid #262628;}
+.contactRow .cValue{flex:1; min-width:0; font-size:16px; font-weight:600; color:#fff; overflow-wrap:anywhere;}
+.contactCallBtn,.contactRemoveBtn{flex:none; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center;}
+.contactCallBtn{color:#0a84ff;}
+.contactCallBtn svg{width:19px; height:19px;}
+.contactRemoveBtn{color:#8e8e93; font-size:21px;}
+.azIndex{position:fixed; right:6px; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; align-items:center; z-index:5;}
+.azIndexBtn{font-size:10.5px; font-weight:600; color:#0a84ff; line-height:1.35; padding:0 4px;}
+.azIndexBtn:disabled{color:#3a3a3c;}
 .keypadFab{position:fixed; bottom:94px; left:50%; transform:translateX(-50%); width:56px; height:56px; border-radius:50%; background:var(--accent-grad); box-shadow:0 6px 24px #0006; display:flex; align-items:center; justify-content:center;}
 .keypadFab svg{width:25px; height:25px;}
 .callDialog{position:fixed; inset:auto 0 0; margin:0 auto; width:100%; max-width:440px; max-height:92dvh; overflow-y:auto; padding:22px 24px 26px; border:0; border-radius:28px 28px 0 0; color:#fff; background:var(--coffee-light); box-shadow:0 -12px 50px #0005;}
