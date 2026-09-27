@@ -71,14 +71,21 @@ async function relayCallStatus(req, res, supabase) {
   const secret = process.env.RELAY_CALLBACK_SECRET;
   if (!secret || req.headers['x-relay-secret'] !== secret) return res.status(401).json({ error: 'unauthorized' });
 
-  const { userId, sessionId, status: callStatus, peerIdentifier, contactName } = req.body || {};
+  // platform was hardcoded to 'telegram' here, from when only mp-relay
+  // called this. wacalls-relay (WhatsApp) now calls it too and does send
+  // platform - generalized so a WhatsApp report doesn't get mislabeled as
+  // Telegram (wrong social_calls row, and it would never match a `calls`
+  // row since that lookup also hardcoded 'telegram'). Defaults to
+  // 'telegram' only for an older mp-relay build that predates this field.
+  const { userId, sessionId, status: callStatus, peerIdentifier, contactName, durationSeconds, platform = 'telegram' } = req.body || {};
   if (!userId || !peerIdentifier || !callStatus) return res.status(400).json({ error: 'userId, peerIdentifier and status required' });
+  if (!['whatsapp', 'telegram'].includes(platform)) return res.status(400).json({ error: 'platform must be whatsapp or telegram' });
 
   const { data: call } = await supabase
     .from('calls')
     .select('id')
     .eq('user_id', userId)
-    .eq('platform', 'telegram')
+    .eq('platform', platform)
     .eq('to_number', peerIdentifier)
     .in('status', ['ringing', 'in_progress'])
     .order('created_at', { ascending: false })
@@ -88,7 +95,20 @@ async function relayCallStatus(req, res, supabase) {
   if (call) {
     await supabase.from('calls').update({ status: callStatus }).eq('id', call.id);
   }
-  await supabase.from('social_calls').insert({ user_id: userId, platform: 'telegram', peer_identifier: peerIdentifier, status: callStatus });
+  const socialCallUpdate = { status: callStatus };
+  if (durationSeconds) socialCallUpdate.duration_seconds = durationSeconds;
+  const { data: updatedSocialCalls } = await supabase
+    .from('social_calls')
+    .update(socialCallUpdate)
+    .eq('user_id', userId)
+    .eq('platform', platform)
+    .eq('peer_identifier', peerIdentifier)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .select('id');
+  if (!updatedSocialCalls?.length) {
+    await supabase.from('social_calls').insert({ user_id: userId, platform, peer_identifier: peerIdentifier, ...socialCallUpdate });
+  }
 
   // Same natural "the call ended" chat message Twilio calls get, posted
   // into whichever chat session placed the call - if sessionId wasn't
@@ -97,7 +117,16 @@ async function relayCallStatus(req, res, supabase) {
   // guessed at.
   if (sessionId) {
     const who = contactName || peerIdentifier;
-    const text = callStatus === 'completed' ? `Finished the call with ${who} on Telegram.` : `Couldn't complete the call with ${who} on Telegram.`;
+    const channelName = platform === 'whatsapp' ? 'WhatsApp' : 'Telegram';
+    const mins = durationSeconds ? Math.max(1, Math.round(durationSeconds / 60)) : null;
+    let text;
+    if (callStatus === 'completed') {
+      text = mins ? `Finished the call with ${who} on ${channelName} (about ${mins} min).` : `Finished the call with ${who} on ${channelName}.`;
+    } else if (callStatus === 'no_answer') {
+      text = `I called ${who} on ${channelName}, but there was no answer.`;
+    } else {
+      text = `Couldn't complete the call with ${who} on ${channelName}.`;
+    }
     await supabase.from('assistant_messages').insert({ user_id: userId, session_id: sessionId, role: 'assistant', content: text, source: 'text' });
     await supabase.from('chat_sessions').update({ updated_at: new Date().toISOString() }).eq('id', sessionId);
   }
