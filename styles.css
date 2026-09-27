@@ -589,17 +589,34 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .recentChatMenuItem.danger{color:#ff6b6b;}
 .recentChatMenuItem:active{background:rgba(255,255,255,0.08);}
 
-/* ---------- recent calls ---------- */
+/* ---------- recent calls (flat iOS-style list) ---------- */
 .recentRow{
   display:flex; align-items:center; gap:12px;
-  background:var(--glass-bg); backdrop-filter:blur(18px) saturate(160%); -webkit-backdrop-filter:blur(18px) saturate(160%);
-  border:1px solid var(--glass-border); border-radius:18px; padding:14px; margin-bottom:10px;
+  background:none; border:none; border-radius:0; padding:11px 2px;
+  border-bottom:1px solid rgba(255,255,255,0.09); margin-bottom:0;
 }
-.recentAvatar{width:46px; height:46px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:16px; color:#fff; flex:none;}
+.recentRow:last-child{border-bottom:none;}
+.recentAvatar{width:48px; height:48px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:16px; color:#fff; flex:none;}
+.recentAvatar--unknown{background:#48484a; color:#a8a8ad;}
+.recentAvatar--unknown svg{width:26px; height:26px;}
 .recentBody{flex:1; min-width:0;}
-.recentName{font-size:15px; font-weight:650; margin-bottom:3px;}
-.recentPreview{font-size:12.5px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-.recentDate{font-size:12px; color:var(--dim); flex:none; align-self:flex-start; margin-top:2px;}
+.recentName{font-size:16.5px; font-weight:600; margin-bottom:2px; color:#fff;}
+.recentName--missed{color:#ff453a;}
+.recentPreview{font-size:13px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.recentMeta{display:flex; align-items:center; gap:6px; flex:none;}
+.recentDate{font-size:13px; color:var(--dim); flex:none;}
+.recentInfoBtn{width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#0a84ff; flex:none;}
+.recentInfoBtn svg{width:20px; height:20px;}
+.recentInfoBtn:disabled{opacity:0.35;}
+
+#screen-recent h1.pageTitle{font-size:32px; padding-top:6px; margin-bottom:4px;}
+#screen-recent .recentSubTabs{
+  order:-1; background:rgba(120,120,128,0.24); border:none; border-radius:9px; padding:2px;
+  margin:max(env(safe-area-inset-top,0px),44px) 0 16px;
+}
+#screen-recent{display:flex; flex-direction:column;}
+#screen-recent .recentSubTabBtn{border-radius:7px; padding:6px 0; font-size:13px;}
+#screen-recent .recentSubTabBtn.active{background:rgba(255,255,255,0.14); color:#fff;}
 
 /* ---------- ss3 theme: peach-to-black gradient with a drifting glow, from Mitra's onboarding screen ---------- */
 [data-theme="ss3"]{
@@ -667,8 +684,10 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .dialCallBtn svg{width:30px; height:30px;}
 .contactMethod{display:flex; align-items:center; gap:14px; width:100%; min-height:64px; text-align:left; font-size:17px; border-top:1px solid var(--line);}
 .contactMethod>span:last-child{margin-left:auto; color:var(--dim);}
-.methodSymbol{width:34px; height:34px; border-radius:50%; background:var(--glass-bg); display:flex; align-items:center; justify-content:center; color:var(--accent);}
+.methodSymbol{width:34px; height:34px; border-radius:50%; background:var(--glass-bg); display:flex; align-items:center; justify-content:center; color:var(--accent); overflow:hidden;}
 .methodSymbol svg{width:18px; height:18px;}
+.methodSymbol--brand{background:transparent;}
+.methodSymbol--brand svg{width:100%; height:100%;}
 .actionSheet .secondaryBtn{margin-top:16px;}
 #emysaCallForm label{font-size:13px; color:var(--dim);}
 #emysaCallbackNumber{margin:12px 0; padding:14px; background:var(--glass-bg); border-radius:12px; width:100%;}

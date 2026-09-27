@@ -1127,9 +1127,26 @@ function setCallChannel(channel, { focus = true } = {}) {
 // Restore the persisted line's badge/placeholder on load (without opening the keyboard).
 if (selectedCallChannel) setCallChannel(selectedCallChannel, { focus: false });
 
-$('homeWaveBtn').addEventListener('click', () => {
-  $('emysaCallStatus').textContent = '';
-  $('emysaCallDialog').showModal();
+$('homeWaveBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  $('callChannelMenu').classList.toggle('hidden');
+});
+document.addEventListener('click', (e) => {
+  if (!$('callChannelMenu').classList.contains('hidden') && !e.target.closest('.callChannelWrap')) {
+    $('callChannelMenu').classList.add('hidden');
+  }
+});
+document.querySelectorAll('.callChannelItem').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    $('callChannelMenu').classList.add('hidden');
+    const channel = btn.dataset.channel;
+    if (channel === 'emysa') {
+      $('emysaCallStatus').textContent = '';
+      $('emysaCallDialog').showModal();
+      return;
+    }
+    setCallChannel(channel);
+  });
 });
 $('emysaCallForm').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -1551,25 +1568,47 @@ function renderCallsList(calls) {
     list.innerHTML = `<div class="authHint" style="text-align:left;">No calls yet.</div>`;
     return;
   }
+  const PLATFORM_LABEL = { whatsapp: 'WhatsApp', telegram: 'Telegram' };
   for (const c of calls) {
+    const isKnown = !!c.contact_name;
     const name = c.contact_name || c.to_number;
-    const hue = hueForName(name);
+    const missed = c.status === 'no_answer' || c.status === 'failed';
     const el = document.createElement('div');
     el.className = 'recentRow';
+
+    let avatarHtml;
+    if (isKnown) {
+      const hue = hueForName(name);
+      avatarHtml = `<div class="recentAvatar" style="background:linear-gradient(135deg, hsl(${hue},55%,58%), hsl(${(hue + 40) % 360},45%,38%));">${escapeHtml((name || '?')[0].toUpperCase())}</div>`;
+    } else {
+      avatarHtml = `<div class="recentAvatar recentAvatar--unknown"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1c0-2.76-3.58-5-8-5z"/></svg></div>`;
+    }
+
+    const subtitle = isKnown
+      ? (PLATFORM_LABEL[c.platform] ? `${PLATFORM_LABEL[c.platform]} Audio` : callSummaryLine(c))
+      : 'unknown';
+
     el.innerHTML = `
-      <div class="recentAvatar" style="background:linear-gradient(135deg, hsl(${hue},55%,58%), hsl(${(hue + 40) % 360},45%,38%));">${escapeHtml((name || '?')[0].toUpperCase())}</div>
+      ${avatarHtml}
       <div class="recentBody">
-        <div class="recentName">${escapeHtml(name)}</div>
-        <div class="recentPreview">${escapeHtml(callSummaryLine(c))}</div>
+        <div class="recentName${missed ? ' recentName--missed' : ''}">${escapeHtml(name)}</div>
+        <div class="recentPreview">${escapeHtml(subtitle)}</div>
       </div>
-      <div class="recentDate">${relativeCallDate(c.created_at)}</div>`;
+      <div class="recentMeta">
+        <div class="recentDate">${relativeCallDate(c.created_at)}</div>
+        <button type="button" class="recentInfoBtn" aria-label="Call details"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9.25" stroke="currentColor" stroke-width="1.5"/><path d="M12 11v5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="8" r="1.1" fill="currentColor"/></svg></button>
+      </div>`;
+
     if (c.session_id) {
+      const resume = () => { openChatSession(c.session_id); document.querySelector('[data-tab=home]').click(); };
+      el.querySelector('.recentInfoBtn').addEventListener('click', (event) => { event.stopPropagation(); resume(); });
       el.tabIndex = 0;
       el.setAttribute('role', 'button');
       el.setAttribute('aria-label', `Resume call conversation with ${name}`);
-      const resume = () => { openChatSession(c.session_id); document.querySelector('[data-tab=home]').click(); };
       el.onclick = resume;
       el.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); resume(); } };
+    } else {
+      el.querySelector('.recentInfoBtn').disabled = true;
     }
     list.appendChild(el);
   }
