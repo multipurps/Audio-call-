@@ -1,8 +1,10 @@
+import { LANGUAGE_NAMES } from '../lib/callLanguages.js';
+import { prepareCall, saveCallPlan, confirmCallPlan, attachCallPlans } from '../lib/callPlans.js';
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { wacallsStartCall, wacallsAttachAI } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
 
-const LANGUAGE_NAMES = { en: 'English', es: 'Spanish', fr: 'French', pt: 'Portuguese', de: 'German', ha: 'Hausa', yo: 'Yoruba', ig: 'Igbo', sw: 'Swahili', ar: 'Arabic', hi: 'Hindi', zh: 'Chinese' };
+
 
 // Home-screen "talk to the assistant" chat. Separate from the live in-call
 // relay (server/relay.js) — this is the request/response layer where the
@@ -29,6 +31,14 @@ export default async function handler(req, res) {
     case 'sessions': return listSessions(req, res, supabase, userId);
     case 'archiveSession': return archiveSession(req, res, supabase, userId);
     case 'messages': return listMessages(req, res, supabase, userId);
+    case 'cancelCall': {
+      if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+      if (!req.body?.sessionId) return res.status(400).json({ error: 'sessionId required' });
+      const { error } = await supabase.from('call_plans').update({ status: 'cancelled' }).eq('user_id', userId).eq('session_id', req.body.sessionId).eq('status', 'pending');
+      return res.status(error ? 500 : 200).json(error ? { error: error.message } : { ok: true });
+    }
+    case 'prepareCall': return prepareCall(req, res, supabase, userId);
+    case 'confirmCall': return confirmCallPlan(req, res, supabase, userId);
     case 'send': return sendMessage(req, res, supabase, userId);
     case 'sendImage': return sendImage(req, res, supabase, userId);
     case 'transcribe': return transcribeAudio(req, res, supabase, userId);
@@ -73,7 +83,7 @@ async function speakText(req, res, supabase, userId) {
   if (!fishKey) return res.status(500).json({ error: 'Voice output not configured (missing FISH_API_KEY)' });
 
   const { text } = req.body || {};
-  if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
+  if (typeof text !== 'string' || !text.trim() || text.length > 4000) return res.status(400).json({ error: 'Text required (maximum 4000 characters)' });
 
   const { data: voice } = await supabase.from('voice_profiles').select('*').eq('user_id', userId).maybeSingle();
   const referenceId = voice?.status === 'ready' ? voice.provider_voice_id : undefined;
@@ -100,15 +110,29 @@ async function speakText(req, res, supabase, userId) {
 async function listSessions(req, res, supabase, userId) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
   const archived = req.query?.archived === 'true';
-  const { data, error } = await supabase
-    .from('chat_sessions')
-    .select('id,title,created_at,updated_at,archived')
-    .eq('user_id', userId)
-    .eq('archived', archived)
-    .order('updated_at', { ascending: false })
-    .limit(100);
+  let query = supabase.from('chat_sessions').select('id,title,created_at,updated_at,archived')
+    .eq('user_id', userId).eq('archived', archived);
+  let relatedCalls = [];
+  let plans = [];
+  if (req.query?.callRelated === 'true') {
+    const [callsResult, plansResult] = await Promise.all([
+      supabase.from('calls').select('id,session_id,to_number,contact_id,created_at').eq('user_id', userId).not('session_id', 'is', null).order('created_at', { ascending: false }).limit(1000),
+      supabase.from('call_plans').select('session_id,label,created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(1000),
+    ]);
+    if (callsResult.error || plansResult.error) return res.status(500).json({ error: 'Could not load call conversations' });
+    relatedCalls = callsResult.data || [];
+    plans = plansResult.data || [];
+    const ids = [...new Set([...relatedCalls, ...plans].map((r) => r.session_id))];
+    if (!ids.length) return res.status(200).json({ sessions: [] });
+    query = query.in('id', ids);
+  }
+  const { data, error } = await query.order('updated_at', { ascending: false }).limit(100);
   if (error) return res.status(500).json({ error: error.message });
-  return res.status(200).json({ sessions: data });
+  const sessions = (data || []).map((session) => ({ ...session,
+    call_label: plans.find((p) => p.session_id === session.id)?.label || relatedCalls.find((c) => c.session_id === session.id)?.to_number || null,
+    call_id: relatedCalls.find((c) => c.session_id === session.id)?.id || null,
+  }));
+  return res.status(200).json({ sessions });
 }
 
 async function archiveSession(req, res, supabase, userId) {
@@ -191,7 +215,11 @@ async function listMessages(req, res, supabase, userId) {
     .order('created_at', { ascending: true })
     .limit(200);
   if (error) return res.status(500).json({ error: error.message });
-  return res.status(200).json({ messages: data, sessionId });
+  try {
+    return res.status(200).json({ messages: await attachCallPlans(supabase, userId, sessionId, data), sessionId });
+  } catch (err) {
+    return res.status(500).json({ error: 'Could not load call plans. Check that the call-plans migration has been applied.' });
+  }
 }
 
 async function insertMessage(supabase, userId, sessionId, role, content, callId = null, source = 'text') {
@@ -222,6 +250,10 @@ async function sendImage(req, res, supabase, userId) {
   if (!groqKey) return res.status(500).json({ error: 'Vision not configured (missing GROQ_API_KEY)' });
 
   let sessionId = incomingSessionId || null;
+  if (sessionId) {
+    const { data: owned } = await supabase.from('chat_sessions').select('id').eq('id', sessionId).eq('user_id', userId).maybeSingle();
+    if (!owned) return res.status(404).json({ error: 'Chat not found' });
+  }
   let isNewSession = false;
   if (!sessionId) {
     const { data: session, error } = await supabase
@@ -280,8 +312,8 @@ async function sendImage(req, res, supabase, userId) {
 
 async function sendMessage(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { text, callerId, sessionId: incomingSessionId, source, channel } = req.body || {};
-  if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
+  const { text, callerId, sessionId: incomingSessionId, source, channel, target } = req.body || {};
+  if (typeof text !== 'string' || !text.trim() || text.length > 4000) return res.status(400).json({ error: 'Text required (maximum 4000 characters)' });
   // Which line to call out on — 'phone' (Twilio), or 'whatsapp'/'telegram'
   // (the user's linked personal account). Selected from the dropdown under
   // the Home header's call-channel button and sent explicitly with every
@@ -297,6 +329,10 @@ async function sendMessage(req, res, supabase, userId) {
   const msgSource = source === 'call' ? 'call' : 'text';
 
   let sessionId = incomingSessionId || null;
+  if (sessionId) {
+    const { data: owned } = await supabase.from('chat_sessions').select('id').eq('id', sessionId).eq('user_id', userId).maybeSingle();
+    if (!owned) return res.status(404).json({ error: 'Chat not found' });
+  }
   let isNewSession = false;
   if (!sessionId) {
     const { data: session, error } = await supabase
@@ -403,6 +439,13 @@ async function sendMessage(req, res, supabase, userId) {
   // WhatsApp") wins over the sticky line picker in the UI - naming it IS
   // choosing it, and should not be silently overridden by whatever the
   // button happened to be left on.
+  // Explicit contact actions cannot be redirected by model output.
+  if (target) {
+    if (!['whatsapp', 'telegram'].includes(uiChannel)) return res.status(400).json({ error: 'Use the pre-call flow for Phone' });
+    const contact = (contacts || []).find((c) => c.id === target.contactId);
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
+    intent = { action: 'call', contactName: contact.name, phoneNumber: null, objective: text.trim(), channel: uiChannel };
+  }
   const callChannel = (['phone', 'whatsapp', 'telegram'].includes(intent.channel) ? intent.channel : null) || uiChannel;
 
   if (intent.action === 'call' || intent.action === 'retry') {
@@ -427,6 +470,7 @@ async function sendMessage(req, res, supabase, userId) {
           .from('calls')
           .select('contact_id,to_number,objective')
           .eq('user_id', userId)
+          .eq('session_id', sessionId)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -450,6 +494,8 @@ async function sendMessage(req, res, supabase, userId) {
           contact = (contacts || []).find((c) => (c.phone_number || '').replace(/[\s()-]/g, '') === retryToNumber) || null;
         }
       }
+    } else if (target?.contactId) {
+      contact = (contacts || []).find((c) => c.id === target.contactId);
     } else if (!intent.phoneNumber) {
       const name = (intent.contactName || '').trim().toLowerCase();
       if (name) {
@@ -479,6 +525,10 @@ async function sendMessage(req, res, supabase, userId) {
       return respond();
     }
 
+    if (callChannel === 'phone' && !intent.objective && !retryObjective) {
+      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `What would you like me to say to ${label}? Send your instructions and I'll prepare a summary before you tap Call Now.`, null, msgSource));
+      return respond();
+    }
     let objective = intent.objective || (intent.action === 'retry' ? retryObjective : null) || 'Say hello and share what the user wants to talk about.';
     const { data: langProfile } = await supabase.from('profiles').select('language').eq('user_id', userId).maybeSingle();
     if (langProfile?.language && langProfile.language !== 'en') {
@@ -511,6 +561,7 @@ async function sendMessage(req, res, supabase, userId) {
           to_number: digitsOnly,
           objective,
           platform: callChannel,
+          session_id: sessionId,
           platform_call_id: platformCallId || null,
           status,
         }).select().single();
@@ -574,91 +625,21 @@ async function sendMessage(req, res, supabase, userId) {
       return respond();
     }
 
-    const placed = await placeCall(supabase, userId, { toNumber, objective, contactId: contact?.id || null, callerId: callerId || null, sessionId });
-
-    if (placed.error) {
-      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${label}: ${placed.error}`, null, msgSource));
-      return respond();
+    try {
+      const message = await saveCallPlan(supabase, userId, {
+        sessionId, toNumber, contactId: contact?.id || null,
+        objective: `${objective}\nUser's instructions: ${text.trim()}`, script: text.trim(),
+        summary: `I'll call ${label}. ${objective}`, label,
+      });
+      newMessages.push(message);
+      return respond({ channelUsed: 'phone' });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
     }
-
-    const verb = intent.action === 'retry' ? 'again now' : 'now';
-    newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I'm calling ${label} ${verb}.`, placed.call.id, msgSource));
-    return respond({ callId: placed.call.id, toNumber, contactName: contact?.name || null, channelUsed: callChannel });
   }
 
   newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', intent.reply || 'Got it.', null, msgSource));
   return respond();
-}
-
-// Duplicated (rather than shared with api/calls.js) on purpose: this keeps
-// the already-working manual "type a number" composer flow in calls.js
-// completely untouched while this newer assistant path is still being wired
-// up and tested.
-async function placeCall(supabase, userId, { toNumber, objective, contactId, callerId = null, sessionId = null }) {
-  const { data: usage } = await supabase.from('user_usage').select('*').eq('user_id', userId).maybeSingle();
-  const used = usage?.call_minutes_used ?? 0;
-  const limit = (usage?.monthly_minute_limit ?? 60) + (usage?.bonus_minutes ?? 0);
-  if (used >= limit) return { error: 'monthly call minutes exhausted' };
-
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const fromNumber = process.env.TWILIO_FROM_NUMBER;
-  const appUrl = process.env.PUBLIC_APP_URL;
-  if (!accountSid || !authToken || !fromNumber || !appUrl) return { error: 'telephony not configured yet' };
-
-  const { data: settings } = await supabase.from('profiles').select('record_calls, ring_seconds').eq('user_id', userId).maybeSingle();
-  const recordCalls = settings?.record_calls ?? true;
-  const ringSeconds = settings?.ring_seconds ?? 25;
-
-  const { data: call, error: insertErr } = await supabase
-    .from('calls')
-    .insert({
-      user_id: userId,
-      caller_id: callerId,
-      to_number: toNumber,
-      objective,
-      status: 'queued',
-      contact_id: contactId || null,
-      session_id: sessionId || null,
-    })
-    .select()
-    .single();
-  if (insertErr) return { error: insertErr.message };
-
-  try {
-    const twiml_url = `${appUrl}/api/calls-twiml?callId=${call.id}`;
-    const status_callback = `${appUrl}/api/calls-status?callId=${call.id}`;
-    const body = new URLSearchParams({
-      To: toNumber,
-      From: fromNumber,
-      Url: twiml_url,
-      StatusCallback: status_callback,
-      StatusCallbackEvent: 'initiated ringing answered completed',
-      Record: recordCalls ? 'true' : 'false',
-      Timeout: String(ringSeconds),
-      MachineDetection: 'Enable', // lets calls-twiml.js hang up immediately on voicemail instead of connecting the relay
-    });
-    const twilioResp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body,
-    });
-    if (!twilioResp.ok) {
-      const detail = await twilioResp.text().catch(() => '');
-      console.error(`placeCall: Twilio rejected the call (status ${twilioResp.status}):`, detail.slice(0, 500));
-      await supabase.from('calls').update({ status: 'failed' }).eq('id', call.id);
-      return { error: 'call provider rejected the call' };
-    }
-    const twilioData = await twilioResp.json();
-    await supabase.from('calls').update({ twilio_call_sid: twilioData.sid, status: 'ringing' }).eq('id', call.id);
-    return { call };
-  } catch (err) {
-    await supabase.from('calls').update({ status: 'failed' }).eq('id', call.id);
-    return { error: err.message || String(err) };
-  }
 }
 
 // Posted once, when a voice call with Emysa ends — the home chat is meant

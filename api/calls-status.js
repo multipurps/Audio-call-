@@ -44,13 +44,10 @@ export default async function handler(req, res) {
     });
   }
 
-  // Only calls placed through the Emysa's home chat carry a contact_id
-  // (see api/assistant.js) — calls started from the older manual "type a
-  // number" composer have none, so we don't post noise into a thread that
-  // was never talking about them. When a terminal status comes in for one
-  // of these, post a natural-language follow-up back into that same thread
-  // so the chat updates asynchronously, exactly like the real call does.
-  if (call?.user_id && call?.contact_id && ['no_answer', 'completed', 'failed'].includes(status) && status !== call.status) {
+  // Calls from chat (including keypad and Emysa callbacks) have a session_id.
+  // Legacy calls without a chat session cannot receive a follow-up.
+
+  if (call?.user_id && call?.session_id && ['no_answer', 'completed', 'failed'].includes(status) && status !== call.status) {
     await postAssistantFollowUp(supabase, call.user_id, call.contact_id, call.session_id, callId, status, CallDuration);
   }
 
@@ -58,8 +55,9 @@ export default async function handler(req, res) {
 }
 
 async function postAssistantFollowUp(supabase, userId, contactId, sessionId, callId, status, callDuration) {
-  const { data: contact } = await supabase.from('contacts').select('name').eq('id', contactId).maybeSingle();
-  const name = contact?.name || 'them';
+  const { data: contact } = contactId ? await supabase.from('contacts').select('name').eq('id', contactId).eq('user_id', userId).maybeSingle() : { data: null };
+  const { data: plan } = await supabase.from('call_plans').select('label').eq('call_id', callId).eq('user_id', userId).maybeSingle();
+  const name = contact?.name || plan?.label || 'the requested number';
 
   // Roughly how many times we've already tried this contact today, so a
   // repeated busy signal reads as "still busy" rather than resetting each time.

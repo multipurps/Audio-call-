@@ -1,3 +1,4 @@
+import { normalizePhone } from './lib/phoneNumbers.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // Installed PWAs (especially iOS "Add to Home Screen") can keep showing a
@@ -93,42 +94,22 @@ async function authedFetch(url, options = {}) {
 }
 
 // ---------- tabs ----------
-let gliderReady = false;
-function moveTabGlider(name) {
-  const glider = $('tabGlider');
-  const btn = document.querySelector(`#tabBar .tabBtn[data-tab="${name}"]`);
-  if (!glider || !btn) return;
-  const barRect = $('tabBar').getBoundingClientRect();
-  const btnRect = btn.getBoundingClientRect();
-  if (btnRect.width === 0) return;
-  if (!gliderReady) {
-    // Suppress the transition for the very first placement so the glider
-    // doesn't visibly slide in from a default position on load — that's
-    // what was reading as the app "moving around" on open.
-    glider.style.transition = 'none';
-    gliderReady = true;
-    requestAnimationFrame(() => { glider.style.transition = ''; });
-  }
-  glider.style.transform = `translateX(${btnRect.left - barRect.left - 6}px)`;
-}
-
 document.querySelectorAll('.tabBtn').forEach((btn) => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tabBtn').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.tabBtn').forEach((b) => { b.classList.remove('active'); b.removeAttribute('aria-current'); });
+    btn.setAttribute('aria-current', 'page');
     btn.classList.add('active');
     document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active', 'fadeIn'));
     const target = $(`screen-${btn.dataset.tab}`);
     target.classList.add('active', 'fadeIn');
-    moveTabGlider(btn.dataset.tab);
+    if (btn.dataset.tab === 'contacts') loadContacts();
     $('homeInputBar').classList.toggle('visible', btn.dataset.tab === 'home');
     if (btn.dataset.tab === 'recent') { loadRecentChats(); loadCalls(); }
     if (btn.dataset.tab === 'profile') renderProfileHeader();
     if (btn.dataset.tab === 'home') startMessagePolling(); else stopMessagePolling();
   });
 });
-window.addEventListener('resize', () => {
-  moveTabGlider(document.querySelector('#tabBar .tabBtn.active')?.dataset.tab || 'home');
-});
+
 
 // ---------- auth ----------
 const authScreen = $('authScreen');
@@ -276,7 +257,7 @@ async function enterApp(session) {
   ensureNotificationsEnabled();
   renderProfileHeader();
   initHomeChat();
-  moveTabGlider('home');
+
   redeemPendingReferral();
 }
 
@@ -355,6 +336,9 @@ supabase.auth.getSession()
 let homeMessageIds = new Set();
 let pollTimer = null;
 let currentChatSessionId = null;
+let chatRevision = 0;
+let preCallTarget = null;
+let chatSending = false;
 
 function greetingForNow(name) {
   const h = new Date().getHours();
@@ -365,6 +349,10 @@ function greetingForNow(name) {
 
 async function initHomeChat() {
   if (!currentUser) return;
+  chatRevision++;
+  clearPreCallContext();
+  savedContacts = [];
+  contactsLoaded = false;
   const { data } = await supabase.from('profiles').select('name').eq('user_id', currentUser.id).maybeSingle();
   const displayName = data?.name || (currentUser.email || '').split('@')[0];
   $('homeIdleGreeting').textContent = greetingForNow(displayName);
@@ -382,20 +370,31 @@ async function initHomeChat() {
 }
 
 async function openChatSession(sessionId) {
+  const revision = ++chatRevision;
+  clearPreCallContext();
   stopMessagePolling();
   currentChatSessionId = sessionId;
   homeMessageIds.clear();
   $('homeChat').innerHTML = '';
   setHomeChatActive(false);
-  const resp = await authedFetch(`/api/assistant?action=messages&sessionId=${encodeURIComponent(sessionId)}`);
-  if (resp.ok) {
+  const resp = await authedFetch(`/api/assistant?action=messages&sessionId=${encodeURIComponent(sessionId)}`).catch(() => null);
+  if (revision !== chatRevision) return;
+  if (resp?.ok) {
     const { messages } = await resp.json();
+    if (revision !== chatRevision) return;
     renderHomeMessages(messages || [], true);
+    const plan = [...(messages || [])].reverse().find((m) => m.call_plan?.status === 'pending' && new Date(m.call_plan.expires_at) > new Date())?.call_plan;
+    if (plan) showPreCallContext({ contactId: plan.contact_id, toNumber: plan.to_number, name: plan.label, kind: plan.kind }, 'phone');
+  } else {
+    appendChatBubble({ role: 'assistant', content: 'Could not load this conversation. Open it again from Recent to retry.', created_at: new Date().toISOString() });
+    setHomeChatActive(true);
   }
   startMessagePolling();
 }
 
 function startNewChat() {
+  chatRevision++;
+  clearPreCallContext();
   stopMessagePolling();
   currentChatSessionId = null;
   homeMessageIds.clear();
@@ -417,7 +416,10 @@ function renderHomeMessages(messages, replaceAll) {
   let added = false;
   let lastDay = replaceAll ? null : dayKey(lastRenderedAt());
   for (const m of messages) {
-    if (homeMessageIds.has(m.id)) continue;
+    if (homeMessageIds.has(m.id)) {
+      if (m.call_plan) updateCallPlanAction(m.call_plan);
+      continue;
+    }
     homeMessageIds.add(m.id);
     added = true;
     const day = dayKey(m.created_at);
@@ -478,6 +480,7 @@ function appendChatBubble(m) {
     el.classList.add('chatMsgTappable');
     el.addEventListener('click', () => openCallFromMessage(m.call_id));
   }
+  if (m.call_plan) renderCallPlanAction(el, m.call_plan);
   row.appendChild(avatar);
   row.appendChild(el);
   $('homeChat').appendChild(row);
@@ -533,29 +536,31 @@ $('homeHeaderLogoWrap').addEventListener('click', () => {
 
 async function sendChatMessage(text, onReply, source = 'text', channel = null) {
   const isCall = source === 'call';
+  const revision = chatRevision;
+  const target = !isCall && preCallTarget ? { ...preCallTarget } : null;
   if (!isCall) {
     appendChatBubble({ id: `local-${Date.now()}`, role: 'user', content: text, created_at: new Date().toISOString() });
     setHomeChatActive(true);
     scrollHomeChatToBottom();
   }
 
-  const resp = await authedFetch('/api/assistant?action=send', {
+  const resp = await authedFetch(target?.channel === 'phone' ? '/api/assistant?action=prepareCall' : '/api/assistant?action=send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, sessionId: currentChatSessionId, source, channel: channel || currentCallChannel() }),
+    body: JSON.stringify({ text, sessionId: currentChatSessionId, source, channel: target?.channel || channel || currentCallChannel(), target }),
   });
   const data = await resp.json();
+  if (revision !== chatRevision) return;
   if (!resp.ok) {
     const errText = data.error || 'Something went wrong.';
-    if (!isCall) {
-      appendChatBubble({ id: `err-${Date.now()}`, role: 'assistant', content: errText, created_at: new Date().toISOString() });
-      scrollHomeChatToBottom();
-    }
-    if (onReply) await onReply(errText);
-    return;
+    if (onReply) { await onReply(errText); return; }
+    throw new Error(errText);
   }
   if (data.sessionId) currentChatSessionId = data.sessionId;
-  if (data.callId && data.toNumber) trackActiveCall(data.callId, data.toNumber, data.contactName);
+  if (data.callId && data.toNumber) {
+    trackActiveCall(data.callId, data.toNumber, data.contactName);
+    clearPreCallContext();
+  }
   // The server can pick a different line than the UI's sticky selection -
   // e.g. the user typed "call him on WhatsApp" while the badge still said
   // Telegram from an earlier message. When that happens, pull the picker
@@ -572,21 +577,34 @@ async function sendChatMessage(text, onReply, source = 'text', channel = null) {
     const savedUserMsg = (data.messages || []).find((m) => m.role === 'user');
     if (savedUserMsg) homeMessageIds.add(savedUserMsg.id);
     renderHomeMessages(replies, false);
+    if (replies.some((m) => m.call_plan)) $('preCallContext').classList.add('ready');
   }
   if (onReply) await onReply(replies.map((m) => m.content).join(' ') || '');
 }
 
 async function sendBrief() {
   const text = $('briefInput').value.trim();
-  if (!text) return;
+  if (!text || chatSending) return;
+  chatSending = true;
+  $('cancelPreCallBtn').disabled = true;
+  const revision = chatRevision;
   $('sendBtn').disabled = true;
   $('briefInput').value = '';
   $('briefInput').style.height = 'auto';
-  // The chosen line is sticky: it stays until the user picks another one.
-  // It used to reset to Phone (Twilio) after one send, so any follow-up
-  // ("which Juicy?", "call again") silently went out as a phone call.
-  await sendChatMessage(text, null, 'text', currentCallChannel());
-  $('sendBtn').disabled = false;
+  try {
+    await sendChatMessage(text, null, 'text', currentCallChannel());
+  } catch (err) {
+    if (revision === chatRevision) {
+      $('briefInput').value = text;
+      appendChatBubble({ role: 'assistant', content: err.message || 'Connection lost. Please try again.', created_at: new Date().toISOString() });
+      setHomeChatActive(true);
+    }
+  } finally {
+    chatSending = false;
+    $('cancelPreCallBtn').disabled = false;
+    $('sendBtn').disabled = false;
+    syncHomeChatPadding();
+  }
 }
 
 $('sendBtn').addEventListener('click', sendBrief);
@@ -640,10 +658,13 @@ syncHomeChatPadding();
 function startMessagePolling() {
   if (pollTimer || !currentUser) return;
   pollTimer = setInterval(async () => {
-    if (!currentChatSessionId) return;
-    const resp = await authedFetch(`/api/assistant?action=messages&sessionId=${encodeURIComponent(currentChatSessionId)}`);
+    if (!currentChatSessionId || chatSending) return;
+    const revision = chatRevision;
+    const resp = await authedFetch(`/api/assistant?action=messages&sessionId=${encodeURIComponent(currentChatSessionId)}`).catch(() => null);
+    if (!resp || revision !== chatRevision) return;
     if (!resp.ok) return;
     const { messages } = await resp.json();
+    if (revision !== chatRevision || chatSending) return;
     renderHomeMessages(messages || [], false);
   }, 5000);
 }
@@ -693,7 +714,7 @@ function renderSavedChats(sessions) {
     const row = document.createElement('div');
     row.className = 'savedChatRow';
     row.innerHTML = `
-      <div class="savedChatTitle">${s.title}</div>
+      <div class="recentBody"><div class="savedChatTitle">${escapeHtml(s.title)}</div>${s.call_label ? `<div class="recentPreview">${escapeHtml(s.call_label)} · ${s.call_id ? 'Call conversation' : 'Call setup'}</div>` : ''}</div>
       <div class="chatRowActions">
         <div class="savedChatDate">${shortDateLabel(s.updated_at)}</div>
         <button class="chatRowIconBtn" data-action="archive" aria-label="Archive"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M5 9v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
@@ -1106,37 +1127,16 @@ function setCallChannel(channel, { focus = true } = {}) {
 // Restore the persisted line's badge/placeholder on load (without opening the keyboard).
 if (selectedCallChannel) setCallChannel(selectedCallChannel, { focus: false });
 
-$('homeWaveBtn').addEventListener('click', (e) => {
-  e.stopPropagation();
-  $('callChannelMenu').classList.toggle('hidden');
+$('homeWaveBtn').addEventListener('click', () => {
+  $('emysaCallStatus').textContent = '';
+  $('emysaCallDialog').showModal();
 });
-document.addEventListener('click', (e) => {
-  if (!$('callChannelMenu').classList.contains('hidden') && !e.target.closest('.callChannelWrap')) {
-    $('callChannelMenu').classList.add('hidden');
-  }
-});
-document.querySelectorAll('.callChannelItem').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    $('callChannelMenu').classList.add('hidden');
-    const channel = btn.dataset.channel;
-    if (channel === 'emysa') {
-      // iOS Safari only allows audio playback that traces back to a direct,
-      // synchronous tap — resuming/creating the AudioContext after any await
-      // (like the network fetch to generate speech) gets silently blocked.
-      // Doing it here, inside the real tap, unlocks every later programmatic
-      // buffer playback on this same context for the rest of the call, even
-      // from deep inside async code.
-      const ctx = getAssistantAudioCtx();
-      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-      // Explicit hint for iOS 17+: Safari otherwise infers the category from
-      // whichever media API ran most recently, which is what causes the
-      // ducking in the first place. Feature-detected — older iOS ignores it.
-      if ('audioSession' in navigator) { try { navigator.audioSession.type = 'play-and-record'; } catch {} }
-      openAssistantCallScreen();
-      return;
-    }
-    setCallChannel(channel);
-  });
+$('emysaCallForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const toNumber = normalizePhone($('emysaCallbackNumber').value);
+  if (!toNumber) { $('emysaCallStatus').textContent = 'Include your country code, for example +14155552671.'; return; }
+  $('emysaCallDialog').close();
+  beginPreCall({ toNumber, name: 'Emysa (callback to you)', kind: 'emysa' }, 'phone');
 });
 
 function blobToBase64(blob) {
@@ -1149,39 +1149,62 @@ function blobToBase64(blob) {
 }
 
 // ---------- Contacts (so the assistant can call people by name) ----------
+let savedContacts = [];
+let contactsLoaded = false;
+const PHONE_ICON = '<svg viewBox="0 0 24 24" fill="none"><path d="M6.6 10.8c1.2 2.4 3.2 4.4 5.6 5.6l1.9-1.9c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.5.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.5.1.4 0 .8-.2 1l-1.9 1.9z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
 async function loadContacts() {
-  const resp = await authedFetch('/api/contacts');
-  if (!resp.ok) return;
-  const { contacts } = await resp.json();
   const list = $('contactsList');
-  list.innerHTML = '';
-  if (!contacts?.length) {
-    list.innerHTML = `<div class="authHint" style="text-align:left;">No contacts saved yet.</div>`;
-    return;
-  }
-  for (const c of contacts) {
-    const el = document.createElement('div');
-    el.className = 'profileCard';
-    el.innerHTML = `
-      <div class="cIcon">${(c.name || '?')[0].toUpperCase()}</div>
-      <div class="cBody"><div class="cValue">${c.name}</div><div class="cLabel">${c.phone_number}</div></div>`;
-    const del = document.createElement('button');
-    del.className = 'plainInput';
-    del.style.cssText = 'width:auto; padding:8px 12px; cursor:pointer; color:#ff6b6b;';
-    del.textContent = 'Remove';
-    del.addEventListener('click', async () => {
-      await authedFetch('/api/contacts', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id }) });
-      loadContacts();
-    });
-    el.appendChild(del);
-    list.appendChild(el);
+  list.textContent = 'Loading contacts…';
+  try {
+    const resp = await authedFetch('/api/contacts');
+    if (!resp.ok) throw new Error('Could not load contacts. Tap Contacts to retry.');
+    const { contacts } = await resp.json();
+    savedContacts = contacts || [];
+    contactsLoaded = true;
+    list.innerHTML = '';
+    if (!savedContacts.length) list.textContent = 'No contacts yet. Add someone or open the keypad below.';
+    for (const c of savedContacts) {
+      const el = document.createElement('div');
+      el.className = 'profileCard contactRow';
+      el.innerHTML = '<div class="cIcon"></div><div class="cBody"><div class="cValue"></div><div class="cLabel"></div></div>';
+      el.querySelector('.cIcon').textContent = (c.name || '?')[0].toUpperCase();
+      el.querySelector('.cValue').textContent = c.name;
+      el.querySelector('.cLabel').textContent = c.phone_number;
+      const call = document.createElement('button');
+      call.className = 'contactCallBtn';
+      call.setAttribute('aria-label', `Call ${c.name}`);
+      call.setAttribute('aria-haspopup', 'dialog');
+      call.innerHTML = PHONE_ICON;
+      call.onclick = () => openContactMethods(c);
+      const del = document.createElement('button');
+      del.className = 'contactRemoveBtn';
+      del.textContent = '×';
+      del.setAttribute('aria-label', `Remove ${c.name}`);
+      del.onclick = async () => {
+        if (!confirm(`Remove ${c.name} from contacts?`)) return;
+        del.disabled = true;
+        try {
+          await callApi('/api/contacts', { id: c.id }, 'DELETE');
+          await loadContacts();
+        } catch (err) { $('contactStatus').textContent = err.message; }
+        finally { del.disabled = false; }
+      };
+      el.append(call, del);
+      list.appendChild(el);
+    }
+    updateDialMatch();
+  } catch (err) {
+    contactsLoaded = false;
+    savedContacts = [];
+    updateDialMatch();
+    list.textContent = err.message || 'Could not load contacts. Tap Contacts to retry.';
   }
 }
 
 $('addContactBtn').addEventListener('click', async () => {
   const name = $('newContactName').value.trim();
-  const phoneNumber = $('newContactPhone').value.trim();
-  if (!name || !phoneNumber) { $('contactStatus').textContent = 'Name and phone number are both required.'; return; }
+  const phoneNumber = normalizePhone($('newContactPhone').value);
+  if (!name || !phoneNumber) { $('contactStatus').textContent = 'Enter a name and a phone number with country code.'; return; }
   $('addContactBtn').disabled = true;
   $('contactStatus').textContent = 'Saving…';
   try {
@@ -1195,10 +1218,201 @@ $('addContactBtn').addEventListener('click', async () => {
     $('newContactName').value = '';
     $('newContactPhone').value = '';
     $('contactStatus').textContent = 'Contact added.';
-    loadContacts();
+    $('contactEditor').open = false;
+    await loadContacts();
+  } catch (err) {
+    $('contactStatus').textContent = err.message || 'Could not save contact. Please try again.';
   } finally {
     $('addContactBtn').disabled = false;
   }
+});
+
+// ---------- contact actions, keypad and persisted call confirmations ----------
+async function callApi(url, body, method = 'POST') {
+  const response = await authedFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Request failed. Please try again.');
+  return data;
+}
+
+function clearPreCallContext() {
+  preCallTarget = null;
+  setCallChannel('phone', { focus: false });
+  $('preCallContext').classList.add('hidden');
+  $('briefInput').placeholder = 'Message';
+  $('channelBadge').classList.remove('visible');
+}
+function showPreCallContext(target, channel) {
+  preCallTarget = { ...target, channel };
+  setCallChannel(channel, { focus: false });
+  $('preCallLabel').textContent = `${target.name || target.toNumber} · ${channel === 'phone' ? 'Phone' : CHANNEL_META[channel].label}`;
+  $('preCallHint').textContent = channel === 'phone'
+    ? 'What should Emysa say? Send your instructions to get a summary before calling.'
+    : 'What should Emysa say? Sending your instructions starts this contact’s call.';
+  $('preCallContext').classList.remove('hidden', 'ready');
+  $('briefInput').placeholder = 'Call instructions…';
+}
+function beginPreCall(target, channel) {
+  startNewChat();
+  showPreCallContext(target, channel);
+  document.querySelector('[data-tab=home]').click();
+  $('briefInput').focus();
+}
+$('cancelPreCallBtn').addEventListener('click', async () => {
+  const sessionId = currentChatSessionId;
+  $('cancelPreCallBtn').disabled = true;
+  try {
+    if (sessionId) await callApi('/api/assistant?action=cancelCall', { sessionId });
+    if (sessionId === currentChatSessionId) {
+      document.querySelectorAll('.callPlanActions[data-status="pending"]').forEach((el) => {
+        el.dataset.status = 'cancelled';
+        el.querySelector('.callNowBtn').disabled = true;
+        el.querySelector('.callPlanStatus').textContent = 'Cancelled';
+      });
+      clearPreCallContext();
+    }
+  } catch (err) { $('preCallHint').textContent = err.message; }
+  finally { $('cancelPreCallBtn').disabled = false; }
+});
+
+function renderCallPlanAction(bubble, plan) {
+  if (plan.status === 'pending') {
+    document.querySelectorAll('.callPlanActions[data-status="pending"]').forEach((el) => {
+      if (el.dataset.planId === plan.id) return;
+      el.dataset.status = 'cancelled';
+      el.querySelector('.callNowBtn').disabled = true;
+      el.querySelector('.callPlanStatus').textContent = 'Replaced by the new script below';
+    });
+  }
+  const actions = document.createElement('div');
+  actions.className = 'callPlanActions';
+  actions.dataset.planId = plan.id;
+  actions.dataset.status = plan.status;
+  const script = document.createElement('details');
+  const heading = document.createElement('summary');
+  heading.textContent = 'Call instructions';
+  const content = document.createElement('pre');
+  content.textContent = plan.objective;
+  script.append(heading, content);
+  const button = document.createElement('button');
+  button.className = 'primaryBtn callNowBtn';
+  button.textContent = 'Call Now';
+  const edit = document.createElement('button');
+  edit.className = 'secondaryBtn';
+  edit.textContent = 'Revise script';
+  edit.onclick = () => {
+    showPreCallContext({ contactId: plan.contact_id, toNumber: plan.to_number, name: plan.label, kind: plan.kind }, 'phone');
+    $('briefInput').value = plan.script || plan.objective;
+    $('briefInput').focus();
+    syncHomeChatPadding();
+  };
+  const status = document.createElement('p');
+  status.className = 'callPlanStatus';
+  status.setAttribute('role', 'status');
+  button.onclick = async () => {
+    if (button.disabled || chatSending) return;
+    const revision = chatRevision;
+    button.disabled = true;
+    actions.dataset.status = 'placing';
+    status.textContent = 'Placing call…';
+    try {
+      const data = await callApi('/api/assistant?action=confirmCall', { planId: plan.id });
+      actions.dataset.status = 'placed';
+      status.textContent = 'Call placed';
+      trackActiveCall(data.callId, data.toNumber, data.contactName);
+      if (revision === chatRevision) {
+        clearPreCallContext();
+        renderHomeMessages(data.messages || [], false);
+        openCallScreen(data.callId, data.toNumber, data.contactName);
+      }
+    } catch (err) {
+      // Keep disabled on ambiguous network failures; reload the persisted plan
+      // rather than accidentally issuing another paid call.
+      actions.dataset.status = 'failed';
+      status.textContent = err.message || 'Connection lost. Check Recent before trying again.';
+    }
+  };
+  actions.append(script, button, edit, status);
+  bubble.appendChild(actions);
+  updateCallPlanAction(plan, actions);
+}
+function updateCallPlanAction(plan, node) {
+  const actions = node || Array.from(document.querySelectorAll('.callPlanActions')).find((el) => el.dataset.planId === plan.id);
+  if (!actions) return;
+  const expired = new Date(plan.expires_at) <= new Date();
+  // Do not let a stale polling response re-enable a locally claimed button.
+  if (plan.status === 'pending' && actions.dataset.status !== 'pending') return;
+  actions.dataset.status = plan.status;
+  actions.querySelector('.callNowBtn').disabled = plan.status !== 'pending' || expired;
+  actions.querySelector('.callPlanStatus').textContent = expired && plan.status === 'pending'
+    ? 'Plan expired. Revise the script to prepare a new call.'
+    : ({ pending: 'Ready when you are. No call placed yet.', placing: 'Placing call…', placed: 'Call placed', cancelled: 'Replaced or cancelled', failed: 'Call failed. Check Recent before preparing another.', uncertain: 'Provider response lost. The call may still connect; check Recent.' })[plan.status];
+}
+
+let contactCallTarget = null;
+function openContactMethods(contact) {
+  contactCallTarget = contact;
+  $('contactCallTitle').textContent = `Call ${contact.name}`;
+  $('contactCallNumber').textContent = contact.phone_number;
+  $('contactCallDialog').showModal();
+}
+document.querySelectorAll('[data-method]').forEach((btn) => btn.addEventListener('click', () => {
+  if (!contactCallTarget) return;
+  const contact = contactCallTarget;
+  $('contactCallDialog').close();
+  beginPreCall({ contactId: contact.id, toNumber: contact.phone_number, name: contact.name, kind: 'contact' }, btn.dataset.method);
+}));
+document.querySelectorAll('[data-dismiss]').forEach((btn) => btn.addEventListener('click', () => $(btn.dataset.dismiss).close()));
+document.querySelectorAll('.callDialog').forEach((dialog) => dialog.addEventListener('click', (event) => {
+  const rect = dialog.getBoundingClientRect();
+  if (event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) dialog.close();
+}));
+$('openKeypadBtn').addEventListener('click', () => {
+  $('dialStatus').textContent = '';
+  updateDialMatch();
+  $('keypadDialog').showModal();
+  // Keep the native keyboard from obscuring the custom keypad on opening.
+  $('keypadDialog').querySelector('[data-dismiss]').focus();
+});
+function matchedDialContact() {
+  const number = normalizePhone($('dialNumber').value);
+  return number ? savedContacts.find((c) => normalizePhone(c.phone_number) === number) : null;
+}
+function updateDialMatch() {
+  const number = normalizePhone($('dialNumber').value);
+  const match = matchedDialContact();
+  $('dialMatch').textContent = match ? match.name : (number ? 'New number' : '');
+  $('dialSaveBtn').classList.toggle('hidden', !number || !!match || !contactsLoaded);
+  $('dialCallBtn').disabled = !number;
+}
+function addDialDigit(digit) {
+  const input = $('dialNumber');
+  if (input.value.length < 32) input.value += digit;
+  updateDialMatch();
+}
+document.querySelectorAll('[data-digit]').forEach((btn) => btn.addEventListener('click', () => addDialDigit(btn.dataset.digit)));
+$('dialPlusBtn').addEventListener('click', () => {
+  if (!$('dialNumber').value.startsWith('+')) $('dialNumber').value = '+' + $('dialNumber').value;
+  updateDialMatch();
+});
+$('dialDeleteBtn').addEventListener('click', () => { $('dialNumber').value = $('dialNumber').value.slice(0, -1); updateDialMatch(); });
+$('dialNumber').addEventListener('input', updateDialMatch);
+$('dialSaveBtn').addEventListener('click', () => {
+  const number = normalizePhone($('dialNumber').value);
+  if (!number || matchedDialContact()) return;
+  $('keypadDialog').close();
+  $('contactEditor').open = true;
+  $('newContactPhone').value = number;
+  $('contactStatus').textContent = 'Add a name to save this number.';
+  $('newContactName').focus();
+});
+$('dialCallBtn').addEventListener('click', () => {
+  const number = normalizePhone($('dialNumber').value);
+  if (!number) { $('dialStatus').textContent = 'Enter a phone number with country code. * and # are not dialable phone numbers.'; return; }
+  const contact = matchedDialContact();
+  $('keypadDialog').close();
+  if (contact) openContactMethods(contact);
+  else beginPreCall({ toNumber: number, name: number, kind: 'contact' }, 'phone');
 });
 
 // ---------- active call screen ----------
@@ -1219,7 +1433,7 @@ function openCallScreen(callId, toNumber, contactName) {
   $('callContactAvatar').style.display = '';
   const displayName = contactName || toNumber;
   $('callContactAvatar').textContent = (contactName ? contactName[0] : toNumber.replace(/[^0-9]/g, '').slice(-2)) || '?';
-  $('callTitleText').textContent = `Emysa & ${displayName}`;
+  $('callTitleText').textContent = contactName === 'Emysa (callback to you)' ? 'Emysa · your phone' : `Emysa & ${displayName}`;
   $('transcriptPanel').innerHTML = '';
   $('waveRow').classList.remove('speaking');
   callAiMuted = false;
@@ -1343,35 +1557,46 @@ function renderCallsList(calls) {
     const el = document.createElement('div');
     el.className = 'recentRow';
     el.innerHTML = `
-      <div class="recentAvatar" style="background:linear-gradient(135deg, hsl(${hue},55%,58%), hsl(${(hue + 40) % 360},45%,38%));">${(name || '?')[0].toUpperCase()}</div>
+      <div class="recentAvatar" style="background:linear-gradient(135deg, hsl(${hue},55%,58%), hsl(${(hue + 40) % 360},45%,38%));">${escapeHtml((name || '?')[0].toUpperCase())}</div>
       <div class="recentBody">
-        <div class="recentName">${name}</div>
-        <div class="recentPreview">${callSummaryLine(c)}</div>
+        <div class="recentName">${escapeHtml(name)}</div>
+        <div class="recentPreview">${escapeHtml(callSummaryLine(c))}</div>
       </div>
       <div class="recentDate">${relativeCallDate(c.created_at)}</div>`;
+    if (c.session_id) {
+      el.tabIndex = 0;
+      el.setAttribute('role', 'button');
+      el.setAttribute('aria-label', `Resume call conversation with ${name}`);
+      const resume = () => { openChatSession(c.session_id); document.querySelector('[data-tab=home]').click(); };
+      el.onclick = resume;
+      el.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); resume(); } };
+    }
     list.appendChild(el);
   }
 }
 
-let recentSubTab = 'chats';
+let recentSubTab = 'calls';
 let recentChatSessions = [];
 let recentChatMenuTargetId = null;
 
 document.querySelectorAll('.recentSubTabBtn').forEach((btn) => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.recentSubTabBtn').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.recentSubTabBtn').forEach((b) => { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
+    btn.setAttribute('aria-pressed', 'true');
     btn.classList.add('active');
     recentSubTab = btn.dataset.subtab;
     $('recentChatsList').classList.toggle('hidden', recentSubTab !== 'chats');
     $('callsList').classList.toggle('hidden', recentSubTab !== 'calls');
     $('recentSearch').value = '';
+    renderRecentChatsList(recentChatSessions);
+    renderCallsList(lastLoadedCalls);
     $('recentSearch').placeholder = recentSubTab === 'chats' ? 'Search chats' : 'Search conversations';
   });
 });
 
 async function loadRecentChats() {
-  const resp = await authedFetch('/api/assistant?action=sessions');
-  if (!resp.ok) return;
+  const resp = await authedFetch('/api/assistant?action=sessions&callRelated=true').catch(() => null);
+  if (!resp?.ok) { $('recentChatsList').textContent = 'Could not load call chats. Tap Recent to retry.'; return; }
   const { sessions } = await resp.json();
   recentChatSessions = sessions || [];
   renderRecentChatsList(recentChatSessions);
@@ -1381,18 +1606,21 @@ function renderRecentChatsList(sessions) {
   const list = $('recentChatsList');
   list.innerHTML = '';
   if (!sessions?.length) {
-    list.innerHTML = `<div class="authHint" style="text-align:left;">No chats yet — start one from Home.</div>`;
+    list.innerHTML = `<div class="authHint" style="text-align:left;">No call chats yet — prepare a call from Contacts or call Emysa.</div>`;
     return;
   }
   for (const s of sessions) {
     const row = document.createElement('div');
     row.className = 'savedChatRow';
     row.innerHTML = `
-      <div class="savedChatTitle">${s.title}</div>
+      <div class="recentBody"><div class="savedChatTitle">${escapeHtml(s.title)}</div>${s.call_label ? `<div class="recentPreview">${escapeHtml(s.call_label)} · ${s.call_id ? 'Call conversation' : 'Call setup'}</div>` : ''}</div>
       <div class="chatRowActions">
         <div class="savedChatDate">${shortDateLabel(s.updated_at)}</div>
         <button class="recentChatKebabBtn" aria-label="More"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg></button>
       </div>`;
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.addEventListener('keydown', (e) => { if (e.target === row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); row.click(); } });
     row.addEventListener('click', () => {
       openChatSession(s.id);
       document.querySelector('#tabBar .tabBtn[data-tab="home"]').click();
@@ -1448,8 +1676,8 @@ $('recentSearch').addEventListener('input', () => {
 
 async function loadCalls() {
   if (!currentSession) return;
-  const resp = await authedFetch('/api/calls?action=list');
-  if (!resp.ok) return;
+  const resp = await authedFetch('/api/calls?action=list').catch(() => null);
+  if (!resp?.ok) { $('callsList').textContent = 'Could not load calls. Tap Recent to retry.'; return; }
   const { calls } = await resp.json();
   lastLoadedCalls = calls || [];
   renderCallsList(lastLoadedCalls);
@@ -1601,7 +1829,7 @@ $('referralsBtn').addEventListener('click', () => { loadReferrals(); openSheet('
 $('callAnsweringBtn').addEventListener('click', () => { loadCallAnswering(); openSheet('sheet-call-answering'); });
 $('memoriesBtn').addEventListener('click', () => { loadMemories(); openSheet('sheet-memories'); });
 $('callSettingsBtn').addEventListener('click', () => { loadCallSettings(); openSheet('sheet-call-settings'); });
-$('contactsBtn').addEventListener('click', () => { openSheet('sheet-contacts'); loadContacts(); });
+$('contactsBtn').addEventListener('click', () => { closeSheets(); document.querySelector('[data-tab=contacts]').click(); });
 $('archiveBtn').addEventListener('click', () => { loadArchivedChats(); openSheet('sheet-archive'); });
 $('getStartedBtn').addEventListener('click', () => openSheet('sheet-get-started'));
 
