@@ -715,6 +715,21 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .iosMenu .iosRowLink .methodSymbol{width:26px; height:26px; background:none;}
 .iosRowLink .iosRowTitle{flex:1;}
 .iosChevron{width:15px; height:15px; color:#8e8e93; flex:none;}
+
+/* ---------- call detail sheet (info icon on a Recents row) ---------- */
+.callDetailDialog{background:#000; color:#fff; padding:18px 20px 30px; text-align:center;}
+.callDetailDone{position:absolute; top:16px; right:18px; color:#0a84ff; font-size:15px; font-weight:600;}
+.callDetailAvatar{width:76px; height:76px; margin:18px auto 12px; border-radius:50%; background:#8e8e93; color:#fff; display:flex; align-items:center; justify-content:center; font-size:30px; font-weight:600;}
+.callDetailAvatar svg{width:42px; height:42px;}
+.callDetailName{font-size:24px; font-weight:700; margin-bottom:20px;}
+.callDetailLogCard,.callDetailCard{background:#1c1c1e; border-radius:14px; padding:14px 16px; margin-bottom:12px; text-align:left;}
+.callDetailDay{font-size:13px; color:#8e8e93; margin-bottom:8px;}
+.callDetailEntry{display:flex; align-items:flex-start; gap:12px;}
+.callDetailTime{font-size:15px; color:#fff; flex:none; padding-top:1px;}
+.callDetailType{font-size:16px; font-weight:600; color:#fff;}
+.callDetailDuration{font-size:14px; color:#8e8e93; margin-top:2px;}
+.callDetailLabel{font-size:12.5px; font-weight:600; color:#8e8e93; text-transform:uppercase; letter-spacing:.03em; margin-bottom:6px;}
+.callDetailText{font-size:15.5px; line-height:1.45; color:#fff; white-space:pre-wrap;}
 .dialogHeader{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px;}
 .callDialog h2{font-size:20px; font-weight:650;}
 .dialogHeader button{min-height:44px; color:var(--accent); font-size:15px;}

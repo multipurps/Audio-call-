@@ -1669,19 +1669,53 @@ function renderCallsList(calls) {
         <button type="button" class="recentInfoBtn" aria-label="Call details"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9.25" stroke="currentColor" stroke-width="1.5"/><path d="M12 11v5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="8" r="1.1" fill="currentColor"/></svg></button>
       </div>`;
 
+    el.querySelector('.recentInfoBtn').addEventListener('click', (event) => { event.stopPropagation(); openCallDetail(c, name, isKnown); });
     if (c.session_id) {
       const resume = () => { openChatSession(c.session_id); document.querySelector('[data-tab=home]').click(); };
-      el.querySelector('.recentInfoBtn').addEventListener('click', (event) => { event.stopPropagation(); resume(); });
       el.tabIndex = 0;
       el.setAttribute('role', 'button');
       el.setAttribute('aria-label', `Resume call conversation with ${name}`);
       el.onclick = resume;
       el.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); resume(); } };
-    } else {
-      el.querySelector('.recentInfoBtn').disabled = true;
     }
     list.appendChild(el);
   }
+}
+
+const CALL_TYPE_LABEL = {
+  inbound: { completed: 'Incoming Call', no_answer: 'Missed Call', failed: 'Missed Call' },
+  outbound: { completed: 'Outgoing Call', no_answer: 'No Answer', failed: 'Call Failed' },
+};
+function formatCallDuration(seconds) {
+  if (!seconds) return null;
+  if (seconds < 60) return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m} min${m === 1 ? '' : 's'}${s ? ` ${s} sec` : ''}`;
+}
+function openCallDetail(c, name, isKnown) {
+  $('callDetailAvatar').innerHTML = isKnown
+    ? escapeHtml((name || '?')[0].toUpperCase())
+    : `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1c0-2.76-3.58-5-8-5z"/></svg>`;
+  $('callDetailName').textContent = name;
+  const created = c.created_at ? new Date(c.created_at) : null;
+  const today = new Date();
+  const isToday = created && created.toDateString() === today.toDateString();
+  $('callDetailDay').textContent = created
+    ? (isToday ? 'Today' : created.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }))
+    : '';
+  $('callDetailTime').textContent = created ? created.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '';
+  const direction = c.direction === 'inbound' ? 'inbound' : 'outbound';
+  const typeLabel = CALL_TYPE_LABEL[direction][c.status] || (direction === 'inbound' ? 'Incoming Call' : 'Outgoing Call');
+  $('callDetailType').textContent = typeLabel;
+  const duration = formatCallDuration(c.duration_seconds);
+  $('callDetailDuration').textContent = duration || '';
+  $('callDetailDuration').classList.toggle('hidden', !duration);
+  $('callDetailScriptCard').classList.toggle('hidden', !c.script);
+  $('callDetailScript').textContent = c.script || '';
+  $('callDetailSummaryCard').classList.toggle('hidden', !c.summary);
+  $('callDetailSummary').textContent = c.summary || '';
+  $('callDetailDialog').showModal();
 }
 
 let recentSubTab = 'calls';
