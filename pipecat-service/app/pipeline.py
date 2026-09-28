@@ -101,6 +101,7 @@ def build_pipeline(
     transport: Any,
     context: Any,
     extra_context: str | None = None,
+    services: tuple[Any, Any, Any, Any] | None = None,
 ) -> tuple[Any, Any]:
     """Assemble the real Pipecat pipeline.
 
@@ -116,10 +117,15 @@ def build_pipeline(
         LLMUserAggregatorParams,
     )
 
-    stt = build_stt(settings)
-    llm = build_llm(settings)
-    tts = build_tts(settings)
-    vad = build_vad(settings.bridge_sample_rate)
+    if services is not None:
+        # Injected `(stt, llm, tts, vad)`: lets tests drive the real
+        # Pipecat aggregators and pipeline with offline stand-in services.
+        stt, llm, tts, vad = services
+    else:
+        stt = build_stt(settings)
+        llm = build_llm(settings)
+        tts = build_tts(settings)
+        vad = build_vad(settings.bridge_sample_rate)
 
     # A system message leads the context so every turn is grounded in the
     # behavioural rules; the aggregator maintains the rest as the call runs.

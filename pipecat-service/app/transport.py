@@ -29,7 +29,9 @@ from loguru import logger
 
 from app.backpressure import BoundedFrameQueue
 from app.config import Settings
+from app.conversation import clog, create_conversation
 from app.protocol import (
+    CONTROL_CALL_ACTIVE,
     CONTROL_ERROR,
     CONTROL_HANGUP,
     CONTROL_HELLO,
@@ -77,6 +79,10 @@ class AcafBridge:
 
         self.session: CallSession | None = None
         self.serializer: TelegramFrameSerializer | None = None
+        #: The assistant behind this call: runs the Pipecat pipeline (or its
+        #: mock in mock mode). Without it the bridge is a transport that
+        #: receives caller audio and drops it.
+        self.conversation: Any = None
         self._closed = asyncio.Event()
         self._write_lock = asyncio.Lock()
         self._tasks: list[asyncio.Task[Any]] = []
@@ -136,6 +142,32 @@ class AcafBridge:
         # one place.
         self.session.on_stop(self._on_session_stop)
 
+        # Start the assistant. Failing here is deliberately loud: the
+        # exception closes the bridge, the relay sees the socket drop and ends
+        # the call, instead of leaving the callee on a connected but silent line.
+        self.conversation = create_conversation(
+            settings=self._settings,
+            session_id=self.session.session_id,
+            serializer=self.serializer,
+            send_audio=self.send_audio,
+            send_control=self._send_text,
+            on_ended=self._on_conversation_ended,
+        )
+        try:
+            await self.conversation.start()
+        except Exception as exc:  # noqa: BLE001 - reported, then re-raised
+            clog(
+                "ERROR",
+                self.session.session_id,
+                "assistant failed to start; closing bridge",
+                error=type(exc).__name__,
+                detail=str(exc)[:200],
+            )
+            with contextlib.suppress(Exception):
+                await self._send_control(CONTROL_ERROR, reason="assistant-start-failed")
+            self.conversation = None
+            raise
+
         self._tasks = [
             asyncio.create_task(self._read_loop(), name="acaf-read"),
             asyncio.create_task(self._heartbeat_loop(), name="acaf-heartbeat"),
@@ -167,25 +199,34 @@ class AcafBridge:
         """
         if self._closed.is_set() and self.session is None:
             return
-        with contextlib.suppress(Exception):
-            await self._send_control(CONTROL_STOPPED, reason=reason)
         self._closed.set()
-        with contextlib.suppress(Exception):
-            await self._ws.close()
 
+        # Release the session FIRST, and shielded. When the peer has already
+        # dropped the socket the ASGI server may cancel this task at its very
+        # first await; anything ordered after that point (stopping the
+        # conversation, the goodbye message, the socket close) can then never
+        # run, and a finished call stays registered - counted as live and
+        # holding a slot - until the reaper finds it.
         session = self.session
+        session_id = session.session_id if session is not None else None
         if session is not None:
             deliberate = (
                 self._peer_ended
                 or session.stopped
                 or reason in ("shutdown", "hung-up", "peer-hangup", "session-stopped")
             )
+            self.session = None
             if deliberate:
                 with contextlib.suppress(Exception):
-                    await self._registry.remove(session.session_id, reason)
+                    await asyncio.shield(self._registry.remove(session.session_id, reason))
             else:
                 session.mark_disconnected()
-            self.session = None
+
+        await self._stop_conversation(reason)
+        with contextlib.suppress(Exception):
+            await self._send_control(CONTROL_STOPPED, reason=reason)
+        with contextlib.suppress(Exception):
+            await self._ws.close()
 
     def stats(self) -> dict[str, Any]:
         return {
@@ -377,6 +418,12 @@ class AcafBridge:
             )
             return True
 
+        if message.type == CONTROL_CALL_ACTIVE:
+            # The relay says the callee picked up: greet now. Idempotent.
+            if self.conversation is not None:
+                await self.conversation.note_call_active("relay-signal")
+            return True
+
         if message.type in (CONTROL_HANGUP, CONTROL_STOPPED):
             self._peer_ended = True
             logger.info(
@@ -435,9 +482,8 @@ class AcafBridge:
         and backpressure) frames are pushed onto the pipeline task's input
         queue through this method.
         """
-        queue = getattr(self, "_pipeline_input", None)
-        if queue is not None:
-            await queue.put(frame)
+        if self.conversation is not None:
+            await self.conversation.push_audio(frame)
 
     def _inbound_sequence(self, data: bytes) -> int | None:
         """Peek at a frame's sequence number without full deserialization."""
@@ -548,7 +594,26 @@ class AcafBridge:
             await self._send_control(CONTROL_HANGUP, reason=reason)
         self._closed.set()
 
+    async def _on_conversation_ended(self, reason: str) -> None:
+        """The pipeline stopped on its own (crash or end): hang the call up.
+
+        Without this a dead pipeline would leave the callee connected to a
+        line that never answers again.
+        """
+        if self._closed.is_set():
+            return
+        with contextlib.suppress(Exception):
+            await self._send_control(CONTROL_HANGUP, reason=reason)
+        self._closed.set()
+
+    async def _stop_conversation(self, reason: str) -> None:
+        conversation, self.conversation = self.conversation, None
+        if conversation is not None:
+            with contextlib.suppress(Exception):
+                await conversation.stop(reason)
+
     async def _cancel_tasks(self) -> None:
+        await self._stop_conversation("bridge-closing")
         for task in self._tasks:
             task.cancel()
         for task in self._tasks:
