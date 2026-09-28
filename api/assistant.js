@@ -1,7 +1,7 @@
 import { LANGUAGE_NAMES } from '../lib/callLanguages.js';
 import { prepareCall, saveCallPlan, confirmCallPlan, attachCallPlans } from '../lib/callPlans.js';
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
-import { wacallsStartCall, wacallsAttachAI } from '../lib/wacallsClient.js';
+import { wacallsPlaceAICall } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
 
 
@@ -574,19 +574,13 @@ async function sendMessage(req, res, supabase, userId) {
         if (callChannel === 'whatsapp') {
           const { data: waRow } = await supabase.from('whatsapp_accounts').select('wacalls_session_id').eq('user_id', userId).maybeSingle();
           if (!waRow?.wacalls_session_id) throw new Error('WhatsApp is not connected — link it in Profile first.');
-          const started = await wacallsStartCall(userId, waRow.wacalls_session_id, digitsOnly);
-          platformCallId = started?.call?.callId || null;
-          // Connect Emysa to the call instead of leaving it for a human
-          // operator's browser - without this, the call rings and nobody
-          // ever picks up. If attaching fails, the call itself was already
-          // placed, so this only logs rather than failing the whole thing.
-          try {
-            await wacallsAttachAI(userId, waRow.wacalls_session_id, platformCallId, {
-              appSessionId: sessionId, contactName: contact?.name || null, peerNumber: digitsOnly,
-            });
-          } catch (err) {
-            console.error('wacallsAttachAI failed:', err.message);
-          }
+          // Places the call and connects the assistant to it. A call that
+          // rings with no assistant behind it is a failure, not a success:
+          // this throws (after hanging up) so the user is told the truth.
+          const placed = await wacallsPlaceAICall(userId, waRow.wacalls_session_id, digitsOnly, {
+            appSessionId: sessionId, contactName: contact?.name || null,
+          });
+          platformCallId = placed.callId;
         } else {
           // Telegram goes through mp-relay (MadelineProto), never through
           // the old relay's fake-DH stub and never through Twilio. If the
