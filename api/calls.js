@@ -100,7 +100,18 @@ async function listCalls(req, res, supabase, userId) {
     const { data: contacts } = await supabase.from('contacts').select('id,name').in('id', contactIds);
     namesById = new Map((contacts || []).map((c) => [c.id, c.name]));
   }
-  const calls = (data || []).map((c) => ({ ...c, contact_name: c.call_kind === 'emysa' ? 'Emysa (callback to you)' : c.contact_id ? namesById.get(c.contact_id) || null : null }));
+  const callIds = (data || []).map((c) => c.id);
+  let planByCallId = new Map();
+  if (callIds.length) {
+    const { data: plans } = await supabase.from('call_plans').select('call_id, script, summary').in('call_id', callIds);
+    planByCallId = new Map((plans || []).map((p) => [p.call_id, p]));
+  }
+  const calls = (data || []).map((c) => ({
+    ...c,
+    contact_name: c.call_kind === 'emysa' ? 'Emysa (callback to you)' : c.contact_id ? namesById.get(c.contact_id) || null : null,
+    script: planByCallId.get(c.id)?.script || null,
+    summary: planByCallId.get(c.id)?.summary || null,
+  }));
 
   return res.status(200).json({ calls });
 }

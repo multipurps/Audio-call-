@@ -1050,5 +1050,28 @@
   <p class="dialogHint">Emysa will call you on your phone. First, choose what you'd like to talk about in chat. You'll review the summary before any call starts.</p>
   <form id="emysaCallForm"><label for="emysaCallbackNumber">Your callback number</label><input class="plainInput" id="emysaCallbackNumber" type="tel" autocomplete="tel" placeholder="+1 415 555 2671" required maxlength="32"><p id="emysaCallStatus" class="authHint" role="status"></p><button class="primaryBtn" type="submit">Continue in chat</button></form>
 </dialog>
+<dialog id="callDetailDialog" class="callDialog callDetailDialog" aria-labelledby="callDetailName">
+  <button data-dismiss="callDetailDialog" class="callDetailDone" aria-label="Close">Done</button>
+  <div class="callDetailAvatar" id="callDetailAvatar"></div>
+  <h2 id="callDetailName" class="callDetailName"></h2>
+  <div class="callDetailLogCard">
+    <div class="callDetailDay" id="callDetailDay"></div>
+    <div class="callDetailEntry">
+      <div class="callDetailTime" id="callDetailTime"></div>
+      <div class="callDetailEntryBody">
+        <div class="callDetailType" id="callDetailType"></div>
+        <div class="callDetailDuration" id="callDetailDuration"></div>
+      </div>
+    </div>
+  </div>
+  <div class="callDetailCard hidden" id="callDetailScriptCard">
+    <div class="callDetailLabel">What Emysa was told to say</div>
+    <p class="callDetailText" id="callDetailScript"></p>
+  </div>
+  <div class="callDetailCard hidden" id="callDetailSummaryCard">
+    <div class="callDetailLabel">Summary</div>
+    <p class="callDetailText" id="callDetailSummary"></p>
+  </div>
+</dialog>
 </body>
 </html>
