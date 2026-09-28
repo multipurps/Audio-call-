@@ -693,16 +693,28 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
    centered position for when no anchor is passed (e.g. from the keypad). */
 .actionSheet{
   inset:auto; top:50%; left:50%; transform:translate(-50%,-50%); margin:0;
-  width:min(300px, 88vw); max-width:none; max-height:80vh;
-  padding:0; border-radius:14px; overflow:hidden; background:#26262a; box-shadow:0 16px 50px rgba(0,0,0,.5);
+  width:min(300px, 86vw); max-width:none; max-height:80vh;
+  padding:0; border:0; background:none; overflow:visible; box-shadow:none; color:#fff;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+  animation:iosMenuIn .16s ease-out;
 }
-.actionSheet::backdrop{background:rgba(0,0,0,.4); backdrop-filter:none;}
-.actionSheetHeader{padding:12px 16px 10px; text-align:center; border-bottom:1px solid rgba(255,255,255,.08);}
-.actionSheetHeader span{display:block; font-size:13px; font-weight:600; color:#fff;}
-.actionSheetHeader p{font-size:12px; color:rgba(255,255,255,.5); margin-top:2px;}
-.actionSheet .contactMethod{padding:0 16px; min-height:52px; font-size:16px; border-top-color:rgba(255,255,255,.08);}
-.actionSheetHeader + .contactMethod{border-top:0;}
-.actionSheet .contactMethod>span:last-child{color:rgba(255,255,255,.3);}
+@keyframes iosMenuIn{from{opacity:0; scale:.94;} to{opacity:1; scale:1;}}
+.actionSheet::backdrop{background:rgba(0,0,0,.28); backdrop-filter:blur(2px); -webkit-backdrop-filter:blur(2px);}
+.iosMenuGroup{background:rgba(44,44,46,.94); backdrop-filter:blur(28px) saturate(180%); -webkit-backdrop-filter:blur(28px) saturate(180%); border-radius:14px; overflow:hidden; margin-bottom:8px; box-shadow:0 10px 40px rgba(0,0,0,.45);}
+.iosMenuGroup:last-child{margin-bottom:0;}
+.iosMenuHeader{padding:10px 20px 8px; font-size:13px; color:#8e8e93; border-bottom:.5px solid rgba(255,255,255,.14);}
+.iosMenu .iosRow{display:flex; align-items:center; gap:12px; width:100%; min-height:52px; padding:8px 18px; font-size:17px; text-align:left; border-top:.5px solid rgba(255,255,255,.14); color:#fff; background:none; border-left:0; border-right:0; border-bottom:0;}
+.iosMenu .iosMenuGroup > .iosRow:first-child,.iosMenu .iosMenuHeader + .iosRow{border-top:0;}
+.iosRow:active{background:rgba(255,255,255,.12);}
+.iosRowText{display:flex; flex-direction:column; flex:1; min-width:0;}
+.iosRowTitle{font-size:17px; color:#fff;}
+.iosRowText .iosRowTitle{font-size:17px;}
+.iosRowSub{font-size:15px; color:#8e8e93; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:1px;}
+.iosMenu .iosRowGlyph{flex:none; color:#fff; display:flex; margin-left:0;}
+.iosRowGlyph svg{width:24px; height:24px;}
+.iosMenu .iosRowLink .methodSymbol{width:26px; height:26px; background:none;}
+.iosRowLink .iosRowTitle{flex:1;}
+.iosChevron{width:15px; height:15px; color:#8e8e93; flex:none;}
 .dialogHeader{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px;}
 .callDialog h2{font-size:20px; font-weight:650;}
 .dialogHeader button{min-height:44px; color:var(--accent); font-size:15px;}
