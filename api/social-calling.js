@@ -1,6 +1,6 @@
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { relayRequest } from '../lib/socialRelayClient.js';
-import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsStartCall } from '../lib/wacallsClient.js';
+import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsPlaceAICall } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
 
 // Telegram + WhatsApp account linking and calling, combined into one file
@@ -299,8 +299,11 @@ async function placeCall(req, res, supabase, userId) {
       throw err;
     }
     try {
-      const data = await wacallsStartCall(userId, row.wacalls_session_id, to.trim());
-      return res.status(200).json(data); // { callId, status } - matches the shape the Telegram path already returns
+      // Place the call AND attach the assistant. This used to only start the
+      // call, so a WhatsApp call placed through this action rang, was
+      // answered, and nothing ever spoke.
+      const placed = await wacallsPlaceAICall(userId, row.wacalls_session_id, to.trim(), { appSessionId: req.body?.sessionId || null });
+      return res.status(200).json({ ...placed.started, callId: placed.callId, aiAttached: placed.aiAttached });
     } catch (err) {
       if (err.statusCode === 404) {
         // Stored id is dead (e.g. relay storage was reset since pairing) -
