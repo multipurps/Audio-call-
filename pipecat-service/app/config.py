@@ -17,6 +17,7 @@ Rules this module enforces, all of which come from the brief:
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from typing import Mapping
 
@@ -352,3 +353,17 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
 
     settings.validate(env)
     return settings
+
+
+#: Fish Audio reference ids are opaque hex-ish tokens. Anything else (spaces,
+#: slashes, quotes) is refused rather than forwarded to the TTS vendor, since
+#: the id arrives over the bridge and ends up in an outbound API request.
+_VOICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+
+def sanitize_voice_id(value: object) -> str | None:
+    """Return a safe per-call TTS voice id, or None to use the default voice."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value if _VOICE_ID_RE.match(value) else None

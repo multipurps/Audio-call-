@@ -19,6 +19,7 @@ adapter can speak ACAF.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import contextlib
 import json
 import time
@@ -28,7 +29,7 @@ from fastapi import WebSocket
 from loguru import logger
 
 from app.backpressure import BoundedFrameQueue
-from app.config import Settings
+from app.config import Settings, sanitize_voice_id
 from app.conversation import clog, create_conversation
 from app.protocol import (
     CONTROL_CALL_ACTIVE,
@@ -145,8 +146,20 @@ class AcafBridge:
         # Start the assistant. Failing here is deliberately loud: the
         # exception closes the bridge, the relay sees the socket drop and ends
         # the call, instead of leaving the callee on a connected but silent line.
+        # Per-user cloned voice: the relay forwards the caller's voice id in
+        # `hello`. It overrides the TTS voice for THIS call only (Settings is
+        # frozen, so the shared default is never mutated). Missing or invalid
+        # ids fall back to the default voice instead of failing the call.
+        call_settings = self._settings
+        raw_voice = hello.extra.get("voiceId")
+        voice_id = sanitize_voice_id(raw_voice)
+        if voice_id:
+            call_settings = dataclasses.replace(self._settings, tts_voice_id=voice_id)
+            clog("INFO", self.session.session_id, "using per-user voice", voiceIdTail=voice_id[-4:])
+        elif raw_voice:
+            clog("WARNING", self.session.session_id, "ignoring invalid voiceId; using default voice")
         self.conversation = create_conversation(
-            settings=self._settings,
+            settings=call_settings,
             session_id=self.session.session_id,
             serializer=self.serializer,
             send_audio=self.send_audio,

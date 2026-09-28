@@ -368,3 +368,16 @@ class TestSecretHandling:
         settings = load_settings({"ASSISTANT_MOCK_MODE": "true"})
         with pytest.raises(Exception):
             settings.port = 9999  # type: ignore[misc]
+
+
+class TestSanitizeVoiceId:
+    def test_accepts_fish_style_id(self):
+        from app.config import sanitize_voice_id
+
+        assert sanitize_voice_id("0123456789abcdef0123456789abcdef") == "0123456789abcdef0123456789abcdef"
+
+    def test_rejects_unsafe_or_missing(self):
+        from app.config import sanitize_voice_id
+
+        for bad in (None, 123, "", "short", "has space in it 12345", "../etc/passwd12", 'a"b' * 5):
+            assert sanitize_voice_id(bad) is None
