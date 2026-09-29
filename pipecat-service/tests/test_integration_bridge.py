@@ -46,7 +46,7 @@ def real_settings():
     return load_settings(
         {
             "ASSISTANT_BRIDGE_SECRET": SECRET,
-            "GROQ_API_KEY": "gk_test_key_value_123456",
+            "OPENAI_API_KEY": "ok_test_key_value_123456",
             "FISH_API_KEY": "fk_test_key_value_123456",
         }
     )
@@ -113,8 +113,8 @@ class TestHealthEndpoints:
             response = client.get("/readyz")
         assert response.status_code == 200
         assert response.json()["providers"] == {
-            "stt": "groq",
-            "llm": "groq",
+            "stt": "openai",
+            "llm": "openai",
             "tts": "fish",
         }
 

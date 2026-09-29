@@ -51,7 +51,8 @@ export function database(seed = {}) {
 
 export async function loadApi(file, db, fetcher, extraEnv = {}) {
   const context = vm.createContext({ console, URLSearchParams, Buffer, Date, Map, Set, AbortSignal,
-    fetch: fetcher, process: { env: { GROQ_API_KEY: 'test-only', TWILIO_ACCOUNT_SID: 'test-only',
+    FormData, Blob,
+    fetch: fetcher, process: { env: { OPENAI_API_KEY: 'test-only', TWILIO_ACCOUNT_SID: 'test-only',
       TWILIO_AUTH_TOKEN: 'test-only', TWILIO_FROM_NUMBER: '+14155550000', PUBLIC_APP_URL: 'https://example.test', ...extraEnv } },
   });
   const cache = new Map();

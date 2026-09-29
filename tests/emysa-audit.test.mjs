@@ -48,16 +48,27 @@ import {
   resolvePatterLlmConfig,
 } from '../server/audioUtils.js';
 
-test('LLM client defaults to GPT Luna (gpt-6-luna) and falls back to Groq on failure', async () => {
+test('LLM client defaults to GPT Luna (gpt-6-luna); Groq endpoints are gone', async () => {
   const providers = resolveLlmProviders({
     LLM_PROVIDER: 'luna',
     LUNA_API_KEY: 'sk-luna-test-secret-123456',
     GROQ_API_KEY: 'gsk-groq-fallback-654321',
   });
+  assert.equal(providers.length, 1);
   assert.equal(providers[0].provider, 'luna');
   assert.equal(providers[0].model, 'gpt-6-luna');
-  assert.equal(providers[1].provider, 'groq');
+  assert.ok(!providers.some((p) => p.provider === 'groq'));
+  assert.ok(providers.every((p) => p.url.includes('api.openai.com')));
 
+  // A legacy LLM_PROVIDER=groq resolves to the OpenAI primary, never Groq.
+  const legacy = resolveLlmProviders({
+    LLM_PROVIDER: 'groq',
+    LUNA_API_KEY: 'sk-luna-test-secret-123456',
+  });
+  assert.equal(legacy.length, 1);
+  assert.equal(legacy[0].provider, 'luna');
+
+  // Primary failure falls back to the fal OpenRouter proxy when FAL_KEY set.
   const calls = [];
   const fakeFetch = async (url, init) => {
     calls.push({ url, body: JSON.parse(init.body) });
@@ -78,16 +89,28 @@ test('LLM client defaults to GPT Luna (gpt-6-luna) and falls back to Groq on fai
     env: {
       LLM_PROVIDER: 'luna',
       LUNA_API_KEY: 'sk-luna-test-secret-123456',
-      GROQ_API_KEY: 'gsk-groq-fallback-654321',
+      FAL_KEY: 'fal-test-key-123456',
     },
     fetchImpl: fakeFetch,
   });
 
   assert.equal(calls.length, 2);
   assert.equal(calls[0].body.model, 'gpt-6-luna');
-  assert.equal(calls[1].body.model, 'qwen/qwen3.8-27b');
-  assert.equal(result.provider, 'groq');
+  assert.ok(calls[0].url.includes('api.openai.com'));
+  assert.equal(calls[1].body.model, 'openai/gpt-4o-mini');
+  assert.equal(result.provider, 'fal');
   assert.equal(result.content, 'Hey there, I am right here with you.');
+
+  // No fallback configured: the primary failure is returned as-is.
+  // There is no silent Groq retry to hide a broken OpenAI configuration.
+  const lone = await generateChatCompletion({
+    messages: [{ role: 'user', content: 'Hello Emysa' }],
+    env: { LUNA_API_KEY: 'sk-luna-test-secret-123456' },
+    fetchImpl: async () => ({ ok: false, status: 500, text: async () => 'boom' }),
+  });
+  assert.equal(lone.ok, false);
+  assert.equal(lone.provider, 'luna');
+  assert.ok(!String(lone.provider).includes('groq'));
 
   const redacted = redactSecrets(
     'Failed with key sk-luna-test-secret-123456',

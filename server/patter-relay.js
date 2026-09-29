@@ -7,21 +7,14 @@ import {
   shouldEndCall,
 } from '../lib/emotionEngine.js';
 import {
-  DEFAULT_LUNA_BASE_URL,
-  DEFAULT_LUNA_MODEL,
-  DEFAULT_GROQ_BASE_URL,
-  DEFAULT_GROQ_MODEL,
-  createChatCompletion,
-} from '../lib/llmClient.js';
-import {
   retrieveRelevantMemories,
-  consolidateAndStoreMemories,
-  inferMemoryType,
 } from '../lib/memoryManager.js';
+import { maybeGenerateCallSummary } from '../lib/callSession.js';
+import { transcribeAudioBuffer, DEFAULT_STT_MODEL } from '../lib/sttClient.js';
+import { isSpeechLikePcm16, resolvePatterLlmConfig } from './audioUtils.js';
 import { Patter, Twilio, CustomLLM } from 'getpatter';
 import { createClient } from '@supabase/supabase-js';
 
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const FISH_API_KEY = process.env.FISH_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -34,10 +27,14 @@ const supabase =
 // Per-call state keyed by callId
 const callState = new Map();
 
-export class GroqWhisperSTT {
-  constructor({ apiKey, sampleRate = 8000 } = {}) {
+// OpenAI batch transcription for one utterance of PCM16 audio. Named for what
+// it replaced (GroqWhisperSTT) only in git history: Groq support is gone —
+// see lib/sttClient.js for the verified model ids and endpoint.
+export class OpenAIWhisperSTT {
+  constructor({ apiKey, sampleRate = 8000, model } = {}) {
     this.apiKey = apiKey;
     this.sampleRate = sampleRate;
+    this.model = model;
     this.chunks = [];
     this.callbacks = new Set();
   }
@@ -62,27 +59,23 @@ export class GroqWhisperSTT {
     const pcm = Buffer.concat(this.chunks);
     this.chunks = [];
 
+    // Speech gate: Patter hands us audio after its own silence detection, but
+    // a fan/generator still produces a "finished utterance" of steady noise.
+    // Skip it before it costs an API call or invents a turn.
+    if (!isSpeechLikePcm16(pcm, this.sampleRate)) return;
+
     const wav = wrapPcm16InWav(pcm, this.sampleRate);
-    const form = new FormData();
-    form.append('file', new Blob([wav], { type: 'audio/wav' }), 'chunk.wav');
-    form.append('model', 'whisper-large-v3-turbo');
-
-    let text = '';
-    try {
-      const resp = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${this.apiKey}` },
-        body: form,
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        text = data.text || '';
-      }
-    } catch {
-      // non-fatal
-    }
-
-    if (!text.trim()) return;
+    const result = await transcribeAudioBuffer({
+      bytes: wav,
+      filename: 'chunk.wav',
+      mimeType: 'audio/wav',
+      model: this.model || process.env.ASSISTANT_STT_MODEL || DEFAULT_STT_MODEL,
+      // The relay passes the key at construction (kept for parity with the
+      // old class); otherwise fall back to the shared resolver.
+      env: this.apiKey ? { ...process.env, OPENAI_API_KEY: this.apiKey } : process.env,
+    });
+    const text = result.text;
+    if (!text) return;
     for (const cb of this.callbacks) {
       await cb({ text, isFinal: true, confidence: 1 });
     }
@@ -308,85 +301,38 @@ async function hangupTwilioCall(twilioCallSid) {
   }
 }
 
+// Persist one turn: transcript always, status promoted to in_progress only
+// from pre-connected states (a completed row must never be resurrected by a
+// late turn racing the status webhook).
+async function persistTurn(callId, transcript) {
+  if (!supabase || !callId) return;
+  await supabase.from('calls').update({ transcript }).eq('id', callId);
+  await supabase
+    .from('calls')
+    .update({ status: 'in_progress' })
+    .eq('id', callId)
+    .in('status', ['queued', 'ringing']);
+}
+
 async function finalizeCall(callId, ctx, transcript) {
   if (!supabase || !callId) return;
-  const prompt = [
-    `Summarize this call outcome in 1-2 sentences for the user who requested it. Objective was: ${ctx.objective}`,
-    `Also decide if there are 1-2 specific, concrete facts worth remembering for next time. Only include facts that are genuinely reusable later.`,
-    `Reply with ONLY JSON: {"summary": string, "memory": string|null, "memories": string[]}`,
-  ].join('\n');
-
-  let summary = '';
-  const extracted = [];
+  // Transcript is persisted turn-by-turn by onTranscript; flush once more,
+  // then hand off to the SHARED summariser used by every platform
+  // (structured summary + durable-memory extraction, idempotent claim).
+  // If the call row is not terminal yet (status webhook still in flight),
+  // maybeGenerateCallSummary no-ops and api/calls-status.js triggers it
+  // when it marks the call completed.
   try {
-    const messages = transcript.map((h) => ({
-      role: h.speaker === 'ai' ? 'assistant' : 'user',
-      content: h.content,
-    }));
-    const llmResult = await createChatCompletion({
-      messages: [{ role: 'system', content: prompt }, ...messages],
-      max_tokens: 180,
-      temperature: 0.3,
-      response_format: { type: 'json_object' },
-    });
-    if (llmResult.ok) {
-      const parsed = JSON.parse(llmResult.data?.choices?.[0]?.message?.content || '{}');
-      summary = parsed.summary || '';
-      if (parsed.memory) extracted.push(parsed.memory);
-      if (Array.isArray(parsed.memories)) extracted.push(...parsed.memories);
-    }
+    await supabase.from('calls').update({ transcript }).eq('id', callId);
   } catch {
-    // non-fatal
+    // non-fatal: turns were already written as they arrived
   }
-  if (summary) {
-    await supabase.from('calls').update({ outcome_summary: summary, transcript }).eq('id', callId);
-  }
-  if (extracted.length > 0 && ctx.userId) {
-    await consolidateAndStoreMemories({
-      supabase,
-      userId: ctx.userId,
-      contactId: ctx.contactId || null,
-      sourceCallId: callId,
-      candidates: extracted.map((m) => ({
-        content: String(m),
-        memory_type: inferMemoryType(String(m), callId),
-      })),
-    });
-  }
+  await maybeGenerateCallSummary(supabase, callId);
 }
 
-/**
- * Resolve Patter CustomLLM configuration so GPT Luna (`gpt-6-luna`) is used
- * whenever `LUNA_API_KEY` / `OPENAI_API_KEY` / `LLM_API_KEY` is configured,
- * falling back to Groq (`GROQ_API_KEY`) otherwise.
- */
-export function resolvePatterLlmConfig(env = process.env) {
-  const lunaKeyName = env.LUNA_API_KEY
-    ? 'LUNA_API_KEY'
-    : env.LLM_API_KEY
-      ? 'LLM_API_KEY'
-      : env.OPENAI_API_KEY
-        ? 'OPENAI_API_KEY'
-        : null;
-
-  if (lunaKeyName && String(env.LLM_PROVIDER || '').toLowerCase() !== 'groq') {
-    return {
-      baseUrl: (env.LUNA_BASE_URL || env.LLM_BASE_URL || DEFAULT_LUNA_BASE_URL).replace(/\/+$/, ''),
-      model: env.LUNA_MODEL || env.LLM_MODEL || DEFAULT_LUNA_MODEL,
-      temperature: 0.75,
-      maxTokens: 170,
-      apiKeyEnv: lunaKeyName,
-    };
-  }
-
-  return {
-    baseUrl: (env.LLM_BASE_URL || DEFAULT_GROQ_BASE_URL).replace(/\/+$/, ''),
-    model: env.LLM_MODEL || DEFAULT_GROQ_MODEL,
-    temperature: 0.75,
-    maxTokens: 170,
-    apiKeyEnv: 'GROQ_API_KEY',
-  };
-}
+// Shared, OpenAI-only CustomLLM configuration (was Groq when no Luna key;
+// that fallback was removed with the rest of the Groq integration).
+export { resolvePatterLlmConfig };
 
 if (process.env.NODE_ENV !== 'test') {
   const phone = new Twilio();
@@ -399,7 +345,7 @@ if (process.env.NODE_ENV !== 'test') {
   const ttsAdapter = new FishAudioTelephonyTTS({ apiKey: FISH_API_KEY });
   const agent = patter.agent({
     systemPrompt: SYSTEM_PROMPT_TEMPLATE,
-    stt: new GroqWhisperSTT({ apiKey: GROQ_API_KEY }),
+    stt: new OpenAIWhisperSTT({ model: process.env.ASSISTANT_STT_MODEL }),
     llm: new CustomLLM(resolvePatterLlmConfig(process.env)),
     tts: ttsAdapter,
   });
@@ -432,12 +378,12 @@ if (process.env.NODE_ENV !== 'test') {
         entry.lastCallerText = rawText;
         entry.ctx.emotionState = appraiseTurn(entry.ctx.emotionState, rawText, { isVoiceCall: true });
         entry.transcript.push({ speaker, content: rawText });
-        await supabase.from('calls').update({ transcript: entry.transcript, status: 'in_progress' }).eq('id', callId);
+        await persistTurn(callId, entry.transcript);
       } else {
         const { endCall, cleanText } = shouldEndCall(rawText, entry.lastCallerText);
         if (cleanText) {
           entry.transcript.push({ speaker, content: cleanText });
-          await supabase.from('calls').update({ transcript: entry.transcript, status: 'in_progress' }).eq('id', callId);
+          await persistTurn(callId, entry.transcript);
         }
         if (endCall && entry.ctx.twilioCallSid) {
           setTimeout(() => hangupTwilioCall(entry.ctx.twilioCallSid), 1500);

@@ -1,6 +1,14 @@
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsPlaceAICall, wacallsHangup } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
+import {
+  createCallRecord,
+  markCallPlaced,
+  markCallFailed,
+  findDuplicateActiveCall,
+  appendTranscriptEntry,
+  maybeGenerateCallSummary,
+} from '../lib/callSession.js';
 
 // Telegram + WhatsApp account linking and calling, combined into one file
 // behind ?action=... — same reason as api/admin.js and api/call-answering.js:
@@ -75,6 +83,12 @@ async function relayCallStatus(req, res, supabase) {
     process.env.MP_RELAY_INTERNAL_SECRET,
     process.env.SOCIAL_RELAY_INTERNAL_SECRET,
     process.env.WACALLS_INTERNAL_SECRET,
+    // The pipecat assistant service authenticates with the same bridge
+    // secret mp-relay/WaCalls use. It reports a call's end (with the final
+    // transcript) when the carrier's own callback never arrived, so a call
+    // that the assistant ended itself still gets its status, summary and
+    // chat follow-up instead of being stuck on "ringing" forever.
+    process.env.ASSISTANT_BRIDGE_SECRET,
   ].filter(Boolean);
   if (!incomingSecret || !validSecrets.includes(incomingSecret)) {
     return res.status(401).json({ error: 'unauthorized' });
@@ -168,15 +182,9 @@ async function relayCallStatus(req, res, supabase) {
     if (Array.isArray(transcript)) {
       callUpdate.transcript = transcript;
     } else if (transcriptEntry && typeof transcriptEntry === 'object' && transcriptEntry.content) {
-      const existingTranscript = Array.isArray(call.transcript) ? call.transcript : [];
-      callUpdate.transcript = [
-        ...existingTranscript,
-        {
-          speaker: transcriptEntry.speaker === 'ai' || transcriptEntry.speaker === 'assistant' ? 'ai' : 'caller',
-          content: String(transcriptEntry.content).trim(),
-          at: transcriptEntry.at || new Date().toISOString(),
-        },
-      ];
+      // Deduped append: a retried callback must not double the last turn.
+      const appended = appendTranscriptEntry(call.transcript, transcriptEntry);
+      if (appended) callUpdate.transcript = appended;
     }
     await supabase.from('calls').update(callUpdate).eq('id', call.id);
   }
@@ -200,7 +208,12 @@ async function relayCallStatus(req, res, supabase) {
 
   // Post natural "the call ended" chat message into whichever chat session placed the call
   // only when transitioning into a terminal state.
-  const effectiveSessionId = sessionId || call?.session_id || null;
+  // Prefer the session id stored on the row (a real chat_sessions uuid). The
+  // body's sessionId is the CARRIER's bridge id (e.g. "call-42") for
+  // WaCalls/mp-relay/assistant reports — inserting that as a chat session id
+  // would violate the FK, and the follow-up would silently never appear.
+  const bodySessionId = typeof sessionId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId) ? sessionId : null;
+  const effectiveSessionId = call?.session_id || bodySessionId || null;
   if (effectiveSessionId && isTerminal && call?.status !== callStatus) {
     const who = contactName || peerIdentifier || 'your contact';
     const channelName = platform === 'whatsapp' ? 'WhatsApp' : 'Telegram';
@@ -215,6 +228,13 @@ async function relayCallStatus(req, res, supabase) {
     }
     await supabase.from('assistant_messages').insert({ user_id: userId, session_id: effectiveSessionId, role: 'assistant', content: text, call_id: call?.id || null, source: 'text' });
     await supabase.from('chat_sessions').update({ updated_at: new Date().toISOString() }).eq('id', effectiveSessionId);
+  }
+
+  // Finished calls get their structured summary (+ memory extraction) from
+  // the same shared service every other platform uses. Idempotent, so a
+  // duplicate callback costs nothing.
+  if (call && isTerminal) {
+    await maybeGenerateCallSummary(supabase, call.id);
   }
   return res.status(200).json({ ok: true, callId: call?.id || null });
 }
@@ -374,10 +394,17 @@ async function whatsappDisconnect(req, res, supabase, userId) {
 
 async function placeCall(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { platform, objective, contactId, contactName, sessionId } = req.body || {};
+  const { platform, objective, instructions, contactId, contactName, sessionId } = req.body || {};
   const to = String(req.body?.to || req.body?.toNumber || '').trim();
   if (platform !== 'telegram' && platform !== 'whatsapp') return res.status(400).json({ error: "platform must be 'telegram' or 'whatsapp'" });
   if (!to) return res.status(400).json({ error: 'to required' });
+
+  // Repeated button presses / retried requests must not dial twice.
+  const duplicate = await findDuplicateActiveCall(supabase, userId, platform, to);
+  if (duplicate) {
+    return res.status(409).json({ error: 'A call to this number is already in progress', callId: duplicate.id });
+  }
+
   if (platform === 'whatsapp') {
     const { data: row } = await supabase.from('whatsapp_accounts').select('wacalls_session_id').eq('user_id', userId).maybeSingle();
     if (!row?.wacalls_session_id) {
@@ -385,34 +412,39 @@ async function placeCall(req, res, supabase, userId) {
       err.statusCode = 400;
       throw err;
     }
+    // The `calls` row exists BEFORE the provider dials: the assistant
+    // pipeline resolves its bridge session ("call-" + provider id) back to
+    // this row to load instructions/memories and persist the transcript,
+    // and the live call screen opens as soon as the row appears.
+    const dbCall = await createCallRecord(supabase, userId, {
+      platform: 'whatsapp',
+      toNumber: to,
+      objective: objective || '',
+      instructions: instructions || null,
+      contactId: contactId || null,
+      sessionId: sessionId || null,
+    });
     try {
       // Place the call AND attach the assistant. This used to only start the
       // call, so a WhatsApp call placed through this action rang, was
       // answered, and nothing ever spoke.
-      const placed = await wacallsPlaceAICall(userId, row.wacalls_session_id, to, { appSessionId: sessionId || null });
-      const { data: callRow } = await supabase
-        .from('calls')
-        .insert({
-          user_id: userId,
-          contact_id: contactId || null,
-          to_number: to,
-          objective: objective || '',
-          status: 'ringing',
-          platform: 'whatsapp',
-          platform_call_id: placed.callId || null,
-          session_id: sessionId || null,
-          transcript: [],
-        })
-        .select('id')
-        .single();
+      const placed = await wacallsPlaceAICall(userId, row.wacalls_session_id, to, {
+        appSessionId: sessionId || null,
+        contactName: contactName || null,
+        // Runs after the relay returns the provider call id but BEFORE the
+        // assistant bridge dials in (attach), so the row carries the id the
+        // pipeline will look for.
+        onCallStarted: ({ callId }) => markCallPlaced(supabase, dbCall.id, { platformCallId: callId }),
+      });
       return res.status(200).json({
         ...placed.started,
         callId: placed.callId,
-        dbCallId: callRow?.id || null,
+        dbCallId: dbCall.id,
         platformCallId: placed.callId,
         aiAttached: placed.aiAttached,
       });
     } catch (err) {
+      await markCallFailed(supabase, dbCall.id);
       if (err.statusCode === 404) {
         // Stored id is dead (e.g. relay storage was reset since pairing) -
         // clear it so the account shows "disconnected" instead of silently
@@ -439,6 +471,14 @@ async function placeCall(req, res, supabase, userId) {
     err.statusCode = 400;
     throw err;
   }
+  const dbCall = await createCallRecord(supabase, userId, {
+    platform: 'telegram',
+    toNumber: to,
+    objective: objective || '',
+    instructions: instructions || null,
+    contactId: contactId || null,
+    sessionId: sessionId || null,
+  });
   try {
     const data = await mpRelayRequest('/calls', {
       method: 'POST',
@@ -451,28 +491,19 @@ async function placeCall(req, res, supabase, userId) {
       },
     });
     const platformCallId = data?.callId || null;
-    const { data: callRow } = await supabase
-      .from('calls')
-      .insert({
-        user_id: userId,
-        contact_id: contactId || null,
-        to_number: to,
-        objective: objective || '',
-        status: data?.status || 'ringing',
-        platform: 'telegram',
-        platform_call_id: platformCallId,
-        session_id: sessionId || null,
-        transcript: [],
-      })
-      .select('id')
-      .single();
+    // mp-relay starts dialing the assistant as soon as it responds; if the
+    // bridge hello arrives before this line, the assistant's own retry loop
+    // picks the row up a moment later.
+    await markCallPlaced(supabase, dbCall.id, { platformCallId });
     return res.status(200).json({
       ...data,
-      callId: callRow?.id || platformCallId,
+      callId: dbCall.id,
+      dbCallId: dbCall.id,
       platformCallId,
       status: data?.status || 'ringing',
     });
   } catch (err) {
+    await markCallFailed(supabase, dbCall.id);
     if (err.statusCode === 401) {
       await supabase
         .from('telegram_accounts')

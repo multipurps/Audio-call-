@@ -8,14 +8,14 @@ import {
 import { createChatCompletion } from '../lib/llmClient.js';
 import {
   retrieveRelevantMemories,
-  consolidateAndStoreMemories,
-  inferMemoryType,
 } from '../lib/memoryManager.js';
+import { maybeGenerateCallSummary } from '../lib/callSession.js';
+import { transcribeAudioBuffer } from '../lib/sttClient.js';
+import { isSpeechLikePcm16 } from './audioUtils.js';
 import { WebSocketServer } from 'ws';
 import { createClient } from '@supabase/supabase-js';
 
 const PORT = process.env.PORT || 8080;
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const FISH_API_KEY = process.env.FISH_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -173,24 +173,31 @@ async function handleTurn(ws, state) {
 
 async function pushTranscript(state) {
   if (!supabase || !state.callId) return;
-  await supabase.from('calls').update({ transcript: state.history, status: 'in_progress' }).eq('id', state.callId);
+  await supabase.from('calls').update({ transcript: state.history }).eq('id', state.callId);
+  // Promote queued/ringing -> in_progress only. A late media flush must never
+  // resurrect a row the status webhook has already marked terminal.
+  await supabase
+    .from('calls')
+    .update({ status: 'in_progress' })
+    .eq('id', state.callId)
+    .in('status', ['queued', 'ringing']);
 }
 
 async function transcribe(mulawAudio) {
-  if (!GROQ_API_KEY || !mulawAudio?.length) return '';
+  if (!mulawAudio?.length) return '';
+  // Speech gate: Twilio media frames keep flowing while nobody is talking
+  // (room tone, fans, generators). Transcribing that produced phantom "the
+  // other person said something" turns. Chunks that are digital silence, or
+  // steady non-speech noise, are dropped here before they cost an STT call.
+  const pcm = mulawToPcm16(mulawAudio, 8000);
+  if (!isSpeechLikePcm16(pcm, 8000)) return '';
   const wav = mulawToWav(mulawAudio, 8000);
-  const form = new FormData();
-  form.append('file', new Blob([wav], { type: 'audio/wav' }), 'chunk.wav');
-  form.append('model', 'whisper-large-v3-turbo');
-
-  const resp = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
-    body: form,
-  });
-  if (!resp.ok) return '';
-  const data = await resp.json();
-  return data.text || '';
+  const result = await transcribeAudioBuffer({ bytes: wav, filename: 'chunk.wav', mimeType: 'audio/wav' });
+  if (!result.ok) {
+    if (result.status) console.error(`transcribe: OpenAI STT rejected the chunk (status ${result.status}):`, result.error);
+    return '';
+  }
+  return result.text;
 }
 
 async function think(state, latestCallerText = '') {
@@ -300,49 +307,14 @@ async function hangupCall(state) {
 
 async function finalizeCall(state) {
   if (!supabase || !state.callId) return;
-  const prompt = [
-    `Summarize this call outcome in 1-2 sentences for the user who requested it. Objective was: ${state.objective}`,
-    `Also decide if there are 1-2 specific, concrete facts worth remembering for next time (preferences, details about the person called, or key outcomes).`,
-    `Reply with ONLY JSON: {"summary": string, "memory": string|null, "memories": string[]}`,
-  ].join('\n');
-
-  let summary = '';
-  let extracted = [];
-  try {
-    const messages = state.history.map((h) => ({
-      role: h.speaker === 'ai' ? 'assistant' : 'user',
-      content: h.content,
-    }));
-    const llmResult = await createChatCompletion({
-      messages: [{ role: 'system', content: prompt }, ...messages],
-      max_tokens: 180,
-      temperature: 0.3,
-      response_format: { type: 'json_object' },
-    });
-    if (llmResult.ok) {
-      const parsed = JSON.parse(llmResult.data?.choices?.[0]?.message?.content || '{}');
-      summary = parsed.summary || '';
-      if (parsed.memory) extracted.push(parsed.memory);
-      if (Array.isArray(parsed.memories)) extracted.push(...parsed.memories);
-    }
-  } catch {
-    // non-fatal
-  }
-  if (summary) {
-    await supabase.from('calls').update({ outcome_summary: summary, transcript: state.history }).eq('id', state.callId);
-  }
-  if (extracted.length > 0 && state.userId) {
-    await consolidateAndStoreMemories({
-      supabase,
-      userId: state.userId,
-      contactId: state.contactId || null,
-      sourceCallId: state.callId,
-      candidates: extracted.map((m) => ({
-        content: String(m),
-        memory_type: inferMemoryType(String(m), state.callId),
-      })),
-    });
-  }
+  // Transcript is persisted turn-by-turn via pushTranscript; flush once more
+  // so the closing lines survive even if the status webhook is slow, then
+  // hand off to the shared summariser (structured summary + memory
+  // extraction) — the same service WhatsApp/Telegram calls use. If the call
+  // row is not terminal yet, the Twilio status webhook triggers the summary
+  // when it marks the call completed.
+  await pushTranscript(state);
+  await maybeGenerateCallSummary(supabase, state.callId);
 }
 
 // ITU-T G.711 mu-law byte -> 16-bit signed linear PCM sample
@@ -355,6 +327,16 @@ export function decodeMulawSample(uByte) {
   let sample = ((mantissa << 3) + MULAW_BIAS) << exponent;
   sample -= MULAW_BIAS;
   return sign ? -sample : sample;
+}
+
+/** Decode 8 kHz G.711 mu-law into raw signed 16-bit little-endian PCM. */
+export function mulawToPcm16(mulawBuffer) {
+  const input = Buffer.isBuffer(mulawBuffer) ? mulawBuffer : Buffer.from(mulawBuffer || []);
+  const pcm = Buffer.alloc(input.length * 2);
+  for (let i = 0; i < input.length; i++) {
+    pcm.writeInt16LE(decodeMulawSample(input[i]), i * 2);
+  }
+  return pcm;
 }
 
 /**
