@@ -16,8 +16,23 @@ export default async function handler(req, res) {
     case 'hangup': return hangupCall(req, res, supabase, userId);
     case 'mute': return muteCall(req, res, supabase, userId);
     case 'list': return listCalls(req, res, supabase, userId);
+    case 'get': return getCall(req, res, supabase, userId);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
   }
+}
+
+async function getCall(req, res, supabase, userId) {
+  const callId = req.query?.callId || req.body?.callId;
+  if (!callId) return res.status(400).json({ error: 'callId required' });
+  const { data: call, error } = await supabase
+    .from('calls')
+    .select('*')
+    .eq('id', callId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!call) return res.status(404).json({ error: 'Call not found' });
+  return res.status(200).json({ call });
 }
 
 async function hangupCall(req, res, supabase, userId) {
@@ -28,6 +43,10 @@ async function hangupCall(req, res, supabase, userId) {
   const { data: call } = await supabase.from('calls').select('*').eq('id', callId).eq('user_id', userId).maybeSingle();
   if (!call) return res.status(404).json({ error: 'Call not found' });
 
+  if (['completed', 'failed', 'no_answer', 'busy', 'canceled'].includes(call.status)) {
+    return res.status(200).json({ ok: true, alreadyEnded: true });
+  }
+
   if (call.platform === 'whatsapp') {
     if (call.platform_call_id) {
       const { data: waRow } = await supabase.from('whatsapp_accounts').select('wacalls_session_id').eq('user_id', userId).maybeSingle();
@@ -36,6 +55,9 @@ async function hangupCall(req, res, supabase, userId) {
           console.error('wacallsHangup failed:', err.message); // best-effort - still mark completed below
         });
       }
+      try {
+        await supabase.from('social_calls').update({ status: 'completed', ended_at: new Date().toISOString() }).eq('id', call.platform_call_id).eq('user_id', userId);
+      } catch {}
     }
     await supabase.from('calls').update({ status: 'completed' }).eq('id', callId);
     return res.status(200).json({ ok: true });
@@ -46,7 +68,15 @@ async function hangupCall(req, res, supabase, userId) {
       await mpRelayRequest(`/calls/${call.platform_call_id}`, { method: 'DELETE' }).catch((err) => {
         console.error('mp-relay hangup failed:', err.message); // best-effort - still mark completed below
       });
+      try {
+        await supabase.from('social_calls').update({ status: 'completed', ended_at: new Date().toISOString() }).eq('id', call.platform_call_id).eq('user_id', userId);
+      } catch {}
     }
+    await supabase.from('calls').update({ status: 'completed' }).eq('id', callId);
+    return res.status(200).json({ ok: true });
+  }
+
+  if (call.platform === 'in_app' || (!call.twilio_call_sid && call.platform)) {
     await supabase.from('calls').update({ status: 'completed' }).eq('id', callId);
     return res.status(200).json({ ok: true });
   }

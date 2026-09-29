@@ -787,3 +787,42 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 
 .preCallContext.ready p{display:none;}
 .preCallContext.ready{padding:6px 14px;}
+
+/* ---------- live call screen enhancements ---------- */
+.callHeader{position:relative;}
+.callMinimizeBtn{position:absolute; top:calc(var(--safe-top, 12px) + 6px); right:18px; width:38px; height:38px; border-radius:50%; background:rgba(255,255,255,.12); color:#fff; display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,.15);}
+.callMinimizeBtn svg{width:20px; height:20px;}
+.callStatePill{display:inline-flex; align-items:center; gap:6px; margin-top:6px; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:500; letter-spacing:.01em; background:rgba(255,255,255,.12); color:rgba(255,255,255,.88); border:1px solid rgba(255,255,255,.14);}
+.callStatePill::before{content:""; width:7px; height:7px; border-radius:50%; background:#ffd60a;}
+.callStatePill[data-phase="speaking"]::before{background:#30d158; box-shadow:0 0 8px #30d158;}
+.callStatePill[data-phase="listening"]::before,.callStatePill[data-phase="connected"]::before{background:#30d158;}
+.callStatePill[data-phase="muted"]::before{background:#ff9f0a;}
+.callStatePill[data-phase="ended"]::before{background:#ff453a;}
+.transcriptEmptyHint{font-size:13px; color:rgba(255,255,255,.55); text-align:center; padding:18px 12px; font-style:italic;}
+#callScreen.captionsHidden .transcriptPanel{display:none;}
+.emysaLiveDivider{display:flex; align-items:center; gap:10px; margin:12px 0; color:var(--dim); font-size:12px; text-transform:uppercase; letter-spacing:.06em;}
+.emysaLiveDivider::before,.emysaLiveDivider::after{content:""; flex:1; height:1px; background:var(--line);}
+.callDetailTranscript{display:flex; flex-direction:column; gap:8px; max-height:240px; overflow-y:auto; margin-top:6px;}
+.callDetailTurn{font-size:14px; line-height:1.4; color:#e5e5ea;}
+.callDetailTurn strong{color:#8e8e93; font-weight:600; margin-right:6px;}
+
+/* ---------- tiered memories sheet ---------- */
+.memoriesClearBtn{color:#ff453a; font-size:13.5px; font-weight:600; padding:6px 10px; border-radius:8px; background:rgba(255,69,58,.12);}
+.memoryMoodBanner{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px; margin:10px 0 12px; border-radius:12px; background:var(--glass-bg); border:1px solid var(--line); font-size:13px; color:var(--fg);}
+.memoryMoodBanner strong{font-weight:600; color:var(--accent);}
+.memoryFilterRow{display:flex; gap:6px; overflow-x:auto; margin:10px 0 12px; padding-bottom:2px;}
+.memoryFilterBtn{padding:6px 12px; border-radius:999px; font-size:12.5px; font-weight:500; background:var(--glass-bg); color:var(--dim); border:1px solid var(--line); white-space:nowrap;}
+.memoryFilterBtn.active{background:var(--accent); color:var(--on-accent,#141414); border-color:transparent; font-weight:600;}
+.memoryAddForm{display:flex; gap:8px; align-items:center; margin-bottom:12px; background:var(--glass-bg); padding:8px 10px; border-radius:14px; border:1px solid var(--line);}
+.memoryAddForm .plainInput{flex:1; min-width:0; font-size:14px;}
+.memoryTypeSelect{width:auto; font-size:12.5px; padding:4px 6px; border-radius:8px; background:rgba(255,255,255,.06);}
+.memoryAddSubmitBtn{width:auto !important; flex:none; padding:8px 14px !important; font-size:13px;}
+.memoryMetaRow{display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;}
+.memoryTypeBadge{display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.03em; background:rgba(255,255,255,.1); color:var(--dim);}
+.memoryTypeBadge[data-type="semantic"]{background:rgba(10,132,255,.18); color:#64d2ff;}
+.memoryTypeBadge[data-type="episodic"]{background:rgba(48,209,88,.18); color:#30d158;}
+.memoryTypeBadge[data-type="emotional"]{background:rgba(255,159,10,.18); color:#ffd60a;}
+.memoryCardActions{display:flex; align-items:center; gap:6px; position:absolute; top:12px; right:12px;}
+.memoryEditBtn,.memoryCard .memoryDelete{position:static; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--dim); background:rgba(255,255,255,.06);}
+.memoryCard{position:relative; padding-right:74px;}
+

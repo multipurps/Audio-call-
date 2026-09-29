@@ -6,31 +6,52 @@ reports back.
 
 ## Architecture
 
-Two deployables:
+Three deployables:
 
 1. **Web app** (`index.html`, `styles.css`, `app.js`, `api/*.js`) — a
-   single-file-style PWA plus Vercel serverless functions for everything
-   that's request/response: auth, admin approval, AI caller CRUD, voice
-   cloning, starting a call, call history. Deploys to Vercel.
+   mobile-first PWA plus Vercel serverless functions (11 endpoints in `api/`,
+   staying within the 12-function Vercel Hobby cap): auth, admin approval,
+   contacts, voice cloning, call plans & confirmation, social calling
+   (`WaCalls` for WhatsApp, `mp-relay` for Telegram), tiered memories, and
+   call history. Deploys to Vercel.
 
-2. **Relay server** (`server/relay.js`) — a persistent Node process that
-   Twilio's Media Streams WebSocket connects to for the live audio of an
-   in-progress call. This has to be a long-lived process, not a Vercel
-   function, because the connection stays open for the whole call. Deploy
-   it on Render (same as the other apps' backends).
+2. **Twilio Relay Server** (`server/patter-relay.js` and `server/relay.js`) —
+   persistent Node processes that Twilio's Media Streams WebSocket connects to
+   for the live audio of an in-progress PSTN call. Uses GPT Luna (`gpt-6-luna`)
+   with automatic fallback to Groq (`qwen/qwen3.8-27b`), Groq Whisper STT,
+   Fish Audio TTS with per-call voice isolation, OpenFeelz-inspired emotional
+   intelligence, and Letta-inspired 4-tier persistent memory.
 
-```
-Android/Web app -> Vercel api/*.js -> Supabase (users, callers, calls, usage)
-                                    -> Twilio REST API (start the call)
+3. **Pipecat Voice Service** (`pipecat-service/`) — Python FastAPI + Pipecat
+   real-time audio bridge used by `mp-relay` over the ACAF WebSocket protocol
+   for Telegram calling. Supports GPT Luna (`ASSISTANT_LLM_PROVIDER=luna`),
+   Groq Whisper STT, Fish Audio TTS, Silero VAD, emotional state tracking, and
+   `[[END_CALL]]` call termination.
 
-Twilio call audio -> server/relay.js (Render) -> Groq (brain + Whisper STT)
-                                                -> Fish Audio (TTS)
-```
+## Emotional Intelligence & Persistent Memory
 
-All provider keys (Twilio, Groq, Fish Audio) live server-side only, in env
-vars — the app owns the accounts, users never see or provide their own keys.
-Per-user monthly minute limits are enforced in `api/calls-create.js` before
-Twilio is ever touched.
+- **GPT Luna Primary LLM (`lib/llmClient.js`, `pipecat-service/app/config.py`)**:
+  Defaults to `gpt-6-luna` via `LUNA_API_KEY` / `OPENAI_API_KEY` with automatic
+  fallback to Groq (`GROQ_API_KEY`) and Fal OpenRouter (`FAL_KEY`) so calls and
+  chats remain resilient even if a single provider key is absent or rate-limited.
+- **OpenFeelz-Inspired Emotional State (`lib/emotionEngine.js`, `pipecat-service/app/emotion.py`)**:
+  Models OCEAN personality traits, continuous PAD (Pleasure, Arousal, Dominance)
+  + relational dimensions (Connection, Curiosity, Energy, Trust), exponential
+  time decay toward personality baseline, and a multi-stage rumination buffer
+  with zero extra LLM calls per turn.
+- **Letta-Inspired 4-Tier Memory (`lib/memoryManager.js`, `api/memories.js`, `sql/016_memory_and_emotion.sql`)**:
+  Separates memory into `working`, `semantic` (facts/preferences), `episodic`
+  (call/chat summaries), and `emotional` (relationship notes) tiers stored in
+  Supabase with hybrid relevance + recency + importance retrieval, contradiction
+  resolution, and automatic secret/PII scrubbing.
+
+## SQL Migrations
+
+Run the SQL migrations in `sql/` in order against your Supabase project:
+- `001_schema.sql` through `015_call_plans.sql` (`006_chat_sessions.sql` and
+  `007_assistant.sql` are order-independent)
+- `016_memory_and_emotion.sql` (adds tiered memory columns on `memories` and
+  creates the `emotional_states` table with RLS policies)
 
 ## Design
 

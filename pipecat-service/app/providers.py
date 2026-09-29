@@ -198,13 +198,17 @@ def build_llm(settings: Settings) -> Any:
             model=settings.resolved_llm_model(),
         )
 
-    if settings.llm_provider == "openai":
+    if settings.llm_provider in ("openai", "luna"):
         from pipecat.services.openai.llm import OpenAILLMService
 
-        return OpenAILLMService(
-            api_key=settings.openai_api_key,
-            model=settings.resolved_llm_model(),
-        )
+        kwargs: dict[str, Any] = {
+            "api_key": settings.resolved_llm_api_key(),
+            "model": settings.resolved_llm_model(),
+        }
+        base_url = settings.resolved_llm_base_url()
+        if base_url:
+            kwargs["base_url"] = base_url
+        return OpenAILLMService(**kwargs)
 
     raise ValueError(f"unsupported LLM provider {settings.llm_provider!r}")
 

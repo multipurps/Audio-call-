@@ -21,6 +21,16 @@ create table if not exists assistant_messages (
   created_at timestamptz not null default now()
 );
 
+do $$
+begin
+  if exists (
+    select 1 from information_schema.tables
+    where table_schema = 'public' and table_name = 'chat_sessions'
+  ) then
+    alter table assistant_messages add column if not exists session_id uuid references chat_sessions(id) on delete cascade;
+  end if;
+end $$;
+
 alter table calls add column if not exists contact_id uuid references contacts(id) on delete set null;
 
 alter table contacts enable row level security;
