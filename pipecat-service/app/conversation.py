@@ -392,12 +392,14 @@ class BridgeOutput(FrameProcessor):
         self._serializer = serializer
         self._send_control = send_control
         self._session_id = session_id
+        self.started_event = asyncio.Event()
 
     async def process_frame(self, frame: Any, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
             self._sender.start()
+            self.started_event.set()
         elif isinstance(frame, InterruptionFrame):
             dropped = await self._sender.interrupt()
             wire = await self._serializer.serialize(frame)
@@ -605,6 +607,7 @@ class CallConversation(_BaseConversation):
             transport=_TransportShim(BridgeInput(), self._output),
             context=self._context,
             services=self._services,
+            on_end_call=self._schedule_assistant_hangup,
         )
         self._task = PipelineTask(
             pipeline,
@@ -617,7 +620,35 @@ class CallConversation(_BaseConversation):
         )
         self._runner = PipelineRunner(handle_sigint=False)
         self._run_task = asyncio.create_task(self._run(), name=f"pipeline-{self._session_id}")
+        # Wait for StartFrame to reach BridgeOutput so all upstream processors
+        # (including TTSService) are initialized before any greeting or audio
+        # frame is queued.
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(self._output.started_event.wait(), timeout=2.0)
         clog("INFO", self._session_id, "pipeline started", bridgeSampleRate=rate)
+
+    def _schedule_assistant_hangup(self) -> None:
+        if self._stopped:
+            return
+        asyncio.create_task(self._graceful_assistant_hangup())
+
+    async def _graceful_assistant_hangup(self) -> None:
+        # Allow final goodbye audio to be enqueued and drained before hanging up
+        await asyncio.sleep(0.4)
+        deadline = time.monotonic() + 8.0
+        while (
+            not self._stopped
+            and self.sender is not None
+            and self.sender.speaking
+            and time.monotonic() < deadline
+        ):
+            await asyncio.sleep(0.1)
+        if self._stopped:
+            return
+        clog("INFO", self._session_id, "assistant requested call termination")
+        with contextlib.suppress(Exception):
+            await self._send_control('{"type":"hangup","reason":"assistant-ended-call"}')
+        await self.stop("assistant-ended-call")
 
     async def _run(self) -> None:
         reason = "pipeline-finished"

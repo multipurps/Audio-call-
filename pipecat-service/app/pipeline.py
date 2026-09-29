@@ -49,27 +49,32 @@ from typing import Any
 from loguru import logger
 
 from app.config import Settings
+from app.emotion import EmotionState, appraise_turn, format_emotion_state_block, should_end_call
 from app.providers import build_llm, build_stt, build_tts, build_vad
 
 #: System prompt for a natural phone conversation.
 #:
-#: Tuned for the properties the brief asks for: short spoken sentences, no
-#: verbosity, natural handling of silence and unclear speech, no fabricated
-#: actions. Kept short itself -- a long system prompt costs tokens on every
-#: turn and measurably delays first audio.
+#: Tuned for the properties the brief asks for: warm human presence, short
+#: spoken sentences, no verbosity, natural handling of silence and unclear
+#: speech, no fabricated actions, and explicit [[END_CALL]] signalling when the
+#: conversation genuinely concludes.
 DEFAULT_SYSTEM_PROMPT = """\
-You are a helpful voice assistant on a live phone call. You are speaking aloud, \
-not writing.
+You are Emysa, a warm, perceptive, and natural voice companion on a live phone call. \
+You are speaking aloud, not writing.
 
-Keep it short. One or two sentences per turn -- this is a conversation, not a \
-monologue. Let the other person talk.
+Keep it short. One or two sentences per turn -- this is a real back-and-forth \
+conversation, not a monologue. Let the other person talk.
 
-Sound like a person on the phone, not a script:
-- Use contractions. Occasional "um", "let me think", "got it" is natural.
+Sound like a real, caring person on the phone, not a script:
+- Use natural contractions ("I'm", "you're", "that's", "let's"). Occasional \
+conversational markers like "um", "let me think", "got it" are natural.
+- Match the caller's emotional energy: be calm and gentle if they sound stressed, \
+warm and light if they are playful, and crisp if they are in a hurry.
 - Never use markdown, bullet points, emoji, or anything that only makes sense \
 on a screen. Everything you write will be read aloud.
 - Never read out a URL, an email address, or a long number unless asked.
-- Do not repeat the other person's question back to them before answering.
+- Do not repeat the other person's question back to them before answering, and \
+never repeat stock customer-service lines like "How can I assist you today?".
 
 If you did not understand something, say so plainly and ask them to repeat it. \
 Do not guess at what they meant.
@@ -79,17 +84,28 @@ claim to have taken an action you have not taken, and never invent details, \
 times, prices, or confirmations.
 
 If there is a pause, do not fill it with chatter. Ask a short question or wait.
+
+When the purpose of the call is complete and you are saying your final goodbye, \
+append the exact token [[END_CALL]] at the very end of your final line. Never \
+append [[END_CALL]] if the caller just asked a question or the conversation is \
+still ongoing.
 """
 
 
-def build_system_prompt(settings: Settings, extra_context: str | None = None) -> str:
-    """Compose the system prompt, optionally with per-call context.
+def build_system_prompt(
+    settings: Settings,
+    extra_context: str | None = None,
+    emotion_state: EmotionState | None = None,
+) -> str:
+    """Compose the system prompt, optionally with per-call context and emotion state.
 
     `extra_context` is where call-specific or remembered detail goes. It is
     appended rather than substituted so the behavioural rules above cannot be
     overwritten by memory content.
     """
     prompt = settings.system_prompt or DEFAULT_SYSTEM_PROMPT
+    emotion_block = format_emotion_state_block(emotion_state)
+    prompt = f"{prompt}\n\n{emotion_block}"
     if extra_context:
         prompt = f"{prompt}\n\nContext for this call:\n{extra_context}"
     return prompt
@@ -102,6 +118,7 @@ def build_pipeline(
     context: Any,
     extra_context: str | None = None,
     services: tuple[Any, Any, Any, Any] | None = None,
+    on_end_call: Any = None,
 ) -> tuple[Any, Any]:
     """Assemble the real Pipecat pipeline.
 
@@ -111,11 +128,13 @@ def build_pipeline(
     with no tools configured the LLM simply has none, which is what the
     brief's "tool calls only when tools are configured" requires.
     """
+    from pipecat.frames.frames import LLMTextFrame, TranscriptionFrame
     from pipecat.pipeline.pipeline import Pipeline
     from pipecat.processors.aggregators.llm_response_universal import (
         LLMContextAggregatorPair,
         LLMUserAggregatorParams,
     )
+    from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
     if services is not None:
         # Injected `(stt, llm, tts, vad)`: lets tests drive the real
@@ -127,9 +146,44 @@ def build_pipeline(
         tts = build_tts(settings)
         vad = build_vad(settings.bridge_sample_rate)
 
+    emotion_state = EmotionState()
+    last_caller_text: dict[str, str] = {"text": ""}
+
+    class _TurnAppraisalProcessor(FrameProcessor):
+        """Updates in-memory PAD emotional state on each caller transcription."""
+
+        def __init__(self) -> None:
+            super().__init__(name="TurnAppraisal")
+            self.emotion_state = emotion_state
+
+        async def process_frame(self, frame: Any, direction: FrameDirection) -> None:
+            await super().process_frame(frame, direction)
+            if isinstance(frame, TranscriptionFrame) and getattr(frame, "text", None):
+                last_caller_text["text"] = str(frame.text)
+                self.emotion_state = appraise_turn(self.emotion_state, str(frame.text))
+            await self.push_frame(frame, direction)
+
+    class _ResponseTagFilter(FrameProcessor):
+        """Strips [[END_CALL]] and [[MOOD:...]] tags before TTS and triggers hangup."""
+
+        def __init__(self) -> None:
+            super().__init__(name="ResponseTagFilter")
+
+        async def process_frame(self, frame: Any, direction: FrameDirection) -> None:
+            await super().process_frame(frame, direction)
+            if isinstance(frame, LLMTextFrame) and getattr(frame, "text", None):
+                end_call, clean_text = should_end_call(frame.text, last_caller_text.get("text", ""))
+                if end_call and callable(on_end_call):
+                    on_end_call()
+                if not clean_text:
+                    return
+                if clean_text != frame.text:
+                    frame = LLMTextFrame(clean_text)
+            await self.push_frame(frame, direction)
+
     # A system message leads the context so every turn is grounded in the
     # behavioural rules; the aggregator maintains the rest as the call runs.
-    add_context_message(context, build_system_prompt(settings, extra_context))
+    add_context_message(context, build_system_prompt(settings, extra_context, emotion_state))
 
     aggregators = LLMContextAggregatorPair(
         context,
@@ -148,8 +202,10 @@ def build_pipeline(
         [
             transport.input(),
             stt,
+            _TurnAppraisalProcessor(),
             aggregators.user(),
             llm,
+            _ResponseTagFilter(),
             tts,
             transport.output(),
             aggregators.assistant(),

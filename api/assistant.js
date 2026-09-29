@@ -1,5 +1,8 @@
 import { LANGUAGE_NAMES } from '../lib/callLanguages.js';
 import { prepareCall, saveCallPlan, confirmCallPlan, attachCallPlans } from '../lib/callPlans.js';
+import { formatEmotionStateBlock, extractAndStripControlTags, shouldEndCall } from '../lib/emotionEngine.js';
+import { createChatCompletion, hasConfiguredLlm } from '../lib/llmClient.js';
+import { prepareTurnContext, consolidateAndStoreMemories, inferMemoryType } from '../lib/memoryManager.js';
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { wacallsPlaceAICall } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
@@ -85,6 +88,10 @@ async function speakText(req, res, supabase, userId) {
   const { text } = req.body || {};
   if (typeof text !== 'string' || !text.trim() || text.length > 4000) return res.status(400).json({ error: 'Text required (maximum 4000 characters)' });
 
+  const { cleanText } = extractAndStripControlTags(text);
+  const spokenText = (cleanText || text).trim().slice(0, 600);
+  if (!spokenText) return res.status(400).json({ error: 'Text required' });
+
   const { data: voice } = await supabase.from('voice_profiles').select('*').eq('user_id', userId).maybeSingle();
   const referenceId = voice?.status === 'ready' ? voice.provider_voice_id : undefined;
 
@@ -92,7 +99,7 @@ async function speakText(req, res, supabase, userId) {
     const resp = await fetch('https://api.fish.audio/v1/tts', {
       method: 'POST',
       headers: { Authorization: `Bearer ${fishKey}`, 'Content-Type': 'application/json', model: 's1' },
-      body: JSON.stringify({ text: text.slice(0, 600), reference_id: referenceId, format: 'mp3' }),
+      body: JSON.stringify({ text: spokenText, reference_id: referenceId, format: 'mp3' }),
     });
     if (!resp.ok) {
       const detail = await resp.text().catch(() => '');
@@ -246,8 +253,7 @@ async function sendImage(req, res, supabase, userId) {
   const { imageBase64, mimeType, caption, sessionId: incomingSessionId, source } = req.body || {};
   if (!imageBase64) return res.status(400).json({ error: 'imageBase64 required' });
   const msgSource = source === 'call' ? 'call' : 'text';
-  const groqKey = process.env.GROQ_API_KEY;
-  if (!groqKey) return res.status(500).json({ error: 'Vision not configured (missing GROQ_API_KEY)' });
+  if (!hasConfiguredLlm(process.env)) return res.status(500).json({ error: 'Vision not configured (missing LLM API key)' });
 
   let sessionId = incomingSessionId || null;
   if (sessionId) {
@@ -272,35 +278,29 @@ async function sendImage(req, res, supabase, userId) {
   const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
   let reply = "Sorry, I couldn't look at that just now.";
   try {
-    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'qwen/qwen3.8-27b',
-        messages: [
-          {
-            role: 'system',
-            content:
-              "You are Emysa, a helpful voice assistant. The user just shared a photo with you. Respond to what's actually in it naturally and conversationally, in 1-3 sentences, as if speaking out loud on a phone call.",
-          },
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: caption?.trim() || "Here's a photo." },
-              { type: 'image_url', image_url: { url: dataUrl } },
-            ],
-          },
-        ],
-        temperature: 0.5,
-        max_tokens: 150,
-      }),
+    const llmResult = await createChatCompletion({
+      messages: [
+        {
+          role: 'system',
+          content:
+            "You are Emysa, a warm, observant, and natural voice companion. The user just shared a photo with you. Respond to what's actually in it naturally and conversationally, in 1-3 sentences, as if speaking out loud to a close friend.",
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: caption?.trim() || "Here's a photo." },
+            { type: 'image_url', image_url: { url: dataUrl } },
+          ],
+        },
+      ],
+      temperature: 0.5,
+      max_tokens: 160,
     });
-    if (!resp.ok) {
-      const detail = await resp.text().catch(() => '');
-      console.error(`sendImage: vision request rejected (status ${resp.status}):`, detail.slice(0, 500));
+    if (!llmResult.ok) {
+      console.error(`sendImage: vision request rejected (status ${llmResult.status}):`, llmResult.errorText);
     } else {
-      const data = await resp.json();
-      reply = data.choices?.[0]?.message?.content?.trim() || reply;
+      const rawReply = llmResult.data?.choices?.[0]?.message?.content?.trim();
+      if (rawReply) reply = extractAndStripControlTags(rawReply).cleanText || reply;
     }
   } catch (err) {
     console.error('sendImage: vision request threw:', err);
@@ -349,38 +349,55 @@ async function sendMessage(req, res, supabase, userId) {
   const newMessages = [userMsg];
   const respond = (extra = {}) => res.status(200).json({ messages: newMessages, sessionId, isNewSession, ...extra });
 
-  const groqKey = process.env.GROQ_API_KEY;
-  if (!groqKey) {
+  if (!hasConfiguredLlm(process.env)) {
     newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "I'm not fully set up yet — the assistant's API key hasn't been added on the server.", null, msgSource));
     return respond();
   }
 
-  const { data: contacts } = await supabase.from('contacts').select('id,name,phone_number').eq('user_id', userId);
-  const { data: memRows } = await supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5);
-  const { data: history } = await supabase
-    .from('assistant_messages')
-    .select('role,content')
-    .eq('user_id', userId)
-    .eq('session_id', sessionId)
-    .order('created_at', { ascending: false })
-    .limit(20);
+  const [{ data: contacts }, { data: history }, turnContext] = await Promise.all([
+    supabase.from('contacts').select('id,name,phone_number').eq('user_id', userId),
+    supabase
+      .from('assistant_messages')
+      .select('role,content')
+      .eq('user_id', userId)
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: false })
+      .limit(20),
+    prepareTurnContext({
+      supabase,
+      userId,
+      userText: text.trim(),
+      isVoiceCall: msgSource === 'call',
+    }),
+  ]);
   const recentHistory = (history || []).reverse();
+  const { emotionState, memoryBundle, commitTurn } = turnContext;
 
   const contactsList = (contacts || []).map((c) => `- ${c.name}`).join('\n') || '(no contacts saved yet)';
-  const memoriesList = (memRows || []).map((m) => `- ${m.content}`).join('\n');
+  const emotionBlock = formatEmotionStateBlock(emotionState);
   const systemPrompt = [
-    'You are Emysa, the in-app assistant for a phone-calling app. The user tells you who to call and what to say, and you place the call for them. They can give you either a phone number directly, or a name from their saved contacts below:',
+    'You are Emysa — a warm, emotionally observant, witty, and grounded personal companion and calling assistant.',
+    'The user can chat with you naturally about anything, or tell you who to call and what to say so you can place the call for them.',
     'Known contacts:',
     contactsList,
-    memoriesList ? `\nThings worth remembering about this user from past calls:\n${memoriesList}` : '',
+    memoryBundle.promptBlock ? `\n${memoryBundle.promptBlock}` : '',
+    `\n${emotionBlock}`,
     '',
-    "About the app, for when the user asks (answer naturally and conversationally in \"reply\" — don't deflect these to a phone-number prompt): this app lets you tell Emysa (you) who to call and what to say, then Emysa places a real phone call and carries the conversation. You can call any phone number or a saved contact, ask for the same person again with something like \"call him again\", and Emysa remembers context from past calls to inform future ones.",
+    'HUMAN PERSONALITY & CONVERSATION STYLE:',
+    '- Speak like a perceptive, caring human friend — never a scripted corporate bot. Use natural contractions and rhythm.',
+    '- Adapt to the user\'s emotional state: be gentle and unhurried if they are stressed or sad, playful when they are joking, and crisp when they are in a hurry.',
+    '- Avoid repeating stock phrases like "How can I assist you today?" or "I understand your frustration."',
+    msgSource === 'call'
+      ? '- You are currently speaking out loud on a live voice call with the user. Keep "reply" concise (1-2 spoken sentences), natural for TTS, with no markdown or bullet lists. If the user says goodbye or asks to end/hang up the call, include [[END_CALL]] at the very end of "reply".'
+      : '',
+    '',
+    "About the app, for when the user asks (answer naturally and conversationally in \"reply\" — don't deflect these to a phone-number prompt): this app lets you tell Emysa (you) who to call and what to say, then Emysa places a real phone, WhatsApp, or Telegram call and carries the conversation. You can call any phone number or a saved contact, ask for the same person again with something like \"call him again\", and Emysa remembers context from past conversations and calls.",
     '',
     'Reply with ONLY a JSON object, no other text, matching this shape:',
-    '{"action":"call"|"retry"|"reply","phoneNumber":string|null,"contactName":string|null,"objective":string|null,"channel":"phone"|"whatsapp"|"telegram"|null,"reply":string|null}',
+    '{"action":"call"|"retry"|"reply","phoneNumber":string|null,"contactName":string|null,"objective":string|null,"channel":"phone"|"whatsapp"|"telegram"|null,"reply":string|null,"mood":string|null}',
     '- action "call": the user wants you to call someone new. If they gave you an actual phone number in their message, put the digits (with country code if given, e.g. "+15551234567") in phoneNumber. Otherwise, if they named someone from the saved contacts list, put your best guess at that name in contactName. objective is a short phrase describing what to say or ask on the call — if they also gave any tone or manner direction (stay calm, keep it light, let it flow naturally, be quick about it, etc.), include that in objective too, don\'t drop it. If they explicitly named which line to call on in this message (e.g. "on WhatsApp", "call him on Telegram", "use my phone line"), put that in channel - phone/whatsapp/telegram. If they did not name a line in THIS message, leave channel null; do not guess or reuse a line from earlier in the conversation, since the app\'s own line selector already carries that forward and takes over whenever this is null.',
     '- action "retry": the user wants you to call the same person again (e.g. "call him again", "try it again").',
-    '- action "reply": anything else — general conversation, questions about you or the app, small talk, or a call request with no number/contact given yet. Answer naturally and helpfully in "reply". Only ask for a phone number or contact name if they\'ve actually expressed intent to make a call but haven\'t said who.',
+    '- action "reply": anything else — general conversation, emotional support, questions about you or the app, small talk, or a call request with no number/contact given yet. Answer naturally, warmly, and helpfully in "reply". Only ask for a phone number or contact name if they\'ve actually expressed intent to make a call but haven\'t said who.',
     'Every single response, with no exceptions, must be that one JSON object and nothing else - never plain conversational text, never text before or after the JSON, even for casual chat or small talk. Put the conversational reply itself inside the "reply" field.',
   ].filter(Boolean).join('\n');
 
@@ -391,22 +408,21 @@ async function sendMessage(req, res, supabase, userId) {
 
   let intent;
   try {
-    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'qwen/qwen3.8-27b',
-        messages: chatMessages,
-        temperature: 0.3,
-        max_tokens: 250, // this only ever needs to emit one small JSON object - qwen3.8-27b
-                         // reasons at length before answering, and with no cap it was
-                         // requesting 1300+ output tokens against a 1000/min tier limit
-        response_format: { type: 'json_object' },
-      }),
+    const llmResult = await createChatCompletion({
+      messages: chatMessages,
+      temperature: 0.35,
+      max_tokens: 280,
+      response_format: { type: 'json_object' },
     });
-    if (!resp.ok) throw new Error(await resp.text());
-    const data = await resp.json();
-    intent = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+    if (!llmResult.ok) throw new Error(llmResult.rawErrorText || llmResult.errorText || 'LLM request failed');
+    const rawContent = llmResult.data?.choices?.[0]?.message?.content || '{}';
+    try {
+      intent = JSON.parse(rawContent);
+    } catch {
+      // If the provider returned plain text despite json_object mode, wrap it cleanly
+      const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+      intent = jsonMatch ? JSON.parse(jsonMatch[0]) : { action: 'reply', reply: rawContent.trim() };
+    }
   } catch (err) {
     // Groq's strict JSON-mode validator sometimes rejects a perfectly good
     // conversational reply just because the model didn't wrap it in our
@@ -425,12 +441,8 @@ async function sendMessage(req, res, supabase, userId) {
       intent = { action: 'reply', reply: recovered };
     } else {
       console.error('assistant intent parse failed:', err);
-      // TEMPORARY: showing the real error text in-app (truncated) because
-      // there's no access to Vercel's function logs from here to see why a
-      // request failed. Ask to have this reverted to a plain generic
-      // message once the assistant is reliably working again.
       const detail = String(err?.message || err).slice(0, 220);
-      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `Sorry, I couldn't process that. (debug: ${detail})`, null, msgSource));
+      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `Sorry, I couldn't process that right now. (${detail})`, null, msgSource));
       return respond();
     }
   }
@@ -632,8 +644,21 @@ async function sendMessage(req, res, supabase, userId) {
     }
   }
 
-  newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', intent.reply || 'Got it.', null, msgSource));
-  return respond();
+  const rawReplyText = intent.reply || 'Got it.';
+  const { endCall, cleanText } = shouldEndCall(rawReplyText, text);
+  const { moodTag } = extractAndStripControlTags(rawReplyText);
+  const inlineMood = intent.mood ? { emotion: String(intent.mood) } : moodTag;
+  const finalEmotion = await commitTurn({ moodTag: inlineMood });
+
+  newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', cleanText || 'Got it.', null, msgSource));
+  return respond({
+    endCall,
+    emotionState: {
+      primaryEmotion: finalEmotion.primaryEmotion,
+      secondaryEmotion: finalEmotion.secondaryEmotion,
+      intensity: finalEmotion.intensity,
+    },
+  });
 }
 
 // Posted once, when a voice call with Emysa ends — the home chat is meant
@@ -645,29 +670,45 @@ async function summarizeCall(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { transcript } = req.body || {};
   if (!transcript || !transcript.trim()) return res.status(400).json({ error: 'transcript required' });
-  const groqKey = process.env.GROQ_API_KEY;
-  if (!groqKey) return res.status(200).json({ summary: 'Had a call with Emysa.' });
+  if (!hasConfiguredLlm(process.env)) return res.status(200).json({ summary: 'Had a call with Emysa.' });
   try {
-    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'qwen/qwen3.8-27b',
-        messages: [
-          { role: 'system', content: 'Summarize this voice call with an assistant in ONE short, plain sentence, third person, as if logging what the user did. No quotes, no preamble.' },
-          { role: 'user', content: transcript.slice(0, 4000) },
-        ],
-        temperature: 0.3,
-        max_tokens: 60,
-      }),
+    const llmResult = await createChatCompletion({
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Analyze this voice call with Emysa. Reply with a JSON object: {"summary": "ONE short plain sentence in third person logging what happened", "memories": ["up to 3 durable personal facts, preferences, or episodic takeaways worth remembering about the user, or empty array"]}.',
+        },
+        { role: 'user', content: transcript.slice(0, 4000) },
+      ],
+      temperature: 0.3,
+      max_tokens: 180,
+      response_format: { type: 'json_object' },
     });
-    if (!resp.ok) {
-      const detail = await resp.text().catch(() => '');
-      console.error(`summarizeCall: request rejected (status ${resp.status}):`, detail.slice(0, 500));
+    if (!llmResult.ok) {
+      console.error(`summarizeCall: request rejected (status ${llmResult.status}):`, llmResult.errorText);
       return res.status(200).json({ summary: 'Had a call with Emysa.' });
     }
-    const data = await resp.json();
-    const summary = data.choices?.[0]?.message?.content?.trim();
+    const raw = llmResult.data?.choices?.[0]?.message?.content?.trim() || '';
+    let summary = 'Had a call with Emysa.';
+    let extractedMemories = [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.summary && typeof parsed.summary === 'string') summary = parsed.summary.trim();
+      if (Array.isArray(parsed.memories)) extractedMemories = parsed.memories;
+    } catch {
+      if (raw && !raw.startsWith('{')) summary = raw;
+    }
+    if (extractedMemories.length > 0) {
+      await consolidateAndStoreMemories({
+        supabase,
+        userId,
+        candidates: extractedMemories.map((m) => ({
+          content: String(m),
+          memory_type: inferMemoryType(String(m)),
+        })),
+      });
+    }
     return res.status(200).json({ summary: summary || 'Had a call with Emysa.' });
   } catch (err) {
     console.error('summarizeCall: request threw:', err);

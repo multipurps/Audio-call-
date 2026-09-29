@@ -27,23 +27,25 @@ from typing import Mapping
 # --------------------------------------------------------------------------
 
 STT_PROVIDERS = ("groq", "mock")
-LLM_PROVIDERS = ("groq", "openai", "mock")
+LLM_PROVIDERS = ("luna", "groq", "openai", "mock")
 TTS_PROVIDERS = ("fish", "mock")
 
 DEFAULT_STT_PROVIDER = "groq"
 DEFAULT_LLM_PROVIDER = "groq"
 DEFAULT_TTS_PROVIDER = "fish"
 
-#: Groq is OpenAI-compatible, which is why the same OpenAI-compatible LLM
-#: adapter serves both the "groq" and "openai" providers -- only base_url and
-#: the key differ. This is a real API-compatibility fact, not a guess.
+#: Groq and GPT Luna are OpenAI-compatible, which is why the same OpenAI-compatible
+#: LLM adapter serves "luna", "groq", and "openai" providers -- only base_url,
+#: model, and the key differ.
 OPENAI_COMPATIBLE_BASE_URLS = {
+    "luna": "https://api.openai.com/v1",
     "groq": "https://api.groq.com/openai/v1",
     "openai": "https://api.openai.com/v1",
 }
 
 DEFAULT_STT_MODEL = "whisper-large-v3-turbo"
 DEFAULT_LLM_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_LUNA_MODEL = "gpt-6-luna"
 
 
 class ConfigError(RuntimeError):
@@ -143,6 +145,7 @@ class Settings:
     # -- credentials -----------------------------------------------------
     groq_api_key: str | None = None
     openai_api_key: str | None = None
+    luna_api_key: str | None = None
     fish_api_key: str | None = None
 
     # -- conversational behaviour ---------------------------------------
@@ -178,6 +181,7 @@ class Settings:
             self.bridge_secret,
             self.groq_api_key,
             self.openai_api_key,
+            self.luna_api_key,
             self.fish_api_key,
             self.supabase_service_role_key,
         )
@@ -253,6 +257,10 @@ class Settings:
             raise ConfigError(
                 "OPENAI_API_KEY is required when ASSISTANT_LLM_PROVIDER=openai"
             )
+        if self.llm_provider == "luna" and not (self.luna_api_key or self.openai_api_key):
+            raise ConfigError(
+                "LUNA_API_KEY or OPENAI_API_KEY is required when ASSISTANT_LLM_PROVIDER=luna"
+            )
         if self.tts_provider == "fish" and not self.fish_api_key:
             raise ConfigError(
                 "FISH_API_KEY is required when ASSISTANT_TTS_PROVIDER=fish"
@@ -278,13 +286,14 @@ class Settings:
             "sttProvider": self.stt_provider,
             "sttModel": self.stt_model or DEFAULT_STT_MODEL,
             "llmProvider": self.llm_provider,
-            "llmModel": self.llm_model or DEFAULT_LLM_MODEL,
+            "llmModel": self.resolved_llm_model(),
             "llmBaseUrl": self.resolved_llm_base_url(),
             "ttsProvider": self.tts_provider,
             "ttsVoiceId": self.tts_voice_id or "<default>",
             "fishKey": "<set>" if self.fish_api_key else "<unset>",
             "groqKey": "<set>" if self.groq_api_key else "<unset>",
             "openaiKey": "<set>" if self.openai_api_key else "<unset>",
+            "lunaKey": "<set>" if self.luna_api_key else "<unset>",
             "persistentMemory": self.enable_persistent_memory,
             "mockMode": self.mock_mode,
         }
@@ -299,7 +308,18 @@ class Settings:
         return self.stt_model or DEFAULT_STT_MODEL
 
     def resolved_llm_model(self) -> str:
-        return self.llm_model or DEFAULT_LLM_MODEL
+        if self.llm_model:
+            return self.llm_model
+        if self.llm_provider == "luna":
+            return DEFAULT_LUNA_MODEL
+        return DEFAULT_LLM_MODEL
+
+    def resolved_llm_api_key(self) -> str:
+        if self.llm_provider == "luna":
+            return self.luna_api_key or self.openai_api_key or ""
+        if self.llm_provider == "openai":
+            return self.openai_api_key or self.luna_api_key or ""
+        return self.groq_api_key or ""
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -307,6 +327,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     env = env if env is not None else os.environ
 
     mock_mode = _env_bool(env, "ASSISTANT_MOCK_MODE", False)
+
+    luna_key = _env(env, "LUNA_API_KEY") or _env(env, "LLM_API_KEY")
+    default_llm_prov = "luna" if luna_key and not _env(env, "ASSISTANT_LLM_PROVIDER") else DEFAULT_LLM_PROVIDER
 
     settings = Settings(
         host=_env(env, "ASSISTANT_HOST", "0.0.0.0") or "0.0.0.0",
@@ -326,10 +349,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         stt_provider=_env(env, "ASSISTANT_STT_PROVIDER", DEFAULT_STT_PROVIDER)
         or DEFAULT_STT_PROVIDER,
         stt_model=_env(env, "ASSISTANT_STT_MODEL"),
-        llm_provider=_env(env, "ASSISTANT_LLM_PROVIDER", DEFAULT_LLM_PROVIDER)
-        or DEFAULT_LLM_PROVIDER,
-        llm_model=_env(env, "ASSISTANT_LLM_MODEL"),
-        llm_base_url=_env(env, "ASSISTANT_LLM_BASE_URL"),
+        llm_provider=_env(env, "ASSISTANT_LLM_PROVIDER", default_llm_prov)
+        or default_llm_prov,
+        llm_model=_env(env, "ASSISTANT_LLM_MODEL") or _env(env, "LUNA_MODEL") or _env(env, "LLM_MODEL"),
+        llm_base_url=_env(env, "ASSISTANT_LLM_BASE_URL") or _env(env, "LUNA_BASE_URL") or _env(env, "LLM_BASE_URL"),
         llm_temperature=_env_float(env, "ASSISTANT_LLM_TEMPERATURE", 0.7),
         llm_max_tokens=_env_int(env, "ASSISTANT_LLM_MAX_TOKENS", 200, minimum=1),
         tts_provider=_env(env, "ASSISTANT_TTS_PROVIDER", DEFAULT_TTS_PROVIDER)
@@ -338,6 +361,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         tts_model=_env(env, "ASSISTANT_TTS_MODEL"),
         groq_api_key=_env(env, "GROQ_API_KEY"),
         openai_api_key=_env(env, "OPENAI_API_KEY"),
+        luna_api_key=luna_key,
         fish_api_key=_env(env, "FISH_API_KEY"),
         system_prompt=_env(env, "ASSISTANT_SYSTEM_PROMPT"),
         greeting=_env(env, "ASSISTANT_GREETING"),

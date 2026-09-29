@@ -77,7 +77,13 @@ class FakeLLM(FrameProcessor):
 
 class FakeTTS(TTSService):
     def __init__(self) -> None:
-        super().__init__(sample_rate=RATE, push_stop_frames=True)
+        from pipecat.services.settings import TTSSettings
+
+        super().__init__(
+            sample_rate=RATE,
+            push_stop_frames=True,
+            settings=TTSSettings(model=None, voice=None, language=None),
+        )
 
     def can_generate_metrics(self) -> bool:
         return True

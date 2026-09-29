@@ -272,12 +272,21 @@ async function redeemPendingReferral() {
   if (resp.ok) localStorage.removeItem('emysa_pending_referral');
 }
 
+function createSafeAvatarImg(url) {
+  const img = document.createElement('img');
+  img.alt = '';
+  const trimmed = typeof url === 'string' ? url.trim() : '';
+  img.src = /^(https?:\/\/|\/|data:image\/|icon-192\.png)/i.test(trimmed) ? trimmed : 'icon-192.png';
+  return img;
+}
+
 function renderAvatar(url) {
   userAvatarUrl = url || null;
   const el = $('profileAvatarCircle');
   const initial = ($('profileEmailDisplay').textContent || currentUser?.email || '?')[0].toUpperCase();
+  el.textContent = '';
   if (url) {
-    el.innerHTML = `<img src="${url}" alt="">`;
+    el.appendChild(createSafeAvatarImg(url));
   } else {
     el.textContent = initial;
   }
@@ -465,12 +474,12 @@ function appendChatBubble(m) {
   avatar.className = 'chatAvatar';
   if (m.role === 'user') {
     if (userAvatarUrl) {
-      avatar.innerHTML = `<img src="${userAvatarUrl}" alt="">`;
+      avatar.appendChild(createSafeAvatarImg(userAvatarUrl));
     } else {
       avatar.textContent = (currentUser?.email || '?')[0].toUpperCase();
     }
   } else {
-    avatar.innerHTML = `<img src="icon-192.png" alt="">`;
+    avatar.appendChild(createSafeAvatarImg('icon-192.png'));
   }
   const el = document.createElement('div');
   el.className = `chatMsg ${m.role === 'user' ? 'chatMsgUser' : 'chatMsgAssistant'}`;
@@ -491,8 +500,12 @@ async function openCallFromMessage(callId) {
   if (!resp.ok) return;
   const { calls } = await resp.json();
   const call = (calls || []).find((c) => c.id === callId);
-  if (!call || !['queued', 'ringing', 'in_progress'].includes(call.status)) return; // call's over, nothing live to show
-  openCallScreen(call.id, call.to_number, call.contact_name);
+  if (!call) return;
+  if (['queued', 'ringing', 'in_progress', 'in-progress'].includes(call.status)) {
+    openCallScreen(call.id, call.to_number, call.contact_name);
+  } else {
+    openCallDetail(call, call.contact_name || call.to_number, !!call.contact_name);
+  }
 }
 
 // ---------- Header logo: shows a spinning ring while a call placed from
@@ -500,15 +513,17 @@ async function openCallFromMessage(callId) {
 // transcript) when tapped. ----------
 let activeHeaderCall = null; // { id, toNumber, contactName } | null
 let headerCallChannel = null;
+let userCallsRealtimeChannel = null;
 
 function trackActiveCall(callId, toNumber, contactName) {
   activeHeaderCall = { id: callId, toNumber, contactName };
+  $('homeHeaderLogoWrap').classList.remove('hidden');
   $('homeHeaderLogoWrap').classList.add('calling');
   if (headerCallChannel) supabase.removeChannel(headerCallChannel);
   headerCallChannel = supabase
     .channel(`header-call-${callId}`)
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'calls', filter: `id=eq.${callId}` }, (payload) => {
-      if (['completed', 'failed', 'no_answer'].includes(payload.new.status)) clearActiveCall();
+      if (['completed', 'failed', 'no_answer', 'busy', 'canceled'].includes(payload.new.status)) clearActiveCall();
     })
     .subscribe();
 }
@@ -520,17 +535,50 @@ function clearActiveCall() {
 }
 
 // If a call placed earlier is still going (app was backgrounded, tab
-// switched away, page reloaded), pick the ring back up rather than losing
-// the indicator until the next message.
+// switched away, page reloaded), pick the ring back up and surface the
+// live call screen automatically. Also supports ?callId= deep-links.
 async function resumeActiveCallIfAny() {
-  const resp = await authedFetch('/api/calls?action=list');
-  if (!resp.ok) return;
+  const resp = await authedFetch('/api/calls?action=list').catch(() => null);
+  if (!resp?.ok) return;
   const { calls } = await resp.json();
-  const live = (calls || []).find((c) => ['queued', 'ringing', 'in_progress'].includes(c.status));
-  if (live) trackActiveCall(live.id, live.to_number, live.contact_name);
+  const urlCallId = new URLSearchParams(window.location.search).get('callId');
+  if (urlCallId) {
+    const deepLinked = (calls || []).find((c) => c.id === urlCallId);
+    if (deepLinked) {
+      if (['queued', 'ringing', 'in_progress', 'in-progress'].includes(deepLinked.status)) {
+        trackActiveCall(deepLinked.id, deepLinked.to_number, deepLinked.contact_name);
+        openCallScreen(deepLinked.id, deepLinked.to_number, deepLinked.contact_name);
+        return;
+      }
+      openCallDetail(deepLinked, deepLinked.contact_name || deepLinked.to_number, !!deepLinked.contact_name);
+    }
+  }
+  const live = (calls || []).find((c) => ['queued', 'ringing', 'in_progress', 'in-progress'].includes(c.status));
+  if (live) {
+    trackActiveCall(live.id, live.to_number, live.contact_name);
+    openCallScreen(live.id, live.to_number, live.contact_name);
+  }
+  if (currentUser && !userCallsRealtimeChannel) {
+    userCallsRealtimeChannel = supabase
+      .channel(`user-calls-${currentUser.id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'calls', filter: `user_id=eq.${currentUser.id}` }, (payload) => {
+        const c = payload?.new;
+        if (c && ['queued', 'ringing', 'in_progress', 'in-progress'].includes(c.status)) {
+          trackActiveCall(c.id, c.to_number, c.contact_name);
+          if ($('callScreen').classList.contains('hidden') && !assistantCallOpen) {
+            openCallScreen(c.id, c.to_number, c.contact_name);
+          }
+        }
+      })
+      .subscribe();
+  }
 }
 
 $('homeHeaderLogoWrap').addEventListener('click', () => {
+  if (assistantCallOpen) {
+    $('callScreen').classList.remove('hidden');
+    return;
+  }
   if (activeHeaderCall) openCallScreen(activeHeaderCall.id, activeHeaderCall.toNumber, activeHeaderCall.contactName);
 });
 
@@ -553,13 +601,14 @@ async function sendChatMessage(text, onReply, source = 'text', channel = null) {
   if (revision !== chatRevision) return;
   if (!resp.ok) {
     const errText = data.error || 'Something went wrong.';
-    if (onReply) { await onReply(errText); return; }
+    if (onReply) { await onReply(errText, null); return; }
     throw new Error(errText);
   }
   if (data.sessionId) currentChatSessionId = data.sessionId;
   if (data.callId && data.toNumber) {
     trackActiveCall(data.callId, data.toNumber, data.contactName);
     clearPreCallContext();
+    openCallScreen(data.callId, data.toNumber, data.contactName);
   }
   // The server can pick a different line than the UI's sticky selection -
   // e.g. the user typed "call him on WhatsApp" while the badge still said
@@ -579,7 +628,7 @@ async function sendChatMessage(text, onReply, source = 'text', channel = null) {
     renderHomeMessages(replies, false);
     if (replies.some((m) => m.call_plan)) $('preCallContext').classList.add('ready');
   }
-  if (onReply) await onReply(replies.map((m) => m.content).join(' ') || '');
+  if (onReply) await onReply(replies.map((m) => m.content).join(' ') || '', data);
 }
 
 async function sendBrief() {
@@ -779,19 +828,33 @@ let assistantListening = false;
 let assistantMuted = false;
 let assistantSpeaking = false;
 
+function setCallStatePill(phase, label) {
+  const pill = $('callStatePill');
+  if (!pill) return;
+  pill.dataset.phase = phase || 'connecting';
+  pill.textContent = label || 'Connecting…';
+}
+
 function appendCallTranscriptLine(speaker, content) {
   const panel = $('transcriptPanel');
+  if (!panel) return;
+  panel.querySelector('.transcriptEmptyHint')?.remove();
+  const normalizedSpeaker = (speaker === 'ai' || speaker === 'assistant') ? 'ai' : 'user';
   const el = document.createElement('div');
-  el.className = `transcriptLine ${speaker}`;
-  let dotInner = '';
-  if (speaker === 'ai') {
-    dotInner = `<img src="icon-192.png" alt="">`;
-  } else if (speaker === 'user' && userAvatarUrl) {
-    dotInner = `<img src="${userAvatarUrl}" alt="">`;
-  } else if (speaker === 'user') {
-    dotInner = (currentUser?.email || '?')[0].toUpperCase();
+  el.className = `transcriptLine ${normalizedSpeaker}`;
+  const dot = document.createElement('div');
+  dot.className = 'transcriptDot';
+  if (normalizedSpeaker === 'ai') {
+    dot.appendChild(createSafeAvatarImg('icon-192.png'));
+  } else if (userAvatarUrl) {
+    dot.appendChild(createSafeAvatarImg(userAvatarUrl));
+  } else {
+    dot.textContent = (currentUser?.email || '?')[0].toUpperCase();
   }
-  el.innerHTML = `<div class="transcriptDot">${dotInner}</div><div class="transcriptBubble">${content}</div>`;
+  const bubble = document.createElement('div');
+  bubble.className = 'transcriptBubble';
+  bubble.textContent = content || '';
+  el.append(dot, bubble);
   panel.appendChild(el);
   panel.scrollTop = panel.scrollHeight;
 }
@@ -830,6 +893,7 @@ async function speakReply(text) {
   // mis-transcribes Emysa's own words as user speech and, if a reply to
   // that gets spoken before this one finishes, plays two replies at once.
   assistantSpeaking = true;
+  setCallStatePill('speaking', 'Emysa speaking…');
   try {
     const resp = await authedFetch('/api/assistant?action=speak', {
       method: 'POST',
@@ -860,6 +924,9 @@ async function speakReply(text) {
     if (assistantCallOpen) appendCallTranscriptLine('ai', '[voice output failed: network error]');
   } finally {
     assistantSpeaking = false;
+    if (assistantCallOpen) {
+      setCallStatePill(assistantMuted ? 'muted' : 'listening', assistantMuted ? 'Microphone muted' : 'Connected · Listening');
+    }
   }
 }
 
@@ -946,19 +1013,46 @@ async function sendCallPhoto(file) {
   }
 }
 
+function minimizeCallScreenToChat() {
+  $('callScreen').classList.add('hidden');
+  if (assistantCallOpen || activeCallScreenId) {
+    $('homeHeaderLogoWrap').classList.remove('hidden');
+    $('homeHeaderLogoWrap').classList.add('calling');
+  }
+}
+
+function endAssistantCall() {
+  if (waveRecorder && waveRecorder.state === 'recording') waveRecorder.stop();
+  assistantCallOpen = false;
+  clearInterval(callTimerInterval);
+  $('callScreen').classList.add('hidden');
+  $('callScreen').classList.remove('assistantMode');
+  $('callContactAvatar').style.display = '';
+  if (!activeHeaderCall) $('homeHeaderLogoWrap').classList.remove('calling');
+  postCallSummary();
+}
+
 function openAssistantCallScreen() {
+  if (assistantCallOpen) {
+    $('callScreen').classList.remove('hidden');
+    return;
+  }
   assistantCallOpen = true;
   assistantMuted = false;
   callTranscriptForSummary = [];
-  $('callScreen').classList.remove('hidden');
+  $('callScreen').classList.remove('hidden', 'captionsHidden');
   $('callScreen').classList.add('assistantMode');
+  $('callFaceTimeBtn')?.classList.add('active');
   $('callAudioBtn').innerHTML = MORE_BTN_HTML;
   $('callAudioBtn').onclick = () => openCallMoreMenu();
   $('callContactAvatar').style.display = 'none';
   $('callTitleText').textContent = 'Emysa';
-  $('transcriptPanel').innerHTML = '';
+  $('transcriptPanel').textContent = '';
   $('waveRow').classList.remove('speaking');
   $('callMuteBtn').classList.remove('active');
+  setCallStatePill('connecting', 'Connecting to Emysa…');
+  $('homeHeaderLogoWrap').classList.remove('hidden');
+  $('homeHeaderLogoWrap').classList.add('calling');
 
   const startedAt = Date.now();
   clearInterval(callTimerInterval);
@@ -969,22 +1063,25 @@ function openAssistantCallScreen() {
     $('callTimer').textContent = `${m}:${s}`;
   }, 1000);
 
-  $('callEndBtn').onclick = () => {
-    if (waveRecorder && waveRecorder.state === 'recording') waveRecorder.stop();
-    assistantCallOpen = false;
-    clearInterval(callTimerInterval);
-    $('callScreen').classList.add('hidden');
-    $('callScreen').classList.remove('assistantMode');
-    $('callContactAvatar').style.display = '';
-    postCallSummary();
+  $('callEndBtn').onclick = () => endAssistantCall();
+  $('callMinimizeBtn').onclick = () => minimizeCallScreenToChat();
+  $('callAddBtn').onclick = () => minimizeCallScreenToChat();
+  $('callFaceTimeBtn').onclick = () => {
+    const hidden = $('callScreen').classList.toggle('captionsHidden');
+    $('callFaceTimeBtn').classList.toggle('active', !hidden);
   };
   $('callMuteBtn').onclick = () => {
     assistantMuted = !assistantMuted;
     $('callMuteBtn').classList.toggle('active', assistantMuted);
+    setCallStatePill(assistantMuted ? 'muted' : 'listening', assistantMuted ? 'Microphone muted' : 'Connected · Listening');
     if (assistantMuted && waveRecorder?.state === 'recording') waveRecorder.stop();
     else if (!assistantMuted && assistantCallOpen) startAssistantListening();
   };
-  $('callKeypadBtn').onclick = () => {};
+  $('callKeypadBtn').onclick = () => {
+    $('dialStatus').textContent = '';
+    updateDialMatch();
+    $('keypadDialog').showModal();
+  };
   $('waveRow').onclick = () => {
     if (waveRecorder && waveRecorder.state === 'recording') waveRecorder.stop();
     else if (!assistantListening && !assistantSpeaking) startAssistantListening();
@@ -1066,13 +1163,21 @@ async function startAssistantListening() {
           if (resp.ok && data.text?.trim()) {
             appendCallTranscriptLine('user', data.text.trim());
             callTranscriptForSummary.push({ role: 'user', content: data.text.trim() });
-            await sendChatMessage(data.text.trim(), async (reply) => {
+            setCallStatePill('connecting', 'Emysa thinking…');
+            let shouldTerminateAfterReply = false;
+            await sendChatMessage(data.text.trim(), async (reply, resData) => {
+              if (resData?.endCall) shouldTerminateAfterReply = true;
               if (assistantCallOpen && reply) {
                 appendCallTranscriptLine('ai', reply);
                 callTranscriptForSummary.push({ role: 'assistant', content: reply });
                 await speakReply(reply);
               }
             }, 'call', currentCallChannel());
+            if (shouldTerminateAfterReply && assistantCallOpen) {
+              setCallStatePill('ended', 'Call ended');
+              endAssistantCall();
+              return;
+            }
           } else if (!resp.ok) {
             const errText = data.detail ? `${data.error}: ${data.detail}`.slice(0, 300) : (data.error || "Sorry, I didn't catch that.");
             // Errors are shown in the transcript, never spoken — Emysa's voice
@@ -1140,6 +1245,10 @@ document.querySelectorAll('.callChannelItem').forEach((btn) => {
   btn.addEventListener('click', () => {
     $('callChannelMenu').classList.add('hidden');
     const channel = btn.dataset.channel;
+    if (channel === 'emysa-live') {
+      openAssistantCallScreen();
+      return;
+    }
     if (channel === 'emysa') {
       $('emysaCallStatus').textContent = '';
       $('emysaCallDialog').showModal();
@@ -1147,6 +1256,10 @@ document.querySelectorAll('.callChannelItem').forEach((btn) => {
     }
     setCallChannel(channel);
   });
+});
+$('emysaLiveCallBtn')?.addEventListener('click', () => {
+  $('emysaCallDialog').close();
+  openAssistantCallScreen();
 });
 $('emysaCallForm').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -1268,7 +1381,8 @@ function renderMyCard() {
   const name = ($('profileEmailDisplay').textContent || 'You').trim() || 'You';
   $('myCardName').textContent = name;
   const avatarEl = $('myCardAvatar');
-  if (userAvatarUrl) avatarEl.innerHTML = `<img src="${userAvatarUrl}" alt="">`;
+  avatarEl.textContent = '';
+  if (userAvatarUrl) avatarEl.appendChild(createSafeAvatarImg(userAvatarUrl));
   else avatarEl.textContent = name[0].toUpperCase();
 }
 $('myCardRow').addEventListener('click', () => document.querySelector('[data-tab=profile]').click());
@@ -1509,52 +1623,102 @@ $('dialCallBtn').addEventListener('click', () => {
 
 // ---------- active call screen ----------
 let activeCallChannel = null;
+let activeCallScreenId = null;
+let activeCallPollInterval = null;
 let callTimerInterval = null;
 let callAiMuted = false;
 
+function applyCallStatusUpdate(callRow) {
+  if (!callRow) return;
+  if (Array.isArray(callRow.transcript)) {
+    renderTranscript(callRow.transcript);
+  }
+  const st = callRow.status;
+  if (st === 'queued') {
+    setCallStatePill('connecting', 'Starting call…');
+  } else if (st === 'ringing') {
+    setCallStatePill('connecting', 'Ringing…');
+  } else if (st === 'in_progress' || st === 'in-progress') {
+    if (callAiMuted) {
+      setCallStatePill('muted', 'Emysa muted');
+    } else {
+      const last = Array.isArray(callRow.transcript) && callRow.transcript.length
+        ? callRow.transcript[callRow.transcript.length - 1]
+        : null;
+      if (last && (last.speaker === 'ai' || last.speaker === 'assistant')) {
+        setCallStatePill('speaking', 'Emysa speaking…');
+      } else {
+        setCallStatePill('connected', 'Connected · Live');
+      }
+    }
+  } else if (['completed', 'failed', 'no_answer', 'busy', 'canceled'].includes(st)) {
+    setCallStatePill('ended', st === 'completed' ? 'Call ended' : `Call ${st.replace('_', ' ')}`);
+    clearActiveCall();
+    closeCallScreen();
+  }
+}
+
 function openCallScreen(callId, toNumber, contactName) {
-  $('callScreen').classList.remove('hidden');
+  const isSameCall = activeCallScreenId === callId && !$('callScreen').classList.contains('hidden');
+  activeCallScreenId = callId;
+  $('callScreen').classList.remove('hidden', 'captionsHidden');
   $('callScreen').classList.remove('assistantMode');
+  $('callFaceTimeBtn')?.classList.add('active');
   $('callAudioBtn').innerHTML = AUDIO_BTN_HTML;
   $('callFaceTimeBtn').onclick = () => {
-    alert('FaceTime video calls are a Pro feature — upgrade to unlock video.');
+    const hidden = $('callScreen').classList.toggle('captionsHidden');
+    $('callFaceTimeBtn').classList.toggle('active', !hidden);
   };
-  $('callAddBtn').onclick = () => {
-    alert("Adding another person to the call isn't available yet.");
-  };
+  $('callAddBtn').onclick = () => minimizeCallScreenToChat();
+  $('callMinimizeBtn').onclick = () => minimizeCallScreenToChat();
   $('callContactAvatar').style.display = '';
-  const displayName = contactName || toNumber;
-  $('callContactAvatar').textContent = (contactName ? contactName[0] : toNumber.replace(/[^0-9]/g, '').slice(-2)) || '?';
+  const displayName = contactName || toNumber || 'Caller';
+  $('callContactAvatar').textContent = (contactName ? contactName[0] : (toNumber || '').replace(/[^0-9]/g, '').slice(-2)) || '?';
   $('callTitleText').textContent = contactName === 'Emysa (callback to you)' ? 'Emysa · your phone' : `Emysa & ${displayName}`;
-  $('transcriptPanel').innerHTML = '';
-  $('waveRow').classList.remove('speaking');
-  callAiMuted = false;
-  $('callMuteBtn').classList.remove('active');
 
-  const startedAt = Date.now();
-  clearInterval(callTimerInterval);
-  callTimerInterval = setInterval(() => {
-    const secs = Math.floor((Date.now() - startedAt) / 1000);
-    const m = String(Math.floor(secs / 60)).padStart(2, '0');
-    const s = String(secs % 60).padStart(2, '0');
-    $('callTimer').textContent = `${m}:${s}`;
-  }, 1000);
+  if (!isSameCall) {
+    renderTranscript([]);
+    $('waveRow').classList.remove('speaking');
+    callAiMuted = false;
+    $('callMuteBtn').classList.remove('active');
+    setCallStatePill('connecting', 'Connecting…');
+
+    const startedAt = Date.now();
+    clearInterval(callTimerInterval);
+    callTimerInterval = setInterval(() => {
+      const secs = Math.floor((Date.now() - startedAt) / 1000);
+      const m = String(Math.floor(secs / 60)).padStart(2, '0');
+      const s = String(secs % 60).padStart(2, '0');
+      $('callTimer').textContent = `${m}:${s}`;
+    }, 1000);
+  }
 
   if (activeCallChannel) supabase.removeChannel(activeCallChannel);
   activeCallChannel = supabase
     .channel(`call-${callId}`)
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'calls', filter: `id=eq.${callId}` }, (payload) => {
-      renderTranscript(payload.new.transcript || []);
-      if (['completed', 'failed', 'no_answer'].includes(payload.new.status)) closeCallScreen();
+      applyCallStatusUpdate(payload.new);
     })
     .subscribe();
 
+  clearInterval(activeCallPollInterval);
+  const pollCallState = async () => {
+    if (activeCallScreenId !== callId) return;
+    const resp = await authedFetch(`/api/calls?action=get&callId=${encodeURIComponent(callId)}`).catch(() => null);
+    if (!resp?.ok || activeCallScreenId !== callId) return;
+    const { call } = await resp.json().catch(() => ({}));
+    if (call) applyCallStatusUpdate(call);
+  };
+  pollCallState();
+  activeCallPollInterval = setInterval(pollCallState, 3000);
+
   $('callEndBtn').onclick = async () => {
+    setCallStatePill('ended', 'Ending call…');
     await authedFetch('/api/calls?action=hangup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ callId }),
-    });
+    }).catch(() => {});
     clearActiveCall();
     closeCallScreen();
   };
@@ -1562,23 +1726,27 @@ function openCallScreen(callId, toNumber, contactName) {
   $('callMuteBtn').onclick = async () => {
     callAiMuted = !callAiMuted;
     $('callMuteBtn').classList.toggle('active', callAiMuted);
+    setCallStatePill(callAiMuted ? 'muted' : 'connected', callAiMuted ? 'Emysa muted' : 'Connected · Live');
     await authedFetch('/api/calls?action=mute', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ callId, muted: callAiMuted }),
-    });
+    }).catch(() => {});
   };
 
-  // Audio (speaker route) and Keypad (DTMF) aren't wired to anything real
-  // yet — this app doesn't currently pipe live audio to the browser, and
-  // sending in-call DTMF safely alongside the media stream needs more
-  // work. They're here for visual parity with the reference call screen.
   $('callAudioBtn').onclick = () => $('callAudioBtn').classList.toggle('active');
-  $('callKeypadBtn').onclick = () => alert('Keypad during a live AI call is not wired up yet.');
+  $('callKeypadBtn').onclick = () => {
+    $('dialStatus').textContent = '';
+    updateDialMatch();
+    $('keypadDialog').showModal();
+  };
 }
 
 function closeCallScreen() {
+  activeCallScreenId = null;
   clearInterval(callTimerInterval);
+  clearInterval(activeCallPollInterval);
+  activeCallPollInterval = null;
   if (activeCallChannel) { supabase.removeChannel(activeCallChannel); activeCallChannel = null; }
   $('callScreen').classList.add('hidden');
   loadCalls();
@@ -1586,17 +1754,37 @@ function closeCallScreen() {
 
 function renderTranscript(history) {
   const panel = $('transcriptPanel');
-  panel.innerHTML = '';
-  for (const line of history) {
+  if (!panel) return;
+  panel.textContent = '';
+  const items = Array.isArray(history) ? history : [];
+  if (items.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'transcriptEmptyHint';
+    empty.textContent = 'Live transcript will appear here as the conversation unfolds…';
+    panel.appendChild(empty);
+    $('waveRow')?.classList.remove('speaking');
+    return;
+  }
+  for (const line of items) {
+    const isAi = line?.speaker === 'ai' || line?.speaker === 'assistant' || line?.role === 'assistant';
+    const roleClass = isAi ? 'ai' : 'caller';
     const el = document.createElement('div');
-    el.className = `transcriptLine ${line.speaker}`;
-    const dot = line.speaker === 'ai' ? '<img src="icon-192.png" alt="">' : '';
-    el.innerHTML = `<div class="transcriptDot">${dot}</div><div class="transcriptBubble">${line.content}</div>`;
+    el.className = `transcriptLine ${roleClass}`;
+    const dot = document.createElement('div');
+    dot.className = 'transcriptDot';
+    if (isAi) {
+      dot.appendChild(createSafeAvatarImg('icon-192.png'));
+    }
+    const bubble = document.createElement('div');
+    bubble.className = 'transcriptBubble';
+    bubble.textContent = line?.content || line?.text || '';
+    el.append(dot, bubble);
     panel.appendChild(el);
   }
   panel.scrollTop = panel.scrollHeight;
-  const last = history[history.length - 1];
-  $('waveRow').classList.toggle('speaking', last?.speaker === 'ai');
+  const last = items[items.length - 1];
+  const lastIsAi = last?.speaker === 'ai' || last?.speaker === 'assistant' || last?.role === 'assistant';
+  $('waveRow')?.classList.toggle('speaking', !!lastIsAi);
 }
 
 // ---------- recent calls ----------
@@ -1713,8 +1901,33 @@ function openCallDetail(c, name, isKnown) {
   $('callDetailDuration').classList.toggle('hidden', !duration);
   $('callDetailScriptCard').classList.toggle('hidden', !c.script);
   $('callDetailScript').textContent = c.script || '';
-  $('callDetailSummaryCard').classList.toggle('hidden', !c.summary);
-  $('callDetailSummary').textContent = c.summary || '';
+  const summaryText = c.summary || c.outcome_summary || '';
+  $('callDetailSummaryCard').classList.toggle('hidden', !summaryText);
+  $('callDetailSummary').textContent = summaryText;
+  const transcriptCard = $('callDetailTranscriptCard');
+  const transcriptEl = $('callDetailTranscript');
+  if (transcriptCard && transcriptEl) {
+    transcriptEl.textContent = '';
+    const turns = Array.isArray(c.transcript) ? c.transcript : [];
+    transcriptCard.classList.remove('hidden');
+    if (turns.length > 0) {
+      for (const turn of turns) {
+        const row = document.createElement('div');
+        row.className = 'callDetailTurn';
+        const speakerLabel = document.createElement('strong');
+        const isAi = turn?.speaker === 'ai' || turn?.speaker === 'assistant' || turn?.role === 'assistant';
+        speakerLabel.textContent = isAi ? 'Emysa:' : `${name || 'Caller'}:`;
+        const textNode = document.createTextNode(turn?.content || turn?.text || '');
+        row.append(speakerLabel, textNode);
+        transcriptEl.appendChild(row);
+      }
+    } else {
+      const empty = document.createElement('div');
+      empty.className = 'callDetailTurn';
+      empty.textContent = 'Transcript unavailable for this call.';
+      transcriptEl.appendChild(empty);
+    }
+  }
   $('callDetailDialog').showModal();
 }
 
@@ -2028,32 +2241,147 @@ $('callAnsweringSaveBtn').addEventListener('click', async () => {
 });
 
 // ---------- Memories ----------
+let selectedMemoryType = '';
+const MEMORY_TYPE_LABEL = {
+  semantic: 'Fact',
+  episodic: 'Episode',
+  emotional: 'Relationship',
+  working: 'Working',
+};
+
 async function loadMemories() {
-  const resp = await authedFetch('/api/memories');
+  const qs = selectedMemoryType ? `?type=${encodeURIComponent(selectedMemoryType)}` : '';
+  const resp = await authedFetch(`/api/memories${qs}`);
   const list = $('memoriesList');
-  list.innerHTML = '';
+  list.textContent = '';
   if (!resp.ok) return;
-  const { memories } = await resp.json();
+  const { memories, emotionState } = await resp.json();
+
+  const moodBanner = $('memoryMoodBanner');
+  if (moodBanner) {
+    if (emotionState?.mood?.label) {
+      moodBanner.classList.remove('hidden');
+      moodBanner.textContent = '';
+      const labelSpan = document.createElement('span');
+      labelSpan.textContent = "Emysa's current state:";
+      const moodStrong = document.createElement('strong');
+      moodStrong.textContent = emotionState.mood.label.replace(/-/g, ' ');
+      moodBanner.append(labelSpan, moodStrong);
+    } else {
+      moodBanner.classList.add('hidden');
+    }
+  }
+
+  $('memoriesClearAllBtn')?.classList.toggle('hidden', !memories?.length);
+
   if (!memories?.length) {
-    list.innerHTML = `<div class="emptyState"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 21s-7-4.35-9.5-8.5C.7 9 2 5.5 5.5 4.7 8 4.1 10 5.3 12 7.5c2-2.2 4-3.4 6.5-2.8C22 5.5 23.3 9 21.5 12.5 19 16.65 12 21 12 21z"/></svg><div>Nothing yet — after a few calls, useful details Emysa picks up on will show up here.</div></div>`;
+    list.innerHTML = `<div class="emptyState"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 21s-7-4.35-9.5-8.5C.7 9 2 5.5 5.5 4.7 8 4.1 10 5.3 12 7.5c2-2.2 4-3.4 6.5-2.8C22 5.5 23.3 9 21.5 12.5 19 16.65 12 21 12 21z"/></svg><div>Nothing in this view yet — add a fact above or talk with Emysa and useful details will show up here.</div></div>`;
     return;
   }
   for (const m of memories) {
     const el = document.createElement('div');
     el.className = 'memoryCard';
-    const date = new Date(m.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' });
-    el.innerHTML = `
-      ${m.contactName ? `<div class="memoryContact">${escapeHtml(m.contactName)}</div>` : ''}
-      <div class="memoryContent">${escapeHtml(m.content)}</div>
-      <div class="memoryDate">${date}</div>
-      <button class="memoryDelete" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
-    el.querySelector('.memoryDelete').addEventListener('click', async () => {
+    const date = m.created_at ? new Date(m.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
+    const metaRow = document.createElement('div');
+    metaRow.className = 'memoryMetaRow';
+    const badge = document.createElement('span');
+    const memType = m.memory_type || 'semantic';
+    badge.className = 'memoryTypeBadge';
+    badge.dataset.type = memType;
+    badge.textContent = MEMORY_TYPE_LABEL[memType] || 'Fact';
+    metaRow.appendChild(badge);
+    if (m.contactName) {
+      const contactEl = document.createElement('div');
+      contactEl.className = 'memoryContact';
+      contactEl.textContent = m.contactName;
+      metaRow.appendChild(contactEl);
+    }
+    const contentEl = document.createElement('div');
+    contentEl.className = 'memoryContent';
+    contentEl.textContent = m.content || '';
+    const dateEl = document.createElement('div');
+    dateEl.className = 'memoryDate';
+    dateEl.textContent = date;
+
+    const actions = document.createElement('div');
+    actions.className = 'memoryCardActions';
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'memoryEditBtn';
+    editBtn.setAttribute('aria-label', 'Edit memory');
+    editBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" width="15" height="15"><path d="M4 20h4l10.5-10.5a2 2 0 0 0 0-2.83l-1.17-1.17a2 2 0 0 0-2.83 0L4 16v4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
+    editBtn.addEventListener('click', async () => {
+      const updated = prompt('Edit memory:', m.content || '');
+      if (!updated || !updated.trim() || updated.trim() === m.content) return;
+      const r = await authedFetch('/api/memories', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: m.id, content: updated.trim() }),
+      });
+      if (r.ok) loadMemories();
+    });
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'memoryDelete';
+    delBtn.setAttribute('aria-label', 'Delete');
+    delBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    delBtn.addEventListener('click', async () => {
       await authedFetch('/api/memories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id }) });
       loadMemories();
     });
+    actions.append(editBtn, delBtn);
+    el.append(metaRow, contentEl, dateEl, actions);
     list.appendChild(el);
   }
 }
+
+document.querySelectorAll('#memoryFilterRow .memoryFilterBtn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#memoryFilterRow .memoryFilterBtn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedMemoryType = btn.dataset.memoryType || '';
+    loadMemories();
+  });
+});
+
+$('memoryAddForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('memoryAddInput');
+  const typeSel = $('memoryAddType');
+  const statusEl = $('memoryAddStatus');
+  const content = input?.value?.trim();
+  if (!content) return;
+  $('memoryAddBtn').disabled = true;
+  if (statusEl) statusEl.textContent = 'Saving…';
+  try {
+    const resp = await authedFetch('/api/memories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, memoryType: typeSel?.value || 'semantic' }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (statusEl) statusEl.textContent = data.error || 'Could not save memory.';
+      return;
+    }
+    input.value = '';
+    if (statusEl) statusEl.textContent = '';
+    await loadMemories();
+  } finally {
+    $('memoryAddBtn').disabled = false;
+  }
+});
+
+$('memoriesClearAllBtn')?.addEventListener('click', async () => {
+  if (!confirm('Clear all saved memories? This cannot be undone.')) return;
+  await authedFetch('/api/memories?clearAll=true', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clearAll: true }),
+  });
+  loadMemories();
+});
 
 // ---------- Call Settings ----------
 async function loadCallSettings() {

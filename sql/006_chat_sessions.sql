@@ -6,7 +6,17 @@ create table if not exists chat_sessions (
   updated_at timestamptz not null default now()
 );
 
-alter table assistant_messages add column if not exists session_id uuid references chat_sessions(id) on delete cascade;
+-- Safe regardless of whether 006_chat_sessions.sql runs before or after 007_assistant.sql
+do $$
+begin
+  if exists (
+    select 1 from information_schema.tables
+    where table_schema = 'public' and table_name = 'assistant_messages'
+  ) then
+    alter table assistant_messages add column if not exists session_id uuid references chat_sessions(id) on delete cascade;
+  end if;
+end $$;
+
 alter table calls add column if not exists session_id uuid references chat_sessions(id) on delete set null;
 
 alter table chat_sessions enable row level security;
