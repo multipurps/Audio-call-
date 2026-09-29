@@ -37,7 +37,7 @@ the Vercel functions, or the MadelineProto integration was modified.
   │  AcafBridge ── TelegramFrameSerializer ── Pipecat Pipeline                      │
   │    handshake, heartbeat,      ACAF ◄─► Pipecat frames      transport.input()    │
   │    backpressure, session                                   → VAD + turn detect  │
-  │    lifecycle, teardown                                     → STT (Groq Whisper)│
+  │    lifecycle, teardown                                     → STT (OpenAI)      │
   │                                                            → context + memory  │
   │                                                            → LLM (replaceable) │
   │                                                            → Fish Audio TTS    │
@@ -111,7 +111,7 @@ Runtime (`pipecat-service/requirements.txt`), all pinned:
 
 | Package | Version | Why |
 | --- | --- | --- |
-| `pipecat-ai[fish,groq,openai,silero,websocket]` | `1.11.0` | The pipeline. Pinned exactly — Pipecat is pre-2.0 and its APIs have moved between releases. |
+| `pipecat-ai[fish,openai,silero,websocket]` | `1.11.0` | The pipeline. Pinned exactly — Pipecat is pre-2.0 and its APIs have moved between releases. The `groq` extra was dropped when Groq support was removed. |
 | `fastapi` | `0.141.1` | ACAF WebSocket + health endpoints. |
 | `uvicorn[standard]` | `0.53.0` | ASGI server. |
 | `loguru` | `0.7.3` | Logging (Pipecat uses it too). |
@@ -133,13 +133,16 @@ all codec work belongs on the PHP side, which already has it.
 | --- | --- | --- | --- |
 | `PORT` | injected by Render | `8080` | |
 | `ASSISTANT_BRIDGE_SECRET` | **yes** | — | Shared with mp-relay. Min 16 chars. Generate: `python -c "import secrets;print(secrets.token_urlsafe(32))"` |
-| `GROQ_API_KEY` | yes (if STT or LLM is groq) | — | |
+| `OPENAI_API_KEY` (or `LUNA_API_KEY`) | **yes** | — | Covers STT and the LLM. Server-side only; never sent to the browser. There is no `GROQ_API_KEY` any more — Groq support was removed. |
 | `FISH_API_KEY` | yes (if TTS is fish) | — | Server-side only; never sent to the browser. |
-| `ASSISTANT_STT_PROVIDER` | no | `groq` | `groq` \| `mock` |
-| `ASSISTANT_LLM_PROVIDER` | no | `groq` | `groq` \| `openai` \| `mock` |
+| `ASSISTANT_STT_PROVIDER` | no | `openai` | `openai` \| `mock` (Groq removed) |
+| `ASSISTANT_LLM_PROVIDER` | no | `openai` | `luna` \| `openai` \| `mock` (both target `api.openai.com`) |
 | `ASSISTANT_TTS_PROVIDER` | no | `fish` | `fish` \| `mock` |
-| `ASSISTANT_STT_MODEL` | no | `whisper-large-v3-turbo` | |
-| `ASSISTANT_LLM_MODEL` | no | `llama-3.3-70b-versatile` | |
+| `ASSISTANT_STT_MODEL` | no | `gpt-4o-mini-transcribe` | `whisper-1` is the manual fallback. |
+| `ASSISTANT_LLM_MODEL` | no | `gpt-6-luna` | |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | recommended | — | Call-context resolver (objective/memories/prior summaries in the prompt), live transcript writes, status transitions. Without them the call still runs, with the default prompt and no transcript persistence. |
+| `ASSISTANT_CONTEXT_TIMEOUT_SECS` | no | `20` | How long to wait at call start for the app's `calls` row (written by Vercel just before the carrier dials). |
+| `PUBLIC_APP_URL` | recommended | — | Lets the service report a call's end through `/api/social-calling?action=relay-call-status` when the carrier's own callback never arrived — that path triggers the shared summary. |
 | `ASSISTANT_LLM_BASE_URL` | no | provider default | Override for a self-hosted OpenAI-compatible endpoint. |
 | `ASSISTANT_LLM_TEMPERATURE` | no | `0.7` | |
 | `ASSISTANT_LLM_MAX_TOKENS` | no | `200` | Keeps replies short. |
@@ -186,7 +189,8 @@ asserts this.
 4. Plan: **must be always-on.** A free instance spins down; a cold start during
    a live call drops the call.
 5. Set the env vars from §4. At minimum `ASSISTANT_BRIDGE_SECRET`,
-   `GROQ_API_KEY`, `FISH_API_KEY`.
+   `OPENAI_API_KEY` (or `LUNA_API_KEY`), `FISH_API_KEY`; add the Supabase
+   pair + `PUBLIC_APP_URL` for live transcripts and call summaries.
 6. Deploy, then confirm `GET /readyz` returns `{"status":"ready", ...}`.
 
 Or use the Blueprint: **New → Blueprint**, which reads
@@ -311,10 +315,12 @@ dependency.)
    that breaks telephony frame cadence. `app/audio.py`'s deterministic
    resampler is used instead. Documented in `app/serializer.py`.
 
-5. **No partial STT.** Your chosen default, Groq Whisper, is batch-only and
-   cannot emit partial transcripts. The brief asked for partials "where
-   supported"; this provider does not support them. The provider is
-   env-swappable, so adding a streaming STT is a config-plus-adapter change.
+5. **No partial STT.** The default (`gpt-4o-mini-transcribe` over the
+   REST Audio API) is batch-only: one request per VAD-terminated utterance,
+   so it cannot emit partial transcripts mid-utterance. The brief asked for
+   partials "where supported"; this provider does not support them. A
+   streaming STT (e.g. the OpenAI Realtime transcription WS) would be a
+   config-plus-adapter change — `build_stt()` is the only seam.
 
 6. **Twilio and Telegram run on two different pipelines today.** Twilio still
    runs through Patter (`server/patter-relay.js`), untouched. Pipecat ships a

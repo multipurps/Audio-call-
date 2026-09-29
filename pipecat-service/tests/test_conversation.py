@@ -100,7 +100,7 @@ def make_conversation(greeting="Hello from test"):
     settings = load_settings(
         {
             "ASSISTANT_BRIDGE_SECRET": "x" * 32,
-            "GROQ_API_KEY": "gk_test_key_value_123456",
+            "OPENAI_API_KEY": "ok_test_key_value_123456",
             "FISH_API_KEY": "fk_test_key_value_123456",
             "ASSISTANT_GREETING": greeting,
         }

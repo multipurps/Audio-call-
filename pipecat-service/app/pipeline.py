@@ -14,9 +14,9 @@ The stage order the brief specifies:
 which maps onto Pipecat's own composition as:
 
     transport.input()          # ACAF frames -> InputAudioRawFrame
-      -> stt                   # Groq Whisper (or mock)
+      -> stt                   # OpenAI transcription (or mock)
       -> context.user()        # turn aggregation + VAD-driven endpointing
-      -> llm                   # Groq / OpenAI-compatible (or mock)
+      -> llm                   # OpenAI Chat Completions (or mock)
       -> tts                   # Fish Audio streaming (or mock)
       -> transport.output()    # OutputAudioRawFrame -> ACAF frames
       -> context.assistant()   # closes the turn, records the reply
@@ -119,6 +119,7 @@ def build_pipeline(
     extra_context: str | None = None,
     services: tuple[Any, Any, Any, Any] | None = None,
     on_end_call: Any = None,
+    transcript: Any = None,
 ) -> tuple[Any, Any]:
     """Assemble the real Pipecat pipeline.
 
@@ -128,7 +129,14 @@ def build_pipeline(
     with no tools configured the LLM simply has none, which is what the
     brief's "tool calls only when tools are configured" requires.
     """
-    from pipecat.frames.frames import LLMTextFrame, TranscriptionFrame
+    from pipecat.frames.frames import (
+        InterruptionFrame,
+        LLMFullResponseEndFrame,
+        LLMFullResponseStartFrame,
+        LLMTextFrame,
+        TTSSpeakFrame,
+        TranscriptionFrame,
+    )
     from pipecat.pipeline.pipeline import Pipeline
     from pipecat.processors.aggregators.llm_response_universal import (
         LLMContextAggregatorPair,
@@ -148,6 +156,54 @@ def build_pipeline(
 
     emotion_state = EmotionState()
     last_caller_text: dict[str, str] = {"text": ""}
+
+    class _TranscriptNote(FrameProcessor):
+        """Records one side of the conversation into the live transcript.
+
+        Two instances share the call's `TranscriptLog`: one after the
+        appraisal stage for the caller's `TranscriptionFrame`s, one after
+        `[[END_CALL]]` filtering for what Emysa actually says. The AI side
+        buffers between LLM response start/end so the persisted turn is the
+        full sentence rather than streaming chunks, and an `InterruptionFrame`
+        (barge-in) flushes the partial as `interrupted` instead of dropping
+        it. `transcript=None` (standalone/mock runs) makes this a pass-through.
+        """
+
+        def __init__(self, speaker: str) -> None:
+            super().__init__(name=f"TranscriptNote[{speaker}]")
+            self._speaker = speaker
+            self._buffer: list[str] = []
+
+        def _note(self, text: str, *, interrupted: bool = False) -> None:
+            if transcript is None:
+                return
+            transcript.note(self._speaker, text, interrupted=interrupted)
+
+        async def process_frame(self, frame: Any, direction: FrameDirection) -> None:
+            await super().process_frame(frame, direction)
+            if isinstance(frame, InterruptionFrame):
+                if self._buffer:
+                    self._note("".join(self._buffer), interrupted=True)
+                    self._buffer = []
+                await self.push_frame(frame, direction)
+                return
+            if self._speaker == "contact":
+                if isinstance(frame, TranscriptionFrame) and getattr(frame, "text", None):
+                    self._note(str(frame.text))
+            else:
+                if isinstance(frame, TTSSpeakFrame) and getattr(frame, "text", None):
+                    # Directly queued speech (the greeting on answer, and any
+                    # future direct-to-TTS path): spoken verbatim, so it
+                    # belongs in the transcript too.
+                    self._note(str(frame.text))
+                elif isinstance(frame, LLMFullResponseStartFrame):
+                    self._buffer = []
+                elif isinstance(frame, LLMTextFrame) and getattr(frame, "text", None):
+                    self._buffer.append(str(frame.text))
+                elif isinstance(frame, LLMFullResponseEndFrame) and self._buffer:
+                    self._note("".join(self._buffer))
+                    self._buffer = []
+            await self.push_frame(frame, direction)
 
     class _TurnAppraisalProcessor(FrameProcessor):
         """Updates in-memory PAD emotional state on each caller transcription."""
@@ -203,9 +259,11 @@ def build_pipeline(
             transport.input(),
             stt,
             _TurnAppraisalProcessor(),
+            _TranscriptNote("contact"),
             aggregators.user(),
             llm,
             _ResponseTagFilter(),
+            _TranscriptNote("ai"),
             tts,
             transport.output(),
             aggregators.assistant(),

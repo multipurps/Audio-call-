@@ -113,7 +113,7 @@ test('the assistant chat path attaches the AI and tells the user when it cannot'
   f.db.tables.contacts = [{ id: 'c1', user_id: 'user-1', name: 'Alex', phone_number: '+1 (415) 555-2671' }];
   const wrapped = f.fetcher;
   f.fetcher = async (url, options) => {
-    if (url.includes('groq.com')) {
+    if (url.includes('api.openai.com')) {
       const body = JSON.parse(options.body);
       const intent = { action: 'call', contactName: 'Alex', objective: 'Confirm lunch at noon.', channel: 'whatsapp' };
       return { ok: true, json: async () => ({ choices: [{ message: { content: body.response_format ? JSON.stringify(intent) : 'ok' } }] }) };

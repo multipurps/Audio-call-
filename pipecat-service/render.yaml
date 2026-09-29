@@ -40,16 +40,22 @@ services:
       - key: ASSISTANT_BRIDGE_SECRET
         sync: false          # shared with mp-relay; generate with:
                              # python -c "import secrets;print(secrets.token_urlsafe(32))"
-      - key: GROQ_API_KEY
+      # OpenAI covers STT (gpt-4o-mini-transcribe) and the LLM (gpt-6-luna).
+      # LUNA_API_KEY may be set instead of / alongside OPENAI_API_KEY when
+      # the operator keeps the Luna key separate; either satisfies the
+      # validation. Groq was removed entirely — do not re-add GROQ_API_KEY.
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: LUNA_API_KEY
         sync: false
       - key: FISH_API_KEY
         sync: false
 
       # --- Non-secret configuration ---------------------------------------
       - key: ASSISTANT_STT_PROVIDER
-        value: groq
+        value: openai
       - key: ASSISTANT_LLM_PROVIDER
-        value: groq
+        value: luna
       - key: ASSISTANT_TTS_PROVIDER
         value: fish
       - key: ASSISTANT_BRIDGE_SAMPLE_RATE
@@ -62,11 +68,18 @@ services:
         value: "1800"
       - key: PYTHON_VERSION
         value: "3.11.9"
-      # Persistent memory is OFF by default. Turning it on stores user data
-      # across calls, so it is a deliberate opt-in:
-      #   - key: ASSISTANT_ENABLE_PERSISTENT_MEMORY
-      #     value: "true"
+      # Supabase creds power the call-context resolver (objective/person
+      # prompt context), live transcript writes, and memory retrieval. Memory
+      # RETRIEVAL additionally requires the opt-in flag below (storing user
+      # data across calls is deliberate); the resolver itself only needs the
+      # two creds. PUBLIC_APP_URL lets the service report a call's end back
+      # through /api/social-calling when the carrier's own callback never
+      # arrived, which is what triggers the shared summary for such calls:
       #   - key: SUPABASE_URL
       #     sync: false
       #   - key: SUPABASE_SERVICE_ROLE_KEY
       #     sync: false
+      #   - key: ASSISTANT_ENABLE_PERSISTENT_MEMORY
+      #     value: "true"
+      #   - key: PUBLIC_APP_URL
+      #     value: https://your-app.vercel.app

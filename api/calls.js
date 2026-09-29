@@ -2,6 +2,7 @@ import { confirmCallPlan } from '../lib/callPlans.js';
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { wacallsHangup } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
+import { maybeGenerateCallSummary } from '../lib/callSession.js';
 
 export default async function handler(req, res) {
   const supabase = getServiceClient();
@@ -35,6 +36,15 @@ async function getCall(req, res, supabase, userId) {
   return res.status(200).json({ call });
 }
 
+
+// One place where a hangup finishes a call: terminal status + ended_at, then
+// the shared summary/memory pass. maybeGenerateCallSummary is idempotent, so
+// racing the provider's own end-of-call callback costs at most one LLM call.
+async function completeCall(supabase, callId) {
+  await supabase.from('calls').update({ status: 'completed', ended_at: new Date().toISOString() }).eq('id', callId);
+  await maybeGenerateCallSummary(supabase, callId);
+}
+
 async function hangupCall(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { callId } = req.body || {};
@@ -59,7 +69,7 @@ async function hangupCall(req, res, supabase, userId) {
         await supabase.from('social_calls').update({ status: 'completed', ended_at: new Date().toISOString() }).eq('id', call.platform_call_id).eq('user_id', userId);
       } catch {}
     }
-    await supabase.from('calls').update({ status: 'completed' }).eq('id', callId);
+    await completeCall(supabase, callId);
     return res.status(200).json({ ok: true });
   }
 
@@ -72,12 +82,12 @@ async function hangupCall(req, res, supabase, userId) {
         await supabase.from('social_calls').update({ status: 'completed', ended_at: new Date().toISOString() }).eq('id', call.platform_call_id).eq('user_id', userId);
       } catch {}
     }
-    await supabase.from('calls').update({ status: 'completed' }).eq('id', callId);
+    await completeCall(supabase, callId);
     return res.status(200).json({ ok: true });
   }
 
   if (call.platform === 'in_app' || (!call.twilio_call_sid && call.platform)) {
-    await supabase.from('calls').update({ status: 'completed' }).eq('id', callId);
+    await completeCall(supabase, callId);
     return res.status(200).json({ ok: true });
   }
 
@@ -100,7 +110,7 @@ async function hangupCall(req, res, supabase, userId) {
     return res.status(502).json({ error: 'Twilio could not end the call', detail });
   }
 
-  await supabase.from('calls').update({ status: 'completed' }).eq('id', callId);
+  await completeCall(supabase, callId);
   return res.status(200).json({ ok: true });
 }
 

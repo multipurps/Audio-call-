@@ -6,6 +6,8 @@ import { prepareTurnContext, consolidateAndStoreMemories, inferMemoryType } from
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { wacallsPlaceAICall } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
+import { createCallRecord, markCallPlaced, markCallFailed, findDuplicateActiveCall } from '../lib/callSession.js';
+import { transcribeAudioBuffer, resolveSttApiKey } from '../lib/sttClient.js';
 
 
 
@@ -19,11 +21,11 @@ import { mpRelayRequest } from '../lib/mpRelayClient.js';
 // Conversations are organized into chat_sessions ("Saved Chats") so the
 // user can keep separate named threads instead of one endless conversation.
 //
-// Intent parsing (action=send) uses fal.ai's OpenRouter-compatible chat
-// completions proxy with openai/gpt-4o-mini — not Groq. Groq's
-// llama-3.3-70b-versatile (used here until now) was decommissioned; every
-// call to it now fails with model_decommissioned. Voice-input transcription
-// (action=transcribe) still uses Groq Whisper, which is unaffected.
+// Intent parsing (action=send) and voice-input transcription
+// (action=transcribe) both use OpenAI: GPT Luna (`gpt-6-luna`) for the
+// conversation, `gpt-4o-mini-transcribe` on /v1/audio/transcriptions for
+// speech. Groq was removed entirely — the model this app used there was
+// decommissioned, and no path may silently fall back to it.
 export default async function handler(req, res) {
   const supabase = getServiceClient();
   const userId = await getAuthedUserId(req, supabase);
@@ -241,13 +243,9 @@ async function insertMessage(supabase, userId, sessionId, role, content, callId 
 }
 
 // Handles a photo sent from the call screen's "More" menu (Camera/Photos).
-// Uses Groq's qwen/qwen3.8-27b, a vision-capable model on the same free
-// tier already used for Whisper transcription in this file - no separate
-// paid account needed for this feature.
-// (Note: a previous change here briefly swapped this to 'qwen/qwen3-32b',
-// on the wrong assumption that qwen3.8-27b didn't exist. It does - that
-// was a bad fix and has been reverted. If Groq requests are still failing,
-// the cause is something else; see the richer error surfaced below.)
+// Goes through the same LLM client as text turns: GPT Luna (`gpt-6-luna`,
+// text+image input, verified in OpenAI's model catalog) with the optional
+// fal OpenRouter fallback — no separate vision provider.
 async function sendImage(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { imageBase64, mimeType, caption, sessionId: incomingSessionId, source } = req.body || {};
@@ -424,7 +422,7 @@ async function sendMessage(req, res, supabase, userId) {
       intent = jsonMatch ? JSON.parse(jsonMatch[0]) : { action: 'reply', reply: rawContent.trim() };
     }
   } catch (err) {
-    // Groq's strict JSON-mode validator sometimes rejects a perfectly good
+    // Strict JSON-mode validators sometimes reject a perfectly good
     // conversational reply just because the model didn't wrap it in our
     // schema - but the actual text it tried to say is right there in the
     // error payload's failed_generation field. Use it instead of throwing
@@ -564,23 +562,44 @@ async function sendMessage(req, res, supabase, userId) {
       // already get - the frontend only needs a callId + toNumber to open
       // it (see openCallFromMessage/trackActiveCall in app.js), and doesn't
       // care which platform placed the call.
-      const recordSocialCall = async (status, platformCallId) => {
-        await supabase.from('social_calls').insert({ user_id: userId, platform: callChannel, peer_identifier: digitsOnly, status })
+      //
+      // The row is created BEFORE dialing (status 'queued') so the assistant
+      // pipeline can resolve it the instant the provider connects, and the
+      // user's own instructions are preserved verbatim for that pipeline.
+      const createSocialRow = async () => {
+        await supabase.from('social_calls').insert({ user_id: userId, platform: callChannel, peer_identifier: digitsOnly, status: 'queued' })
           .then(({ error }) => { if (error) console.error('social_calls insert failed:', error.message); });
-        const { data: callRow, error: callErr } = await supabase.from('calls').insert({
-          user_id: userId,
-          contact_id: contact?.id || null,
-          to_number: digitsOnly,
-          objective,
+        // Throws on failure — a call we cannot track must not be dialled.
+        return createCallRecord(supabase, userId, {
           platform: callChannel,
-          session_id: sessionId,
-          platform_call_id: platformCallId || null,
-          status,
-        }).select().single();
-        if (callErr) console.error('calls insert failed:', callErr.message);
-        return callRow;
+          toNumber: digitsOnly,
+          objective,
+          instructions: text.trim(),
+          contactId: contact?.id || null,
+          sessionId,
+        });
+      };
+      const markSocialRowFailed = async (callRow) => {
+        if (!callRow) return;
+        await markCallFailed(supabase, callRow.id);
+        await supabase.from('social_calls')
+          .update({ status: 'failed' })
+          .eq('user_id', userId)
+          .eq('platform', callChannel)
+          .eq('peer_identifier', digitsOnly)
+          .eq('status', 'queued');
       };
       const verb = intent.action === 'retry' ? 'again now' : 'now';
+
+      // A second press while the first attempt is still ringing must not
+      // dial again — surface the live call instead.
+      const duplicate = await findDuplicateActiveCall(supabase, userId, callChannel, digitsOnly);
+      if (duplicate) {
+        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I'm already calling ${label} on ${channelName}.`, duplicate.id, msgSource));
+        return respond({ channelUsed: callChannel, callId: duplicate.id, toNumber: digitsOnly, contactName: contact?.name || null });
+      }
+
+      const callRow = await createSocialRow();
       try {
         let platformCallId = null;
         if (callChannel === 'whatsapp') {
@@ -591,6 +610,11 @@ async function sendMessage(req, res, supabase, userId) {
           // this throws (after hanging up) so the user is told the truth.
           const placed = await wacallsPlaceAICall(userId, waRow.wacalls_session_id, digitsOnly, {
             appSessionId: sessionId, contactName: contact?.name || null,
+            // Persist the provider id BEFORE the assistant bridge dials in.
+            onCallStarted: async ({ callId }) => {
+              platformCallId = callId;
+              await markCallPlaced(supabase, callRow.id, { platformCallId: callId });
+            },
           });
           platformCallId = placed.callId;
         } else {
@@ -602,6 +626,7 @@ async function sendMessage(req, res, supabase, userId) {
           try {
             const result = await mpRelayRequest('/calls', { method: 'POST', body: { userId, to: digitsOnly, sessionId, contactName: contact?.name || null } });
             platformCallId = result?.callId || null;
+            await markCallPlaced(supabase, callRow.id, { platformCallId });
           } catch (err) {
             if (err.statusCode === 404) throw new Error("the Telegram call service (mp-relay) doesn't have call support deployed yet.");
             if (err.statusCode === 401) {
@@ -615,12 +640,13 @@ async function sendMessage(req, res, supabase, userId) {
             throw err;
           }
         }
-        const callRow = await recordSocialCall('ringing', platformCallId);
-        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `Calling ${label} on ${channelName} ${verb}.`, null, msgSource));
-        return respond({ channelUsed: callChannel, callId: callRow?.id || null, toNumber: digitsOnly, contactName: contact?.name || null });
+        await supabase.from('social_calls').update({ status: 'ringing' })
+          .eq('user_id', userId).eq('platform', callChannel).eq('peer_identifier', digitsOnly).eq('status', 'queued');
+        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `Calling ${label} on ${channelName} ${verb}.`, callRow.id, msgSource));
+        return respond({ channelUsed: callChannel, callId: callRow.id, toNumber: digitsOnly, contactName: contact?.name || null });
       } catch (err) {
-        await recordSocialCall('failed', null);
-        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${label} on ${channelName}: ${err.message}`, null, msgSource));
+        await markSocialRowFailed(callRow);
+        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${label} on ${channelName}: ${err.message}`, callRow?.id || null, msgSource));
         return respond({ channelUsed: callChannel });
       }
     }
@@ -730,33 +756,26 @@ async function logCallSummary(req, res, supabase, userId) {
 
 async function transcribeAudio(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const groqKey = process.env.GROQ_API_KEY;
-  if (!groqKey) return res.status(500).json({ error: 'Voice input not configured (missing GROQ_API_KEY)' });
+  if (!resolveSttApiKey(process.env)) return res.status(500).json({ error: 'Voice input not configured (missing OPENAI_API_KEY)' });
 
   const { audioBase64, mimeType } = req.body || {};
   if (!audioBase64) return res.status(400).json({ error: 'audioBase64 required' });
 
   try {
     const audioBytes = Buffer.from(audioBase64, 'base64');
-    const form = new FormData();
-    form.append('model', 'whisper-large-v3-turbo');
     const ext = (mimeType || 'audio/webm').split('/')[1]?.split(';')[0] || 'webm';
-    form.append('file', new Blob([audioBytes], { type: mimeType || 'audio/webm' }), `voice.${ext}`);
-
-    const resp = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${groqKey}` },
-      body: form,
+    const result = await transcribeAudioBuffer({
+      bytes: audioBytes,
+      filename: `voice.${ext}`,
+      mimeType: mimeType || 'audio/webm',
     });
-    if (!resp.ok) {
-      const detail = await resp.text().catch(() => '');
-      console.error(`transcribeAudio: Groq Whisper rejected the request (status ${resp.status}):`, detail.slice(0, 500));
-      return res.status(502).json({ error: 'Transcription failed', detail });
+    if (!result.ok) {
+      console.error(`transcribeAudio: OpenAI transcription rejected (status ${result.status}):`, result.error);
+      return res.status(502).json({ error: 'Transcription failed', detail: result.error });
     }
-    const data = await resp.json();
-    return res.status(200).json({ text: data.text || '' });
+    return res.status(200).json({ text: result.text });
   } catch (err) {
-    console.error('transcribeAudio: request to Groq threw:', err);
+    console.error('transcribeAudio: request to OpenAI threw:', err);
     return res.status(500).json({ error: err.message || String(err) });
   }
 }

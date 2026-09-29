@@ -10,8 +10,10 @@ Rules this module enforces, all of which come from the brief:
   * No secret is ever defaulted to a real value. There is no fallback API key
     anywhere in this file, so a misconfigured deploy fails closed.
   * The env var names reuse the ones this repo already uses where one exists
-    (`FISH_API_KEY`, `GROQ_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`)
-    rather than introducing a second name for the same credential.
+    (`FISH_API_KEY`, `OPENAI_API_KEY`, `LUNA_API_KEY`, `SUPABASE_URL`,
+    `SUPABASE_SERVICE_ROLE_KEY`) rather than introducing a second name for the
+    same credential. Groq support was removed entirely; there is deliberately
+    no `GROQ_API_KEY` handling anywhere in this service.
 """
 
 from __future__ import annotations
@@ -26,26 +28,29 @@ from typing import Mapping
 # actually exists in app/providers.py -- this list is not aspirational.
 # --------------------------------------------------------------------------
 
-STT_PROVIDERS = ("groq", "mock")
-LLM_PROVIDERS = ("luna", "groq", "openai", "mock")
+STT_PROVIDERS = ("openai", "mock")
+LLM_PROVIDERS = ("luna", "openai", "mock")
 TTS_PROVIDERS = ("fish", "mock")
 
-DEFAULT_STT_PROVIDER = "groq"
-DEFAULT_LLM_PROVIDER = "groq"
+DEFAULT_STT_PROVIDER = "openai"
+DEFAULT_LLM_PROVIDER = "openai"
 DEFAULT_TTS_PROVIDER = "fish"
 
-#: Groq and GPT Luna are OpenAI-compatible, which is why the same OpenAI-compatible
-#: LLM adapter serves "luna", "groq", and "openai" providers -- only base_url,
-#: model, and the key differ.
+#: "luna" and "openai" both resolve to OpenAI's Chat Completions API -- only
+#: the model and which key the operator prefers differ. (Groq used to be a
+#: third entry here; it was removed along with the rest of the Groq support.)
 OPENAI_COMPATIBLE_BASE_URLS = {
     "luna": "https://api.openai.com/v1",
-    "groq": "https://api.groq.com/openai/v1",
     "openai": "https://api.openai.com/v1",
 }
 
-DEFAULT_STT_MODEL = "whisper-large-v3-turbo"
-DEFAULT_LLM_MODEL = "llama-3.3-70b-versatile"
-DEFAULT_LUNA_MODEL = "gpt-6-luna"
+#: Verified OpenAI model ids (https://developers.openai.com/api/docs/models):
+#: gpt-4o-mini-transcribe is OpenAI's current speech-to-text model with a
+#: better WER than whisper-1 at ~$0.003/min of audio. whisper-1 remains a
+#: manual fallback via ASSISTANT_STT_MODEL=whisper-1 if ever needed.
+#: gpt-6-luna is OpenAI's current general-purpose chat model.
+DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe"
+DEFAULT_LLM_MODEL = "gpt-6-luna"
 
 
 class ConfigError(RuntimeError):
@@ -143,7 +148,6 @@ class Settings:
     tts_model: str | None = None
 
     # -- credentials -----------------------------------------------------
-    groq_api_key: str | None = None
     openai_api_key: str | None = None
     luna_api_key: str | None = None
     fish_api_key: str | None = None
@@ -164,6 +168,19 @@ class Settings:
     supabase_url: str | None = None
     supabase_service_role_key: str | None = None
 
+    # -- app-database integration (call context + live transcript) --------
+    #: How long to wait for the app's `calls` row to appear at call start
+    #: (Vercel writes it just before the carrier dials). Bounded so a lost
+    #: row delays the greeting by seconds, not minutes.
+    context_timeout_secs: float = 20.0
+    #: Public base URL of the app (Vercel) — used to report a call's end
+    #: back through /api/social-calling so the shared summary runs when the
+    #: carrier's own outcome callback never arrived. Optional: without it,
+    #: end-of-call falls back to a direct status write (no summary trigger).
+    public_app_url: str | None = None
+    #: Noise-guidance prompt for the transcription API (optional).
+    stt_prompt: str | None = None
+
     # -- testing ---------------------------------------------------------
     #: Runs the whole service with no network calls to any provider.
     mock_mode: bool = False
@@ -179,7 +196,6 @@ class Settings:
         """
         values = (
             self.bridge_secret,
-            self.groq_api_key,
             self.openai_api_key,
             self.luna_api_key,
             self.fish_api_key,
@@ -244,22 +260,20 @@ class Settings:
                 "python -c \"import secrets;print(secrets.token_urlsafe(32))\""
             )
 
-        if self.stt_provider == "groq" and not self.groq_api_key:
+        if self.stt_provider == "openai" and not (
+            self.openai_api_key or self.luna_api_key
+        ):
             raise ConfigError(
-                "GROQ_API_KEY is required when ASSISTANT_STT_PROVIDER=groq"
+                "OPENAI_API_KEY (or LUNA_API_KEY) is required when "
+                "ASSISTANT_STT_PROVIDER=openai. Groq STT was removed; there "
+                "is no other provider to fall back to."
             )
-        if self.llm_provider == "groq" and not self.groq_api_key:
+        if self.llm_provider in ("openai", "luna") and not (
+            self.luna_api_key or self.openai_api_key
+        ):
             raise ConfigError(
-                "GROQ_API_KEY is required when ASSISTANT_LLM_PROVIDER=groq. "
-                "Set ASSISTANT_LLM_PROVIDER=openai to use OPENAI_API_KEY instead."
-            )
-        if self.llm_provider == "openai" and not self.openai_api_key:
-            raise ConfigError(
-                "OPENAI_API_KEY is required when ASSISTANT_LLM_PROVIDER=openai"
-            )
-        if self.llm_provider == "luna" and not (self.luna_api_key or self.openai_api_key):
-            raise ConfigError(
-                "LUNA_API_KEY or OPENAI_API_KEY is required when ASSISTANT_LLM_PROVIDER=luna"
+                f"LUNA_API_KEY or OPENAI_API_KEY is required when "
+                f"ASSISTANT_LLM_PROVIDER={self.llm_provider}"
             )
         if self.tts_provider == "fish" and not self.fish_api_key:
             raise ConfigError(
@@ -291,10 +305,11 @@ class Settings:
             "ttsProvider": self.tts_provider,
             "ttsVoiceId": self.tts_voice_id or "<default>",
             "fishKey": "<set>" if self.fish_api_key else "<unset>",
-            "groqKey": "<set>" if self.groq_api_key else "<unset>",
             "openaiKey": "<set>" if self.openai_api_key else "<unset>",
             "lunaKey": "<set>" if self.luna_api_key else "<unset>",
             "persistentMemory": self.enable_persistent_memory,
+            "contextTimeoutSecs": self.context_timeout_secs,
+            "publicAppUrl": bool(self.public_app_url),
             "mockMode": self.mock_mode,
         }
 
@@ -310,8 +325,7 @@ class Settings:
     def resolved_llm_model(self) -> str:
         if self.llm_model:
             return self.llm_model
-        if self.llm_provider == "luna":
-            return DEFAULT_LUNA_MODEL
+        # luna and openai both run on OpenAI; the default model is the same.
         return DEFAULT_LLM_MODEL
 
     def resolved_llm_api_key(self) -> str:
@@ -319,7 +333,7 @@ class Settings:
             return self.luna_api_key or self.openai_api_key or ""
         if self.llm_provider == "openai":
             return self.openai_api_key or self.luna_api_key or ""
-        return self.groq_api_key or ""
+        return ""
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -359,7 +373,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         or DEFAULT_TTS_PROVIDER,
         tts_voice_id=_env(env, "ASSISTANT_TTS_VOICE_ID"),
         tts_model=_env(env, "ASSISTANT_TTS_MODEL"),
-        groq_api_key=_env(env, "GROQ_API_KEY"),
         openai_api_key=_env(env, "OPENAI_API_KEY"),
         luna_api_key=luna_key,
         fish_api_key=_env(env, "FISH_API_KEY"),
@@ -372,6 +385,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ),
         supabase_url=_env(env, "SUPABASE_URL"),
         supabase_service_role_key=_env(env, "SUPABASE_SERVICE_ROLE_KEY"),
+        context_timeout_secs=_env_float(env, "ASSISTANT_CONTEXT_TIMEOUT_SECS", 20.0, minimum=1.0),
+        public_app_url=_env(env, "PUBLIC_APP_URL"),
+        stt_prompt=_env(env, "ASSISTANT_STT_PROMPT"),
         mock_mode=mock_mode,
     )
 

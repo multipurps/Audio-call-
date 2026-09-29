@@ -1,7 +1,9 @@
 {
   "functions": {
     "api/assistant.js": { "maxDuration": 60 },
-    "api/social-calling.js": { "maxDuration": 60 }
+    "api/social-calling.js": { "maxDuration": 60 },
+    "api/calls.js": { "maxDuration": 60 },
+    "api/calls-status.js": { "maxDuration": 60 }
   },
   "headers": [
     {

@@ -11,7 +11,7 @@ function fixture() {
   let intent = { action: 'call', contactName: 'Alex', objective: 'Confirm lunch at noon.', channel: 'phone' };
   const fetcher = async (url, options) => {
     network.push({ url, options });
-    if (url.includes('groq.com')) {
+    if (url.includes('api.openai.com')) {
       const body = JSON.parse(options.body);
       return { ok: true, json: async () => ({ choices: [{ message: { content: body.response_format ? JSON.stringify(intent) : "I'll confirm lunch at noon and keep it friendly." } }] }) };
     }

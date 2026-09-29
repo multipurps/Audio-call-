@@ -1,4 +1,5 @@
 import { getServiceClient } from '../lib/supabaseAdmin.js';
+import { maybeGenerateCallSummary } from '../lib/callSession.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
@@ -49,6 +50,13 @@ export default async function handler(req, res) {
 
   if (call?.user_id && call?.session_id && ['no_answer', 'completed', 'failed'].includes(status) && status !== call.status) {
     await postAssistantFollowUp(supabase, call.user_id, call.contact_id, call.session_id, callId, status, CallDuration);
+  }
+
+  // Twilio calls are now terminal: run the shared summary + memory pass.
+  // Idempotent — if the relay's own onCallEnd already generated the summary,
+  // this is a no-op.
+  if (['no_answer', 'completed', 'failed', 'busy', 'canceled'].includes(status)) {
+    await maybeGenerateCallSummary(supabase, callId);
   }
 
   return res.status(200).send('ok');

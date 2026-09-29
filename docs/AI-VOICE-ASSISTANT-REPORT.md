@@ -1,3 +1,9 @@
+> **Update (2026-09-29):** this report predates the implementation pass.
+> Groq references below describe the state at the time of writing and are now
+> historical — Groq support was removed from every provider role (LLM, STT,
+> vision; TTS was never Groq). Current status, model ids and test results live
+> in `docs/CALL-SYSTEM-IMPLEMENTATION-REPORT.md`.
+
 # Architecture + Dependency Report — Mitra-like AI voice assistant
 
 Status: **blocking discrepancy found.** Read section 1 before any code is written.

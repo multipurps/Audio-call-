@@ -18,22 +18,30 @@ Three deployables:
 2. **Twilio Relay Server** (`server/patter-relay.js` and `server/relay.js`) —
    persistent Node processes that Twilio's Media Streams WebSocket connects to
    for the live audio of an in-progress PSTN call. Uses GPT Luna (`gpt-6-luna`)
-   with automatic fallback to Groq (`qwen/qwen3.8-27b`), Groq Whisper STT,
+   via OpenAI's Chat Completions API (optional fal OpenRouter fallback),
+   OpenAI transcription (`gpt-4o-mini-transcribe`) with a speech-vs-noise gate,
    Fish Audio TTS with per-call voice isolation, OpenFeelz-inspired emotional
    intelligence, and Letta-inspired 4-tier persistent memory.
+   Groq was removed from every provider role (LLM, STT, vision, TTS was never
+   Groq) — see `docs/CALL-SYSTEM-IMPLEMENTATION-REPORT.md`.
 
 3. **Pipecat Voice Service** (`pipecat-service/`) — Python FastAPI + Pipecat
-   real-time audio bridge used by `mp-relay` over the ACAF WebSocket protocol
-   for Telegram calling. Supports GPT Luna (`ASSISTANT_LLM_PROVIDER=luna`),
-   Groq Whisper STT, Fish Audio TTS, Silero VAD, emotional state tracking, and
-   `[[END_CALL]]` call termination.
+   real-time audio bridge used by `mp-relay` and WaCalls over the ACAF
+   WebSocket protocol for Telegram/WhatsApp calling. Supports GPT Luna
+   (`ASSISTANT_LLM_PROVIDER=luna`), OpenAI transcription
+   (`ASSISTANT_STT_PROVIDER=openai`, `gpt-4o-mini-transcribe`), Fish Audio
+   TTS, Silero VAD, emotional state tracking, and `[[END_CALL]]` call
+   termination. It also resolves the app's `calls` row at call start (goal,
+   memories, prior summaries), persists the live transcript per turn, and
+   reports the call's end back so the shared summary runs.
 
 ## Emotional Intelligence & Persistent Memory
 
 - **GPT Luna Primary LLM (`lib/llmClient.js`, `pipecat-service/app/config.py`)**:
-  Defaults to `gpt-6-luna` via `LUNA_API_KEY` / `OPENAI_API_KEY` with automatic
-  fallback to Groq (`GROQ_API_KEY`) and Fal OpenRouter (`FAL_KEY`) so calls and
-  chats remain resilient even if a single provider key is absent or rate-limited.
+  Defaults to `gpt-6-luna` via `LUNA_API_KEY` / `OPENAI_API_KEY`, with an
+  optional Fal OpenRouter fallback (`FAL_KEY`). There is no Groq endpoint any
+  more: `LLM_PROVIDER=groq` resolves to the OpenAI primary rather than
+  silently targeting a removed provider.
 - **OpenFeelz-Inspired Emotional State (`lib/emotionEngine.js`, `pipecat-service/app/emotion.py`)**:
   Models OCEAN personality traits, continuous PAD (Pleasure, Arousal, Dominance)
   + relational dimensions (Connection, Curiosity, Energy, Trust), exponential
@@ -85,21 +93,25 @@ both intentional:
 
 Initial scaffold: auth + approval gate, AI caller CRUD, voice cloning,
 call initiation with usage limits, call history, and a working relay-server
-skeleton with the full Twilio <-> Groq <-> Fish Audio loop wired up. Not yet
-tuned against real calls: silence-detection timing in the relay, mulaw/WAV
-framing for Whisper, and the IVR/hold-music handling from the original spec
-still need real-call testing before this is production-ready.
+skeleton with the full Twilio <-> OpenAI <-> Fish Audio loop wired up. Not yet
+tuned against real calls: silence-detection timing in the relay, WAV framing
+for OpenAI transcription, and the IVR/hold-music handling from the original spec
+still need real-call testing before this is production-ready. Status of every
+path (and what has NOT been verified on a real line) is tracked in
+`docs/CALL-SYSTEM-IMPLEMENTATION-REPORT.md`.
 
 Home screen is now a chat with the assistant ("Mitra"-style), not a raw
 number composer: `contacts` (name -> phone number, managed from the Contacts tab) let you say "call Juicy Jay" instead of typing digits; `POST
-/api/assistant?action=send` runs one Groq call to decide call vs. retry vs.
-plain reply, then prepares a Phone call for explicit in-chat confirmation; `api/calls-status.js` posts a
+/api/assistant?action=send` runs one LLM call (GPT Luna on OpenAI) to decide
+call vs. retry vs. plain reply, then prepares a Phone call for explicit in-chat
+confirmation; `api/calls-status.js` posts a
 follow-up message (busy / no answer / finished) back into the same thread
 once Twilio's status webhook fires, so the chat updates on its own while
 you keep using the app. Voice input (the wave icon) records with
-`MediaRecorder` and transcribes via Groq Whisper — same model the relay
-already uses. All of this needs `GROQ_API_KEY` set in the Vercel project
-(added to `.env.example`) and `sql/007_assistant.sql` run against Supabase
+`MediaRecorder` and transcribes via OpenAI (`gpt-4o-mini-transcribe`) — the
+same transcription API the relays use. All of this needs `OPENAI_API_KEY` (or
+`LUNA_API_KEY`) set in the Vercel project (see `.env.example`) and
+`sql/007_assistant.sql` run against Supabase
 before it'll do anything; until then `api/assistant.js` replies with an
 explicit "not configured yet" message instead of failing silently.
 

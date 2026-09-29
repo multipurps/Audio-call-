@@ -205,8 +205,10 @@ class TestSettingsDefaults:
     def test_mock_mode_needs_no_credentials(self):
         settings = load_settings({"ASSISTANT_MOCK_MODE": "true"})
         assert settings.mock_mode
-        assert settings.stt_provider == "groq"
-        assert settings.llm_provider == "groq"
+        # Groq was removed; the defaults are OpenAI for STT and the
+        # OpenAI-compatible chat provider for the LLM.
+        assert settings.stt_provider == "openai"
+        assert settings.llm_provider == "openai"
         assert settings.tts_provider == "fish"
 
     def test_port_falls_back_to_8080(self):
@@ -224,34 +226,35 @@ class TestSettingsDefaults:
 class TestSettingsValidation:
     def test_missing_bridge_secret_fails_closed(self):
         with pytest.raises(ConfigError, match="ASSISTANT_BRIDGE_SECRET is required"):
-            load_settings({"GROQ_API_KEY": "x" * 20, "FISH_API_KEY": "y" * 20})
+            load_settings({"OPENAI_API_KEY": "x" * 20, "FISH_API_KEY": "y" * 20})
 
     def test_short_bridge_secret_rejected(self):
         with pytest.raises(ConfigError, match="at least 16 characters"):
             load_settings(
                 {
                     "ASSISTANT_BRIDGE_SECRET": "tooshort",
-                    "GROQ_API_KEY": "x" * 20,
+                    "OPENAI_API_KEY": "x" * 20,
                     "FISH_API_KEY": "y" * 20,
                 }
             )
 
-    def test_groq_stt_requires_groq_key(self):
-        with pytest.raises(ConfigError, match="GROQ_API_KEY is required when ASSISTANT_STT_PROVIDER=groq"):
+    def test_openai_stt_requires_openai_key(self):
+        # No Groq fallback exists any more: a missing OpenAI key fails closed.
+        with pytest.raises(ConfigError, match="OPENAI_API_KEY"):
             load_settings({"ASSISTANT_BRIDGE_SECRET": "a" * 32, "FISH_API_KEY": "y" * 20})
 
     def test_openai_llm_requires_openai_key(self):
-        with pytest.raises(ConfigError, match="OPENAI_API_KEY is required"):
+        with pytest.raises(ConfigError, match="LUNA_API_KEY or OPENAI_API_KEY is required"):
             load_settings(
                 {
                     "ASSISTANT_BRIDGE_SECRET": "a" * 32,
-                    "GROQ_API_KEY": "x" * 20,
                     "FISH_API_KEY": "y" * 20,
                     "ASSISTANT_LLM_PROVIDER": "openai",
+                    "ASSISTANT_STT_PROVIDER": "mock",
                 }
             )
 
-    def test_openai_llm_without_groq_stt_is_accepted(self):
+    def test_openai_llm_with_mock_stt_is_accepted(self):
         settings = load_settings(
             {
                 "ASSISTANT_BRIDGE_SECRET": "a" * 32,
@@ -268,7 +271,7 @@ class TestSettingsValidation:
             load_settings(
                 {
                     "ASSISTANT_BRIDGE_SECRET": "a" * 32,
-                    "GROQ_API_KEY": "x" * 20,
+                    "OPENAI_API_KEY": "x" * 20,
                     "ASSISTANT_TTS_PROVIDER": "fish",
                 }
             )
@@ -333,13 +336,13 @@ class TestSecretHandling:
         settings = load_settings(
             {
                 "ASSISTANT_BRIDGE_SECRET": "a" * 32,
-                "GROQ_API_KEY": "gk_abcdefghijklmnop",
+                "OPENAI_API_KEY": "ok_abcdefghijklmnop",
                 "FISH_API_KEY": "fk_abcdefghijklmnop",
             }
         )
         secrets = settings.secret_values()
         assert "a" * 32 in secrets
-        assert "gk_abcdefghijklmnop" in secrets
+        assert "ok_abcdefghijklmnop" in secrets
         assert "fk_abcdefghijklmnop" in secrets
 
     def test_no_secrets_in_mock_mode(self):
@@ -349,13 +352,13 @@ class TestSecretHandling:
         settings = load_settings(
             {
                 "ASSISTANT_BRIDGE_SECRET": "a" * 32,
-                "GROQ_API_KEY": "gk_abcdefghijklmnop",
+                "OPENAI_API_KEY": "ok_abcdefghijklmnop",
                 "FISH_API_KEY": "fk_abcdefghijklmnop",
             }
         )
         rendered = json.dumps(settings.redacted_summary())
         assert "a" * 32 not in rendered
-        assert "gk_abcdefghijklmnop" not in rendered
+        assert "ok_abcdefghijklmnop" not in rendered
         assert "fk_abcdefghijklmnop" not in rendered
         assert "<set>" in rendered
 

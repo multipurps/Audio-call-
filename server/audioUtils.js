@@ -70,24 +70,96 @@ export function resolveVoiceId(ctx, defaultVoice) {
 
 export function resolvePatterLlmConfig(env = process.env) {
   const lunaKey = env.LUNA_API_KEY || env.LLM_API_KEY || env.OPENAI_API_KEY || '';
-  const groqKey = env.GROQ_API_KEY || '';
   const requestedProvider = (env.LLM_PROVIDER || 'luna').toLowerCase();
 
-  if ((requestedProvider === 'luna' || requestedProvider === 'openai') && lunaKey) {
-    return {
-      provider: 'openai',
-      model: env.LLM_MODEL || env.LUNA_MODEL || 'gpt-6-luna',
-      apiKey: lunaKey,
-      baseUrl: env.LLM_BASE_URL || env.LUNA_BASE_URL || 'https://api.openai.com/v1',
-      temperature: 0.65,
-      maxTokens: 160,
-    };
+  // Groq support was removed (the model this relay used there was
+  // decommissioned). Every config resolves to OpenAI's Chat Completions API;
+  // without a key there is nothing valid to build, so we say so loudly
+  // instead of silently routing a live call to a dead provider.
+  if (requestedProvider === 'fal' || requestedProvider === 'openrouter') {
+    const falKey = env.FAL_KEY || '';
+    if (falKey) {
+      return {
+        provider: 'openai',
+        model: env.LLM_MODEL || 'openai/gpt-4o-mini',
+        apiKey: falKey,
+        baseUrl: 'https://fal.run/openrouter/router/openai/v1',
+        temperature: 0.65,
+        maxTokens: 160,
+      };
+    }
+  }
+  if (!lunaKey) {
+    throw new Error('No LLM API key configured: set LUNA_API_KEY (or OPENAI_API_KEY). Groq was removed.');
   }
   return {
-    provider: 'groq',
-    model: env.GROQ_LLM_MODEL || 'qwen/qwen3.8-27b',
-    apiKey: groqKey,
+    provider: 'openai',
+    model: env.LLM_MODEL || env.LUNA_MODEL || 'gpt-6-luna',
+    apiKey: lunaKey,
+    baseUrl: env.LLM_BASE_URL || env.LUNA_BASE_URL || 'https://api.openai.com/v1',
     temperature: 0.65,
     maxTokens: 160,
   };
+}
+
+/**
+ * Speech-vs-steady-noise gate for telephony audio.
+ *
+ * Twilio (and any raw media stream) keeps delivering frames while nobody is
+ * talking. Feeding room tone — a fan, an air conditioner, a generator — into
+ * Whisper produces confident nonsense ("the other person said something"),
+ * which then drives a bogus LLM turn. This decides whether a PCM16 chunk is
+ * worth an STT call:
+ *
+ *   1. Enough absolute energy (not digital silence).
+ *   2. Amplitude modulates like syllables do: speech frame-RMS varies a lot
+ *      (coefficient of variation >= 0.25), while a steady hum barely varies.
+ *   3. Not dominated by very high zero-crossing rates (pure hiss/static).
+ *   4. Enough voiced duration (>= ~150 ms of active frames) to be a word.
+ *
+ * Heuristic by design — it runs on every 700 ms telephony chunk before any
+ * paid API call. It reduces, but cannot fully guarantee removal of, all
+ * non-speech; the WhatsApp/Telegram pipelines additionally sit behind
+ * Silero VAD, which is the stronger defence there.
+ */
+export function isSpeechLikePcm16(pcmBuf, sampleRate = 8000, options = {}) {
+  const { minRms = 250, minFrameRms = 350, minVariation = 0.25, minActiveMs = 150 } = options;
+  const samples = Math.floor((pcmBuf?.length || 0) / 2);
+  if (samples < sampleRate * 0.05) return false; // shorter than 50 ms
+
+  const frameSamples = Math.max(1, Math.floor(sampleRate * 0.02)); // 20 ms
+  const frameRms = [];
+  let sumSq = 0;
+  let zeroCrossings = 0;
+  let prev = 0;
+  for (let i = 0; i < samples; i++) {
+    const v = pcmBuf.readInt16LE(i * 2);
+    sumSq += v * v;
+    if ((v >= 0) !== (prev >= 0)) zeroCrossings++;
+    prev = v;
+    if ((i + 1) % frameSamples === 0) {
+      const start = i + 1 - frameSamples;
+      let frameSum = 0;
+      for (let j = start; j <= i; j++) {
+        const s = pcmBuf.readInt16LE(j * 2);
+        frameSum += s * s;
+      }
+      frameRms.push(Math.sqrt(frameSum / frameSamples));
+    }
+  }
+  const overallRms = Math.sqrt(sumSq / samples);
+  if (overallRms < minRms) return false; // silence
+
+  const active = frameRms.filter((r) => r >= minFrameRms);
+  if (active.length * 20 < minActiveMs) return false; // not enough voiced audio
+
+  const mean = active.reduce((a, b) => a + b, 0) / active.length;
+  const variance = active.reduce((a, b) => a + (b - mean) ** 2, 0) / active.length;
+  const variation = mean > 0 ? Math.sqrt(variance) / mean : 0;
+  if (variation < minVariation) return false; // steady noise: no syllabic modulation
+
+  const zcrRate = zeroCrossings / samples;
+  if (zcrRate > 0.3) return false; // pure hiss/static
+
+  return true;
 }

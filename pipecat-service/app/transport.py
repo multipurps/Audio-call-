@@ -161,6 +161,8 @@ class AcafBridge:
         self.conversation = create_conversation(
             settings=call_settings,
             session_id=self.session.session_id,
+            platform=self.session.platform,
+            user_id=self.session.user_id,
             serializer=self.serializer,
             send_audio=self.send_audio,
             send_control=self._send_text,

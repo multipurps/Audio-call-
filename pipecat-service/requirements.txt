@@ -9,7 +9,7 @@
 # `FishAudioTTSService.InputParams` was deprecated for `Settings`, and
 # `PipelineTask` moved under `pipecat.workers`). An unpinned range would let a
 # minor bump break call audio with no code change here.
-pipecat-ai[fish,groq,openai,silero,websocket]==1.11.0
+pipecat-ai[fish,openai,silero,websocket]==1.11.0
 
 # --- HTTP / ASGI -----------------------------------------------------------
 # FastAPI and uvicorn serve the ACAF bridge WebSocket and the health endpoints.

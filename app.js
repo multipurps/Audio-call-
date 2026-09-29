@@ -1881,7 +1881,198 @@ function formatCallDuration(seconds) {
   const s = seconds % 60;
   return `${m} min${m === 1 ? '' : 's'}${s ? ` ${s} sec` : ''}`;
 }
+// Detail dialog state: the call currently on screen (drives "Call again")
+// and an in-flight guard so a double tap can never place two calls.
+let callDetailCurrent = null;
+let callAgainInFlight = false;
+
+const CALL_DETAIL_SUMMARY_SECTIONS = {
+  topics: 'Topics discussed',
+  learned: 'What Emysa learned',
+  decisions: 'Decisions & agreements',
+  commitments: 'Promises & commitments',
+  details: 'Dates, amounts & specifics',
+  followups: 'Follow-ups',
+  unresolved: 'Still unresolved',
+};
+
+function renderCallDetailSections(summaryJson) {
+  const card = $('callDetailSectionsCard');
+  const box = $('callDetailSections');
+  if (!card || !box) return;
+  box.textContent = '';
+  const sections = summaryJson && typeof summaryJson === 'object' && !Array.isArray(summaryJson) ? summaryJson : null;
+  if (!sections) { card.classList.add('hidden'); return; }
+  let shown = 0;
+  for (const [key, label] of Object.entries(CALL_DETAIL_SUMMARY_SECTIONS)) {
+    const values = (Array.isArray(sections[key]) ? sections[key] : [])
+      .map((v) => String(v ?? '').trim())
+      .filter(Boolean);
+    if (!values.length) continue;
+    shown += 1;
+    const block = document.createElement('div');
+    block.className = 'callDetailSection';
+    const title = document.createElement('div');
+    title.className = 'callDetailSectionTitle';
+    title.textContent = label;
+    const list = document.createElement('ul');
+    for (const value of values) {
+      const item = document.createElement('li');
+      item.textContent = value;
+      list.appendChild(item);
+    }
+    block.append(title, list);
+    box.appendChild(block);
+  }
+  card.classList.toggle('hidden', shown === 0);
+}
+
+// Person-centred history: every other call with the same contact (falling
+// back to the same number for rows saved before contacts were linked).
+// Rows open in this same dialog, so the whole conversation history of a
+// person is reachable from any one call.
+async function loadCallDetailHistory(call) {
+  const card = $('callDetailHistoryCard');
+  const box = $('callDetailHistory');
+  if (!card || !box) return;
+  box.textContent = '';
+  card.classList.add('hidden');
+  if (!currentUser || !call?.id) return;
+  let query = supabase
+    .from('calls')
+    .select('id, created_at, status, duration_seconds, outcome_summary, summary_json, platform, direction, contact_id, to_number, objective, instructions, session_id, transcript')
+    .eq('user_id', currentUser.id)
+    .order('created_at', { ascending: false })
+    .limit(40);
+  if (call.contact_id) query = query.eq('contact_id', call.contact_id);
+  else if (call.to_number) query = query.eq('to_number', call.to_number);
+  else return;
+  const { data, error } = await query;
+  if (error) return;
+  const rows = (data || []).filter((row) => row.id !== call.id);
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'callDetailHistoryEmpty';
+    empty.textContent = 'This is the only call on record with this person.';
+    box.appendChild(empty);
+    card.classList.remove('hidden');
+    return;
+  }
+  for (const row of rows) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'callDetailHistoryRow';
+    const label = document.createElement('span');
+    const created = row.created_at ? new Date(row.created_at) : null;
+    const direction = row.direction === 'inbound' ? 'incoming' : 'outgoing';
+    label.textContent = `${direction[0].toUpperCase()}${direction.slice(1)} call`;
+    const meta = document.createElement('span');
+    meta.className = 'callDetailHistoryMeta';
+    const duration = formatCallDuration(row.duration_seconds);
+    const statusText = CALL_TYPE_LABEL[row.direction === 'inbound' ? 'inbound' : 'outbound']?.[row.status]
+      || (['queued', 'ringing', 'in_progress'].includes(row.status) ? 'Live' : '');
+    meta.textContent = [created ? created.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '', duration || statusText].filter(Boolean).join(' · ');
+    button.append(label, meta);
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        const resp = await authedFetch(`/api/calls?action=get&callId=${encodeURIComponent(row.id)}`);
+        const data = await resp.json();
+        if (resp.ok && data.call) openCallDetail(data.call, nameFromCallRow(data.call), !!data.call.contact_id);
+      } finally { button.disabled = false; }
+    };
+    box.appendChild(button);
+  }
+  card.classList.remove('hidden');
+}
+
+function nameFromCallRow(row) {
+  return row?.contact_name || callDetailCurrent?.name || row?.to_number || 'Contact';
+}
+
+function setCallAgainStatus(text, isError) {
+  const el = $('callDetailAgainStatus');
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.toggle('error', !!isError);
+}
+
+// Re-place the same call: same destination, same objective, same channel.
+// WhatsApp/Telegram dial straight through the platform relay; Phone runs the
+// existing prepare -> confirm plan flow (the only path that can place a
+// Twilio call). The server also has its own duplicate-call guard; a 409 here
+// just opens the call that is already in progress.
+async function callAgainFromDetail() {
+  const current = callDetailCurrent;
+  if (!current || callAgainInFlight) return; // double-tap guard: never dial twice
+  const c = current.call;
+  const name = current.name || c.to_number;
+  const btn = $('callDetailAgainBtn');
+  const live = ['queued', 'ringing', 'in_progress', 'in-progress'].includes(c.status);
+  if (live) {
+    $('callDetailDialog').close();
+    trackActiveCall(c.id, c.to_number, name);
+    openCallScreen(c.id, c.to_number, name);
+    return;
+  }
+  callAgainInFlight = true;
+  if (btn) btn.disabled = true;
+  setCallAgainStatus('Placing call…', false);
+  try {
+    const platform = c.platform === 'whatsapp' || c.platform === 'telegram' ? c.platform : 'phone';
+    if (platform === 'phone') {
+      const text = c.objective || c.instructions || c.script || `Call ${name} again.`;
+      const target = c.contact_id ? { contactId: c.contact_id } : { toNumber: c.to_number };
+      const prep = await callApi('/api/assistant?action=prepareCall', {
+        text, target, sessionId: c.session_id || undefined,
+      });
+      const plan = (prep.messages || []).map((m) => m.call_plan).find(Boolean);
+      if (!plan) throw new Error('Could not prepare the call. No call was placed.');
+      const data = await callApi('/api/assistant?action=confirmCall', { planId: plan.id });
+      trackActiveCall(data.callId, data.toNumber, data.contactName);
+      $('callDetailDialog').close();
+      openCallScreen(data.callId, data.toNumber, data.contactName);
+      return;
+    }
+    const resp = await authedFetch('/api/social-calling?action=call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        platform,
+        to: c.to_number,
+        contactId: c.contact_id || null,
+        contactName: c.contact_name || name,
+        objective: c.objective || `Call ${name} again.`,
+        instructions: c.instructions || null,
+        sessionId: c.session_id || null,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.status === 409) {
+      const existingId = data.callId || data.dbCallId;
+      setCallAgainStatus('A call to this number is already in progress.', false);
+      if (existingId) {
+        $('callDetailDialog').close();
+        trackActiveCall(existingId, c.to_number, name);
+        openCallScreen(existingId, c.to_number, name);
+      }
+      return;
+    }
+    if (!resp.ok) throw new Error(data.error || 'Could not place the call.');
+    const dbCallId = data.dbCallId || data.callId;
+    trackActiveCall(dbCallId, c.to_number, name);
+    $('callDetailDialog').close();
+    openCallScreen(dbCallId, c.to_number, name);
+  } catch (err) {
+    setCallAgainStatus(err.message || 'Could not place the call. Please try again.', true);
+  } finally {
+    callAgainInFlight = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
 function openCallDetail(c, name, isKnown) {
+  callDetailCurrent = { call: c, name, isKnown };
   $('callDetailAvatar').innerHTML = isKnown
     ? escapeHtml((name || '?')[0].toUpperCase())
     : `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1c0-2.76-3.58-5-8-5z"/></svg>`;
@@ -1901,9 +2092,10 @@ function openCallDetail(c, name, isKnown) {
   $('callDetailDuration').classList.toggle('hidden', !duration);
   $('callDetailScriptCard').classList.toggle('hidden', !c.script);
   $('callDetailScript').textContent = c.script || '';
-  const summaryText = c.summary || c.outcome_summary || '';
+  const summaryText = c.summary || c.outcome_summary || c.summary_json?.summary || '';
   $('callDetailSummaryCard').classList.toggle('hidden', !summaryText);
   $('callDetailSummary').textContent = summaryText;
+  renderCallDetailSections(c.summary_json);
   const transcriptCard = $('callDetailTranscriptCard');
   const transcriptEl = $('callDetailTranscript');
   if (transcriptCard && transcriptEl) {
@@ -1928,7 +2120,16 @@ function openCallDetail(c, name, isKnown) {
       transcriptEl.appendChild(empty);
     }
   }
+  const againBtn = $('callDetailAgainBtn');
+  if (againBtn) {
+    const isLive = ['queued', 'ringing', 'in_progress', 'in-progress'].includes(c.status);
+    againBtn.textContent = isLive ? 'Open live call' : `Call ${name || ''} again`.trim();
+    againBtn.disabled = false;
+    againBtn.onclick = callAgainFromDetail;
+  }
+  setCallAgainStatus('', false);
   $('callDetailDialog').showModal();
+  loadCallDetailHistory(c);
 }
 
 let recentSubTab = 'calls';

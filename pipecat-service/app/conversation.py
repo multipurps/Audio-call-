@@ -38,6 +38,7 @@ from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
+from app.call_context import CallContext, TranscriptLog, resolve_call_context
 from app.config import Settings
 
 #: Spoken when the callee answers, unless ASSISTANT_GREETING overrides it.
@@ -293,12 +294,26 @@ class _InboundMeter:
 class _BaseConversation:
     """State shared by the real and mock conversations."""
 
-    def __init__(self, *, settings: Settings, session_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        settings: Settings,
+        session_id: str,
+        platform: str | None = None,
+        user_id: str | None = None,
+    ) -> None:
         self._settings = settings
         self._session_id = session_id
+        self.platform = platform
+        self.user_id = user_id
         self._greeted = False
         self.call_active_source: str | None = None
         self._meter = _InboundMeter(session_id)
+        #: Resolved app `calls` row (real calls only; None in mock mode or
+        #: without Supabase creds). Owns every database write this call makes.
+        self.call_context: CallContext | None = None
+        #: Live transcript for this call (created alongside the context).
+        self.transcript: TranscriptLog | None = None
 
     @property
     def greeting_text(self) -> str:
@@ -320,6 +335,8 @@ class _BaseConversation:
             return False
         self.call_active_source = source
         clog("INFO", self._session_id, "call connected, sending greeting", source=source)
+        if self.call_context is not None:
+            await self.call_context.set_in_progress()
         await self._speak_greeting()
         self._greeted = True
         return True
@@ -554,8 +571,15 @@ class CallConversation(_BaseConversation):
         send_control: Callable[[str], Awaitable[None]],
         on_ended: Callable[[str], Awaitable[None]] | None = None,
         services: tuple[Any, Any, Any, Any] | None = None,
+        platform: str | None = None,
+        user_id: str | None = None,
     ) -> None:
-        super().__init__(settings=settings, session_id=session_id)
+        super().__init__(
+            settings=settings,
+            session_id=session_id,
+            platform=platform,
+            user_id=user_id,
+        )
         self._serializer = serializer
         self._send_audio = send_audio
         self._send_control = send_control
@@ -569,12 +593,32 @@ class CallConversation(_BaseConversation):
         self._output: BridgeOutput | None = None
         self.sender: PacedAudioSender | None = None
         self._stopped = False
+        self._started_at: float | None = None
 
     async def start(self) -> None:
         from pipecat.pipeline.runner import PipelineRunner
         from pipecat.pipeline.task import PipelineParams, PipelineTask
 
         from app.pipeline import build_llm_context, build_pipeline
+
+        # Resolve the app's `calls` row before the pipeline exists: it is
+        # the source of the per-call objective/person context for the system
+        # prompt AND the id every live transcript write lands on. The row is
+        # written by Vercel just before the carrier dials, so this waits
+        # against a bounded deadline (ASSISTANT_CONTEXT_TIMEOUT_SECS) rather
+        # than losing the race by milliseconds. Without it (mock mode, no
+        # Supabase creds, row never found) the call still runs — with the
+        # default prompt and no transcript persistence.
+        self.call_context = await resolve_call_context(
+            self._settings,
+            session_id=self._session_id,
+            platform=self.platform or "unknown",
+            user_id=self.user_id,
+        )
+        extra_context: str | None = None
+        if self.call_context is not None:
+            self.transcript = TranscriptLog(self.call_context)
+            extra_context = self.call_context.extra_context or None
 
         rate = self._settings.bridge_sample_rate
         # The output processor is created first only so the sender can call
@@ -606,8 +650,10 @@ class CallConversation(_BaseConversation):
             settings=self._settings,
             transport=_TransportShim(BridgeInput(), self._output),
             context=self._context,
+            extra_context=extra_context,
             services=self._services,
             on_end_call=self._schedule_assistant_hangup,
+            transcript=self.transcript,
         )
         self._task = PipelineTask(
             pipeline,
@@ -625,7 +671,14 @@ class CallConversation(_BaseConversation):
         # frame is queued.
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self._output.started_event.wait(), timeout=2.0)
-        clog("INFO", self._session_id, "pipeline started", bridgeSampleRate=rate)
+        self._started_at = time.monotonic()
+        clog(
+            "INFO",
+            self._session_id,
+            "pipeline started",
+            bridgeSampleRate=rate,
+            contextResolved=bool(self.call_context),
+        )
 
     def _schedule_assistant_hangup(self) -> None:
         if self._stopped:
@@ -706,6 +759,22 @@ class CallConversation(_BaseConversation):
             return
         self._stopped = True
         clog("INFO", self._session_id, "conversation stopping", reason=reason, **self.stats())
+        # Persist whatever the transcript has accumulated so far before the
+        # pipeline is torn down — the end report then waits out the carrier's
+        # own outcome callback and only fills in a status nobody reported.
+        if self.transcript is not None:
+            with contextlib.suppress(Exception):
+                await self.transcript.close()
+        context = self.call_context
+        if context is not None:
+            active = self.call_active
+            duration = (
+                int(time.monotonic() - self._started_at) if self._started_at is not None else 0
+            )
+            asyncio.create_task(
+                self._report_call_end(context, reason, active, duration),
+                name=f"call-end-report-{self._session_id}",
+            )
         if self._task is not None:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(self._task.cancel(), timeout=5.0)
@@ -721,11 +790,54 @@ class CallConversation(_BaseConversation):
             await self.sender.stop()
         clog("INFO", self._session_id, "conversation cleanup completed")
 
+    async def _report_call_end(
+        self, context: CallContext, reason: str, active: bool, duration: int
+    ) -> None:
+        """Hand the finished call back to the app (after a grace period).
+
+        Runs as its own task so `stop()` stays prompt: the app-side
+        `relay-call-status` handler re-checks whether the carrier already
+        reported, and only fills the gap (status + chat follow-up + shared
+        summary/memory extraction) when nothing else did.
+        """
+        try:
+            if active:
+                status = "completed"
+            elif reason in (
+                "peer-hangup",
+                "peer-stopped",
+                "hung-up",
+                "session-stopped",
+                "websocket-closed",
+            ):
+                status = "no_answer"
+            else:
+                status = "failed"
+            await context.report_end(
+                settings=self._settings,
+                status=status,
+                duration_seconds=duration,
+                active=active,
+            )
+        except Exception as exc:  # noqa: BLE001 - must never raise unhandled
+            clog(
+                "WARNING",
+                self._session_id,
+                "end report raised",
+                error=type(exc).__name__,
+            )
+        finally:
+            with contextlib.suppress(Exception):
+                await context.aclose()
+
     def stats(self) -> dict[str, Any]:
         out: dict[str, Any] = {
             "inboundFrames": self._meter.frames,
             "callActiveSource": self.call_active_source or "none",
+            "contextResolved": self.call_context is not None,
         }
+        if self.transcript is not None:
+            out["transcriptWrites"] = self.transcript.writes
         if self.sender is not None:
             out.update(self.sender.stats())
         return out
@@ -754,8 +866,15 @@ class MockConversation(_BaseConversation):
         send_control: Callable[[str], Awaitable[None]],
         on_ended: Callable[[str], Awaitable[None]] | None = None,
         services: Any = None,
+        platform: str | None = None,
+        user_id: str | None = None,
     ) -> None:
-        super().__init__(settings=settings, session_id=session_id)
+        super().__init__(
+            settings=settings,
+            session_id=session_id,
+            platform=platform,
+            user_id=user_id,
+        )
         from app.providers import MockLLM, MockTTS
 
         self._tts = MockTTS(sample_rate=settings.bridge_sample_rate)
