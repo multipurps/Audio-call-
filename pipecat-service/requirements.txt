@@ -18,6 +18,12 @@ pipecat-ai[fish,openai,silero,websocket]==1.11.0
 fastapi==0.141.1
 uvicorn[standard]==0.53.0
 
+# --- Outbound HTTP (call context, transcript writes, end-of-call report) ----
+# app/call_context.py imports httpx directly. It was assumed to be a transitive
+# dependency, but Render's resolved install does not include it, which crashed
+# the service at import time (ModuleNotFoundError: httpx) on every boot.
+httpx>=0.27,<1
+
 # --- Structured logging ----------------------------------------------------
 loguru==0.7.3
 
