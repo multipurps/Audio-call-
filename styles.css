@@ -502,6 +502,9 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
   display:flex; align-items:center; justify-content:center;
 }
 .playCircleBtn svg{width:18px; height:18px;}
+#deleteVoiceBtn{width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex:none; color:#ff6b6b;}
+#deleteVoiceBtn svg{width:19px; height:19px;}
+#deleteVoiceBtn:active{background:rgba(255,107,107,0.14);}
 #recordVoiceBtn.recording{background:rgba(255,90,90,0.18); border-color:rgba(255,90,90,0.4); color:#ff8a8a;}
 .profileCard.signOutCard{justify-content:flex-start;}
 .profileCard.signOutCard .cValue{color:#ff6b6b;}

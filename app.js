@@ -1379,7 +1379,6 @@ function showPreCallContext(target, channel) {
   $('briefInput').placeholder = 'Call instructions…';
 }
 function beginPreCall(target, channel) {
-  startNewChat();
   showPreCallContext(target, channel);
   document.querySelector('[data-tab=home]').click();
   $('briefInput').focus();
