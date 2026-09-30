@@ -10,7 +10,32 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="styles.css?v=2026-09-27.1">
-</head>
+    <script>
+      // Wake the sleeping backend services the instant the page opens - before
+      // sign-in, before app.js downloads, before any splash screen - so they
+      // are up by the time the user has finished setting up a call. Invisible
+      // by design: no UI, no awaiting, errors ignored. Only a plain HTTP
+      // request wakes a Render free-tier service (a WebSocket upgrade does
+      // not), and no-cors is enough because the response is never read.
+      (function () {
+        var URLS = [
+          'https://audio-call-assistant.onrender.com/healthz', // AI voice service
+          'https://wacalls-relay.onrender.com/',               // WhatsApp calling
+          'https://audio-call-relay.onrender.com/'             // Twilio calling
+        ];
+        var last = 0;
+        window.__warmBackends = function () {
+          var now = Date.now();
+          if (now - last < 4 * 60 * 1000) return; // at most once per 4 minutes
+          last = now;
+          URLS.forEach(function (u) {
+            try { fetch(u, { mode: 'no-cors', cache: 'no-store', keepalive: true }).catch(function () {}); } catch (e) {}
+          });
+        };
+        window.__warmBackends();
+      })();
+    </script>
+  </head>
 <body>
 
 <div id="app">

@@ -356,23 +356,15 @@ function greetingForNow(name) {
   return `Good ${time}${who}, what can I help you with today?`;
 }
 
-// Wake the sleeping backend services (AI voice + WhatsApp relay) as soon as the
-// app is opened, so they are up by the time the user finishes setting up a call.
-// Throttled; failures are irrelevant.
-let lastWarmupAt = 0;
-function warmBackends() {
-  const now = Date.now();
-  if (now - lastWarmupAt < 4 * 60 * 1000) return;
-  lastWarmupAt = now;
-  authedFetch('/api/assistant?action=warmup', { method: 'POST' }).catch(() => {});
-}
+// index.html already pinged the sleeping backends the moment the page opened.
+// Ping again (throttled inside __warmBackends) when the app returns to the
+// foreground after being backgrounded, since they may have gone back to sleep.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && currentUser) warmBackends();
+  if (document.visibilityState === 'visible') window.__warmBackends?.();
 });
 
 async function initHomeChat() {
   if (!currentUser) return;
-  warmBackends();
   chatRevision++;
   clearPreCallContext();
   savedContacts = [];

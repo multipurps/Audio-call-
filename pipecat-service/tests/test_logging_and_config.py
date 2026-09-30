@@ -406,7 +406,7 @@ class TestLlmReasoningExtra:
         assert llm_reasoning_extra("gpt-6-luna", "turbo") == {}
 
 
-class TestIdentityWording:
+class TestOpeningAndIdentity:
     """Source-level checks so they run without the Pipecat runtime installed."""
 
     def _read(self, name):
@@ -414,16 +414,31 @@ class TestIdentityWording:
 
         return (Path(__file__).resolve().parent.parent / "app" / name).read_text()
 
-    def test_default_greeting_does_not_announce_ai(self):
+    def _prompt(self):
+        # Join the source's backslash line continuations, then normalise spaces.
+        return " ".join(self._read("pipeline.py").replace("\\\n", "").split())
+
+    def test_model_opens_the_call_from_the_users_instructions(self):
+        src = self._read("conversation.py")
+        assert "OPENING_CUE" in src and "LLMRunFrame" in src
+        assert "following the user's instructions" in " ".join(src.split())
+
+    def test_intro_is_not_hardcoded_as_an_ai_announcement(self):
         import re
 
-        m = re.search(r'DEFAULT_GREETING = "(.*)"', self._read("conversation.py"))
-        assert m, "DEFAULT_GREETING not found"
-        greeting = m.group(1)
+        greeting = re.search(r'DEFAULT_GREETING = "(.*)"', self._read("conversation.py")).group(1)
         assert "AI" not in greeting and "assistant" not in greeting.lower()
-        assert "Emysa" in greeting
+
+    def test_prompt_lets_the_user_control_the_intro(self):
+        text = self._prompt()
+        assert "If they tell you not to introduce yourself" in text
+        assert "briefly say hi, say you are Emysa and why you are calling" in text
+
+    def test_prompt_is_gender_neutral(self):
+        text = self._prompt()
+        assert "Emysa is not tied to any gender" in text
 
     def test_prompt_is_honest_if_sincerely_asked(self):
-        text = " ".join(self._read("pipeline.py").split())
-        assert "never claim to be human and never deny what you are" in text
+        text = self._prompt()
+        assert "Never claim to be human and never deny what you are" in text
         assert "sincerely asks whether they are talking to an AI" in text

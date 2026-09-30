@@ -41,8 +41,22 @@ from loguru import logger
 from app.call_context import CallContext, TranscriptLog, resolve_call_context
 from app.config import Settings
 
-#: Spoken when the callee answers, unless ASSISTANT_GREETING overrides it.
+#: Last-resort opener, spoken verbatim only when the model cannot open the call
+#: itself (no LLM context available) or ASSISTANT_GREETING is set. Normally the
+#: model writes the opening line from the user's own instructions - see
+#: OPENING_CUE - so nothing about the intro is hardcoded.
 DEFAULT_GREETING = "Hey, it's Emysa. Can you hear me okay?"
+
+#: Added to the LLM context the moment the callee answers, then the model is run.
+#: It is a stage direction for the model, not something the person said.
+OPENING_CUE = (
+    "[The person has just picked up the call. Open the conversation now, "
+    "following the user's instructions for this call. Unless those instructions "
+    "say otherwise, say hi, tell them you're Emysa and why you're calling, and "
+    "make sure they can hear you. If the instructions say not to introduce "
+    "yourself, or to open a particular way, do exactly that. One or two short "
+    "sentences.]"
+)
 
 #: Outbound audio is released in frames of this many milliseconds.
 FRAME_MS = 20
@@ -362,6 +376,7 @@ from pipecat.frames.frames import (  # noqa: E402 - grouped with their use
     InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMRunFrame,
     LLMTextFrame,
     OutputAudioRawFrame,
     StartFrame,
@@ -742,6 +757,18 @@ class CallConversation(_BaseConversation):
     async def _speak_greeting(self) -> None:
         if self._task is None:
             return
+        # Default: the model opens the call itself, guided by the user's
+        # instructions already in its system prompt (intro on by default, off
+        # or reshaped if the user says so). An explicit ASSISTANT_GREETING
+        # override is spoken verbatim instead.
+        if not (self._settings.greeting or "").strip() and self._context is not None:
+            try:
+                self._context.add_message({"role": "user", "content": OPENING_CUE})
+                await self._task.queue_frame(LLMRunFrame())
+                clog("INFO", self._session_id, "model opening the call")
+                return
+            except Exception as exc:  # noqa: BLE001 - fall back to the fixed opener
+                clog("WARNING", self._session_id, "model opening failed; using fallback", error=type(exc).__name__)
         text = self.greeting_text
         # Recorded in the LLM context directly rather than left to the
         # assistant aggregator: that only commits spoken text on a later
