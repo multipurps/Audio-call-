@@ -645,6 +645,7 @@ async function sendBrief() {
   } catch (err) {
     if (revision === chatRevision) {
       $('briefInput').value = text;
+      resizeBriefInput();
       appendChatBubble({ role: 'assistant', content: err.message || 'Connection lost. Please try again.', created_at: new Date().toISOString() });
       setHomeChatActive(true);
     }
@@ -663,11 +664,14 @@ $('briefInput').addEventListener('keydown', (e) => {
   // sending — only the send button, or Cmd/Ctrl+Enter, submits the message.
 });
 $('briefInput').addEventListener('input', () => {
+  resizeBriefInput();
+  syncHomeChatPadding();
+});
+function resizeBriefInput() {
   const el = $('briefInput');
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
-  syncHomeChatPadding();
-});
+}
 
 // The chat's bottom padding has to actually match the input bar's real,
 // current height (which grows as the message box grows) or new messages
@@ -722,76 +726,13 @@ function stopMessagePolling() {
   pollTimer = null;
 }
 
-// ---------- Home header: hamburger menu (Saved Chats) + wave (voice input) ----------
-function monthGroupLabel(iso) {
-  return new Date(iso).toLocaleDateString([], { month: 'long', year: new Date(iso).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
-}
+// ---------- Home header: new-chat button; chat history lives under Recent > Chat ----------
 function shortDateLabel(iso) {
   const d = new Date(iso);
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-let savedChatSessions = [];
-
-async function loadSavedChats() {
-  const list = $('savedChatsList');
-  list.innerHTML = '<div class="authHint">Loading…</div>';
-  const resp = await authedFetch('/api/assistant?action=sessions');
-  if (!resp.ok) { list.innerHTML = '<div class="authHint">Could not load saved chats.</div>'; return; }
-  const { sessions } = await resp.json();
-  savedChatSessions = sessions || [];
-  renderSavedChats(savedChatSessions);
-}
-
-function renderSavedChats(sessions) {
-  const list = $('savedChatsList');
-  if (!sessions.length) {
-    list.innerHTML = '<div class="authHint" style="margin-top:20px;">No saved chats yet — start one from Home.</div>';
-    return;
-  }
-  let lastGroup = null;
-  list.innerHTML = '';
-  for (const s of sessions) {
-    const group = monthGroupLabel(s.updated_at);
-    if (group !== lastGroup) {
-      const h = document.createElement('div');
-      h.className = 'sectionLabel';
-      h.textContent = group;
-      list.appendChild(h);
-      lastGroup = group;
-    }
-    const row = document.createElement('div');
-    row.className = 'savedChatRow';
-    row.innerHTML = `
-      <div class="recentBody"><div class="savedChatTitle">${escapeHtml(s.title)}</div>${s.call_label ? `<div class="recentPreview">${escapeHtml(s.call_label)} · ${s.call_id ? 'Call conversation' : 'Call setup'}</div>` : ''}</div>
-      <div class="chatRowActions">
-        <div class="savedChatDate">${shortDateLabel(s.updated_at)}</div>
-        <button class="chatRowIconBtn" data-action="archive" aria-label="Archive"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="5" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M5 9v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
-        <button class="chatRowIconBtn danger" data-action="delete" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-      </div>`;
-    row.addEventListener('click', () => { openChatSession(s.id); closeSheets(); });
-    row.querySelector('[data-action="archive"]').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await authedFetch('/api/assistant?action=archiveSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: s.id, archived: true }) });
-      loadSavedChats();
-    });
-    row.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (!confirm(`Delete "${s.title}"? This can't be undone.`)) return;
-      await authedFetch('/api/assistant?action=deleteSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: s.id }) });
-      loadSavedChats();
-    });
-    list.appendChild(row);
-  }
-}
-
-$('savedChatsSearch').addEventListener('input', () => {
-  const q = $('savedChatsSearch').value.trim().toLowerCase();
-  renderSavedChats(!q ? savedChatSessions : savedChatSessions.filter((s) => s.title.toLowerCase().includes(q)));
-});
-
-$('newChatBtn').addEventListener('click', () => { startNewChat(); closeSheets(); });
-$('homeMenuBtn').addEventListener('click', () => { loadSavedChats(); openSheet('sheet-home-menu'); });
+$('homeMenuBtn').addEventListener('click', () => startNewChat());
 
 let waveRecorder = null;
 let waveChunks = [];
@@ -1488,6 +1429,7 @@ function renderCallPlanAction(bubble, plan) {
   edit.onclick = () => {
     showPreCallContext({ contactId: plan.contact_id, toNumber: plan.to_number, name: plan.label, kind: plan.kind }, 'phone');
     $('briefInput').value = plan.script || plan.objective;
+    resizeBriefInput();
     $('briefInput').focus();
     syncHomeChatPadding();
   };

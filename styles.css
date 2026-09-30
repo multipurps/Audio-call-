@@ -86,6 +86,9 @@ body{
   position:relative; width:100vw; height:100dvh; height:-webkit-fill-available;
 }
 button{-webkit-appearance:none; appearance:none; border:0; cursor:pointer; font-family:inherit; color:#fff; background:none;}
+button:focus{outline:none;}
+button:focus-visible{outline:2px solid #0a84ff; outline-offset:2px;}
+dialog:focus{outline:none;}
 img{display:block; max-width:100%;}
 
 #app{position:absolute; inset:0;}
@@ -557,7 +560,6 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .socialRow .profileCard{flex:1; justify-content:center; margin-bottom:0;}
 
 /* ---------- saved chats ---------- */
-.savedChatsHeader{display:flex; align-items:center; gap:6px; padding:calc(env(safe-area-inset-top, 0px) + 18px) 14px 14px;}
 .searchBar{
   display:flex; align-items:center; gap:8px; background:var(--glass-bg); backdrop-filter:blur(18px) saturate(160%);
   -webkit-backdrop-filter:blur(18px) saturate(160%); border:1px solid var(--glass-border); border-radius:14px;
@@ -602,6 +604,16 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 #screen-recent .searchBar svg{color:#8e8e93;}
 #screen-recent .searchBar input{color:#fff; font-size:14px;}
 #screen-recent .searchBar input::placeholder{color:#8e8e93;}
+#screen-recent .savedChatRow{
+  display:flex; align-items:center; gap:10px; background:none; border:none; border-radius:0;
+  padding:12px 0; border-bottom:1px solid #262628; margin-bottom:0; cursor:pointer;
+}
+#screen-recent .savedChatRow:last-child{border-bottom:none;}
+#screen-recent .savedChatTitle{font-size:16px; font-weight:600; color:#fff;}
+#screen-recent .savedChatDate{font-size:13px; color:#8e8e93;}
+#screen-recent .recentChatKebabBtn{color:#8e8e93;}
+#screen-recent .recentChatMenu{background:#26262a; border:none; box-shadow:0 12px 40px rgba(0,0,0,.5);}
+#screen-recent .recentChatMenuItem:active{background:rgba(255,255,255,.08);}
 
 .recentRow{
   display:flex; align-items:center; gap:12px;
