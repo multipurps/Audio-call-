@@ -404,3 +404,26 @@ class TestLlmReasoningExtra:
 
         assert llm_reasoning_extra("gpt-6-luna", "") == {}
         assert llm_reasoning_extra("gpt-6-luna", "turbo") == {}
+
+
+class TestIdentityWording:
+    """Source-level checks so they run without the Pipecat runtime installed."""
+
+    def _read(self, name):
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parent.parent / "app" / name).read_text()
+
+    def test_default_greeting_does_not_announce_ai(self):
+        import re
+
+        m = re.search(r'DEFAULT_GREETING = "(.*)"', self._read("conversation.py"))
+        assert m, "DEFAULT_GREETING not found"
+        greeting = m.group(1)
+        assert "AI" not in greeting and "assistant" not in greeting.lower()
+        assert "Emysa" in greeting
+
+    def test_prompt_is_honest_if_sincerely_asked(self):
+        text = " ".join(self._read("pipeline.py").split())
+        assert "never claim to be human and never deny what you are" in text
+        assert "sincerely asks whether they are talking to an AI" in text

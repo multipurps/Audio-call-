@@ -52,6 +52,7 @@ export default async function handler(req, res) {
     case 'summarizeCall': return summarizeCall(req, res, supabase, userId);
     case 'deleteSession': return deleteSession(req, res, supabase, userId);
     case 'savePushSubscription': return savePushSubscription(req, res, supabase, userId);
+    case 'warmup': return warmBackends(req, res);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
   }
 }
@@ -778,4 +779,23 @@ async function transcribeAudio(req, res, supabase, userId) {
     console.error('transcribeAudio: request to OpenAI threw:', err);
     return res.status(500).json({ error: err.message || String(err) });
   }
+}
+
+// Free-tier Render services sleep after ~15 minutes idle and can take about a
+// minute to wake, and a WebSocket upgrade does not wake them - only a plain
+// HTTP request does. The app calls this as soon as it opens (and when it
+// returns to the foreground), so the AI voice service and the WhatsApp relay
+// are already up by the time the user has finished writing a call. It lives
+// here as an action because /api is at Vercel's 12-function limit. Requests are
+// fire-and-forget: we abort after a few seconds, the wake-up keeps going.
+async function warmBackends(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const relay = String(process.env.WACALLS_RELAY_URL || '').replace(/\/$/, '');
+  const targets = [process.env.ASSISTANT_WARMUP_URL, relay ? `${relay}/` : null]
+    .map((u) => String(u || '').trim())
+    .filter((u) => /^https:\/\//i.test(u));
+  await Promise.allSettled(
+    targets.map((url) => fetch(url, { method: 'GET', signal: AbortSignal.timeout(5000) }).catch(() => null)),
+  );
+  return res.status(202).json({ ok: true, warmed: targets.length });
 }

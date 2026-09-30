@@ -42,7 +42,7 @@ from app.call_context import CallContext, TranscriptLog, resolve_call_context
 from app.config import Settings
 
 #: Spoken when the callee answers, unless ASSISTANT_GREETING overrides it.
-DEFAULT_GREETING = "Hi, this is Emysa, an AI assistant. Can you hear me okay?"
+DEFAULT_GREETING = "Hey, it's Emysa. Can you hear me okay?"
 
 #: Outbound audio is released in frames of this many milliseconds.
 FRAME_MS = 20
