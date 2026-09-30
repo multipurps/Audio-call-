@@ -291,6 +291,47 @@ def extract_and_strip_control_tags(raw_text: str) -> tuple[str, bool]:
     return cleaned, has_end
 
 
+_MOOD_VALUE_RE = re.compile(r"\[\[\s*(?:MOOD|FEEL)\s*:\s*([a-zA-Z_ -]+)(?:\s*:\s*([0-9.]+))?\s*\]\]", re.I)
+
+
+def parse_mood_tag(raw_text: str) -> tuple[str | None, float | None]:
+    """Extract `[[MOOD:emotion:0.7]]` from a reply. Returns (emotion, intensity)."""
+    match = _MOOD_VALUE_RE.search(raw_text or "")
+    if not match:
+        return None, None
+    emotion = match.group(1).strip().lower().replace(" ", "_")
+    intensity: float | None = None
+    if match.group(2) is not None:
+        try:
+            intensity = clamp(float(match.group(2)), 0.0, 1.0)
+        except ValueError:
+            intensity = None
+    return emotion or None, intensity
+
+
+def apply_inline_mood(state: EmotionState, emotion: str, intensity: float | None = None) -> EmotionState:
+    """Fold the model's own mood marker into the emotional state.
+
+    Zero extra LLM calls: the model tags its own tone inline and the state
+    follows the conversation instead of drifting at random. Intensity blends
+    with the current one so a calm conversation does not jump to a shout.
+    """
+    emotion = (emotion or "").strip().lower().replace(" ", "_") or "warm"
+    target = intensity if intensity is not None else state.intensity
+    blended = round(clamp(state.intensity * 0.45 + target * 0.55, 0.2, 0.95), 2)
+    return EmotionState(
+        ocean=dict(state.ocean),
+        dimensions=dict(state.dimensions),
+        primary_emotion=emotion,
+        secondary_emotion=state.primary_emotion if state.primary_emotion != emotion else state.secondary_emotion,
+        intensity=blended,
+        user_affect=state.user_affect,
+        rumination=list(state.rumination),
+        turn_count=state.turn_count,
+        updated_at=time.time(),
+    )
+
+
 def should_end_call(raw_assistant_reply: str, user_utterance: str = "") -> tuple[bool, str]:
     """Return `(end_call, clean_text)` with false-positive hangup protection."""
     clean_text, has_end_tag = extract_and_strip_control_tags(raw_assistant_reply)

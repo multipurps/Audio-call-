@@ -3,6 +3,7 @@ import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { wacallsHangup } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
 import { maybeGenerateCallSummary } from '../lib/callSession.js';
+import { createHmac } from 'node:crypto';
 
 export default async function handler(req, res) {
   const supabase = getServiceClient();
@@ -18,8 +19,60 @@ export default async function handler(req, res) {
     case 'mute': return muteCall(req, res, supabase, userId);
     case 'list': return listCalls(req, res, supabase, userId);
     case 'get': return getCall(req, res, supabase, userId);
+    case 'monitor-token': return monitorToken(req, res, supabase, userId);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
   }
+}
+
+// Live audio monitoring: mints a short-lived, per-call HMAC token the browser
+// presents to the assistant service's /monitor websocket to hear BOTH sides
+// of the call (the person's speech + Emysa's TTS) in real time. The token is
+// bound to this call's bridge session and this user — a leaked token cannot
+// listen to another call. The bridge secret itself never leaves the server.
+//
+// The same token shape is verified by pipecat-service/app/monitor.py:
+// HMAC-SHA256(secret, "monitor:{sessionId}:{userId}:{exp}") as
+// "{exp}.{userId}.{hexsig}".
+async function monitorToken(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { callId } = req.body || {};
+  if (!callId) return res.status(400).json({ error: 'callId required' });
+
+  const { data: call } = await supabase
+    .from('calls')
+    .select('*')
+    .eq('id', callId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!call) return res.status(404).json({ error: 'Call not found' });
+  if (!['queued', 'ringing', 'in_progress'].includes(call.status)) {
+    return res.status(409).json({ error: 'Call is not live' });
+  }
+  if (!call.platform_call_id) {
+    // Phone/Twilio calls run on the Twilio relays, which do not expose a
+    // monitor stream. Say so instead of handing back a dead socket.
+    return res.status(409).json({ error: 'Monitoring is available for WhatsApp and Telegram calls' });
+  }
+
+  const secret = process.env.ASSISTANT_BRIDGE_SECRET;
+  const wsBase = (process.env.PUBLIC_ASSISTANT_WS_URL || process.env.ASSISTANT_BRIDGE_URL || '').trim();
+  if (!secret || !wsBase) {
+    return res.status(501).json({ error: 'Live monitoring is not configured (set PUBLIC_ASSISTANT_WS_URL and ASSISTANT_BRIDGE_SECRET)' });
+  }
+
+  const sessionId = `call-${call.platform_call_id}`;
+  const exp = Math.floor(Date.now() / 1000) + 6 * 3600;
+  const sig = createHmac('sha256', secret)
+    .update(`monitor:${sessionId}:${userId}:${exp}`)
+    .digest('hex');
+  const token = `${exp}.${userId}.${sig}`;
+  const base = wsBase.replace(/\/stream\/?$/, '').replace(/\/+$/, '');
+  return res.status(200).json({
+    token,
+    sessionId,
+    sampleRate: 16000,
+    url: `${base}/monitor/${encodeURIComponent(sessionId)}?token=${encodeURIComponent(token)}`,
+  });
 }
 
 async function getCall(req, res, supabase, userId) {
@@ -40,8 +93,20 @@ async function getCall(req, res, supabase, userId) {
 // One place where a hangup finishes a call: terminal status + ended_at, then
 // the shared summary/memory pass. maybeGenerateCallSummary is idempotent, so
 // racing the provider's own end-of-call callback costs at most one LLM call.
-async function completeCall(supabase, callId) {
-  await supabase.from('calls').update({ status: 'completed', ended_at: new Date().toISOString() }).eq('id', callId);
+// The status and duration are truthful: a call hung up before anyone answered
+// is 'canceled' with no talk time; a connected call is 'completed' with the
+// duration measured from the actual answer (answered_at).
+async function completeCall(supabase, call) {
+  const callId = call?.id || call;
+  const nowIso = new Date().toISOString();
+  const update = call?.answered_at
+    ? {
+        status: 'completed',
+        ended_at: nowIso,
+        duration_seconds: Math.max(0, Math.round((Date.now() - new Date(call.answered_at).getTime()) / 1000)),
+      }
+    : { status: 'canceled', ended_at: nowIso };
+  await supabase.from('calls').update(update).eq('id', callId).in('status', ['queued', 'ringing', 'in_progress']);
   await maybeGenerateCallSummary(supabase, callId);
 }
 
@@ -69,7 +134,7 @@ async function hangupCall(req, res, supabase, userId) {
         await supabase.from('social_calls').update({ status: 'completed', ended_at: new Date().toISOString() }).eq('id', call.platform_call_id).eq('user_id', userId);
       } catch {}
     }
-    await completeCall(supabase, callId);
+    await completeCall(supabase, call);
     return res.status(200).json({ ok: true });
   }
 
@@ -82,12 +147,12 @@ async function hangupCall(req, res, supabase, userId) {
         await supabase.from('social_calls').update({ status: 'completed', ended_at: new Date().toISOString() }).eq('id', call.platform_call_id).eq('user_id', userId);
       } catch {}
     }
-    await completeCall(supabase, callId);
+    await completeCall(supabase, call);
     return res.status(200).json({ ok: true });
   }
 
   if (call.platform === 'in_app' || (!call.twilio_call_sid && call.platform)) {
-    await completeCall(supabase, callId);
+    await completeCall(supabase, call);
     return res.status(200).json({ ok: true });
   }
 
@@ -110,7 +175,7 @@ async function hangupCall(req, res, supabase, userId) {
     return res.status(502).json({ error: 'Twilio could not end the call', detail });
   }
 
-  await completeCall(supabase, callId);
+  await completeCall(supabase, call);
   return res.status(200).json({ ok: true });
 }
 

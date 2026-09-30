@@ -9,13 +9,20 @@ Endpoints:
     rolling deploy does not send traffic to an instance whose configuration
     is broken.
   * `WS   /stream`  -- the ACAF bridge. One call per connection.
+  * `WS   /monitor/{session_id}` -- live audio monitoring for the app's
+    authenticated user: a copy of both directions of one call, for the
+    browser's listen-in control. Requires a short-lived HMAC token minted by
+    the app's own API (same shared secret as the bridge); the browser never
+    holds the secret, and a token from one call cannot listen to another.
 
-**This service must never be exposed to a browser.** It is the process that
-holds the provider keys, and the bridge secret is the only thing keeping an
-arbitrary internet client from opening sessions and spending credit. It is
-reached by the PHP relay only, over Render's private networking (`*.internal`)
-where available. `/healthz` and `/readyz` are the only unauthenticated
-endpoints and neither exposes a secret.
+**The `/stream` bridge must never be exposed to a browser.** It is the
+process that holds the provider keys, and the bridge secret is the only thing
+keeping an arbitrary internet client from opening sessions and spending
+credit. It is reached by the carrier relays only, over Render's private
+networking (`*.internal`) where available. `/healthz` and `/readyz` are the
+only unauthenticated endpoints and neither exposes a secret. `/monitor` IS
+browser-facing by design but is useless without a valid per-call token and
+carries audio copies only — it can never inject into a call.
 
 Audio never passes through Vercel. The path is:
 
@@ -173,7 +180,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def stream(websocket: WebSocket) -> None:
         await _handle_stream(websocket, state)
 
+    @app.websocket("/monitor/{session_id}")
+    async def monitor(session_id: str, websocket: WebSocket) -> None:
+        await _handle_monitor(session_id, websocket, state)
+
     return app
+
+
+async def _handle_monitor(session_id: str, websocket: WebSocket, state: ServiceState) -> None:
+    """Serve one authenticated monitoring subscription.
+
+    Auth is a per-call HMAC token minted by the app's API with the shared
+    bridge secret. Without it (or with another call's token) the socket is
+    refused before a single audio byte moves.
+    """
+    from app.monitor import TokenError, get_hub, run_monitor_socket, verify_monitor_token
+
+    settings = state.settings
+    if state.shutting_down:
+        await websocket.close(code=1013)
+        return
+
+    token = websocket.query_params.get("token") or ""
+    if settings.mock_mode:
+        user_id = "mock-user"
+    else:
+        try:
+            user_id = verify_monitor_token(
+                settings.bridge_secret or "", token, session_id=session_id
+            )
+        except TokenError as exc:
+            logger.warning(
+                "monitor auth refused",
+                extra={"sessionId": session_id, "reason": str(exc)},
+            )
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1008)
+            return
+
+    await websocket.accept()
+    try:
+        await websocket.send_json(
+            {"type": "ready", "sessionId": session_id, "userId": user_id}
+        )
+        stats = await run_monitor_socket(
+            websocket, hub=get_hub(), session_id=session_id
+        )
+        logger.info("monitor session ended", extra={"sessionId": session_id, **stats})
+    except WebSocketDisconnect:
+        logger.info("monitor websocket disconnected", extra={"sessionId": session_id})
+    except Exception as exc:  # noqa: BLE001 - monitoring must never crash the service
+        logger.warning(
+            "monitor session failed",
+            extra={"sessionId": session_id, "error": type(exc).__name__},
+        )
+        with contextlib.suppress(Exception):
+            await websocket.close(code=1011)
 
 
 async def _reaper_loop(state: ServiceState) -> None:

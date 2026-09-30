@@ -40,6 +40,7 @@ from loguru import logger
 
 from app.call_context import CallContext, TranscriptLog, resolve_call_context
 from app.config import Settings
+from app.monitor import DIRECTION_CALLER, DIRECTION_EMYSA, get_hub
 
 #: Last-resort opener, spoken verbatim only when the model cannot open the call
 #: itself (no LLM context available) or ASSISTANT_GREETING is set. Normally the
@@ -100,6 +101,8 @@ class PacedAudioSender:
         send_audio: Callable[[bytes], Awaitable[None]],
         send_control: Callable[[str], Awaitable[None]],
         on_speaking: Callable[[bool], Awaitable[None]] | None = None,
+        on_chunk: Callable[[bytes, int, int], None] | None = None,
+        is_muted: Callable[[], bool] | None = None,
         frame_ms: int = FRAME_MS,
         lead_secs: float = SEND_LEAD_SECS,
     ) -> None:
@@ -108,6 +111,14 @@ class PacedAudioSender:
         self._send_audio = send_audio
         self._send_control = send_control
         self._on_speaking = on_speaking
+        # Real-time monitor fan-out: called with each PCM chunk at the moment
+        # it is released to the carrier — i.e. exactly what the recipient is
+        # hearing. Never awaited; a slow monitor cannot slow the call.
+        self._on_chunk = on_chunk
+        # Recipient-side mute ("Emysa muted" on the call screen): drops the
+        # outbound audio at release time. Distinct from the browser's local
+        # monitor mute, which must never touch this path.
+        self._is_muted = is_muted
         self._frame_ms = frame_ms
         self._lead = lead_secs
 
@@ -119,6 +130,7 @@ class PacedAudioSender:
         self.frames_enqueued = 0
         self.frames_sent = 0
         self.frames_flushed = 0
+        self.frames_muted = 0
         self.send_errors = 0
         self.first_audio_logged = False
 
@@ -212,6 +224,23 @@ class PacedAudioSender:
                     await asyncio.sleep(wait)
 
                 try:
+                    muted = False
+                    if self._is_muted is not None:
+                        try:
+                            muted = bool(self._is_muted())
+                        except Exception:  # noqa: BLE001 - never block audio
+                            muted = False
+                    if muted:
+                        # "Emysa muted": the recipient hears silence, the
+                        # transcript still records the reply. Monitor audio
+                        # is dropped with it — there is nothing to hear.
+                        self.frames_muted += 1
+                        continue
+                    if self._on_chunk is not None:
+                        try:
+                            self._on_chunk(chunk, sample_rate, channels)
+                        except Exception:  # noqa: BLE001 - monitor is best-effort
+                            pass
                     wire = await self._serialize(chunk, sample_rate, channels)
                     if wire:
                         await self._send_audio(wire)
@@ -260,6 +289,7 @@ class PacedAudioSender:
             "framesEnqueued": self.frames_enqueued,
             "framesSent": self.frames_sent,
             "framesFlushed": self.frames_flushed,
+            "framesMuted": self.frames_muted,
             "sendErrors": self.send_errors,
         }
 
@@ -322,6 +352,12 @@ class _BaseConversation:
         self.user_id = user_id
         self._greeted = False
         self.call_active_source: str | None = None
+        #: Monotonic timestamp of the *actual answer* (call_active). The talk
+        #: timer and the recorded duration start here — never at dial time
+        #: and never at "first audio frame arrived".
+        self._answered_at: float | None = None
+        #: Monotonic timestamp of pipeline start (when the bridge attached).
+        self._started_at: float | None = None
         self._meter = _InboundMeter(session_id)
         #: Resolved app `calls` row (real calls only; None in mock mode or
         #: without Supabase creds). Owns every database write this call makes.
@@ -337,17 +373,39 @@ class _BaseConversation:
     def call_active(self) -> bool:
         return self.call_active_source is not None
 
-    async def note_call_active(self, source: str) -> bool:
-        """The callee has answered. Speak the greeting exactly once.
+    @property
+    def answered_at(self) -> float | None:
+        return self._answered_at
 
-        `source` records how we learned of it ("relay-signal", or
-        "first-inbound-audio" for relays that predate the explicit signal) so
-        the log shows which path fired. Returns True only for the call that
-        actually triggered the greeting.
+    def talk_seconds(self, now: float | None = None) -> int:
+        """Seconds since the actual answer (0 when the call never connected)."""
+        if self._answered_at is None:
+            return 0
+        now = now if now is not None else time.monotonic()
+        return max(0, int(now - self._answered_at))
+
+    def ring_seconds(self, now: float | None = None) -> int:
+        """Seconds spent ringing (dial -> answer, or dial -> end when unanswered)."""
+        if self._started_at is None:
+            return 0
+        end = self._answered_at
+        if end is None:
+            end = now if now is not None else time.monotonic()
+        return max(0, int(end - self._started_at))
+
+    async def note_call_active(self, source: str) -> bool:
+        """The callee answered. Speak the greeting exactly once.
+
+        `source` records how we learned of it ("relay-signal" = the provider's
+        real answer event; "first-inbound-audio" only for relays explicitly
+        opted into ASSISTANT_ANSWER_ON_FIRST_AUDIO) so the log shows which
+        path fired. Returns True only for the call that actually triggered
+        the greeting.
         """
         if self.call_active_source is not None:
             return False
         self.call_active_source = source
+        self._answered_at = time.monotonic()
         clog("INFO", self._session_id, "call connected, sending greeting", source=source)
         if self.call_context is not None:
             await self.call_context.set_in_progress()
@@ -609,6 +667,9 @@ class CallConversation(_BaseConversation):
         self.sender: PacedAudioSender | None = None
         self._stopped = False
         self._started_at: float | None = None
+        #: Recipient-side mute ("Emysa muted"), polled from the call row.
+        self._ai_muted = False
+        self._mute_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         from pipecat.pipeline.runner import PipelineRunner
@@ -651,6 +712,12 @@ class CallConversation(_BaseConversation):
             send_audio=self._send_audio,
             send_control=self._send_control,
             on_speaking=_speaking,
+            # Monitor: every released chunk is what the recipient is hearing
+            # at that instant — the honest source for "what Emysa says".
+            on_chunk=lambda pcm, rate, channels: get_hub().publish(
+                self._session_id, DIRECTION_EMYSA, rate, pcm
+            ),
+            is_muted=lambda: self._ai_muted,
         )
         self._output = BridgeOutput(
             sender=self.sender,
@@ -687,6 +754,10 @@ class CallConversation(_BaseConversation):
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self._output.started_event.wait(), timeout=2.0)
         self._started_at = time.monotonic()
+        if self.call_context is not None:
+            self._mute_task = asyncio.create_task(
+                self._poll_ai_muted(), name=f"mute-poll-{self._session_id}"
+            )
         clog(
             "INFO",
             self._session_id,
@@ -694,6 +765,21 @@ class CallConversation(_BaseConversation):
             bridgeSampleRate=rate,
             contextResolved=bool(self.call_context),
         )
+
+    async def _poll_ai_muted(self) -> None:
+        """Keep the recipient-side mute flag fresh (one cheap select / 3 s).
+
+        The call screen's "Emysa muted" toggle writes `calls.ai_muted`; the
+        sender drops outbound audio while it is set. The browser's *monitor*
+        mute is entirely separate and never reaches this path.
+        """
+        assert self.call_context is not None
+        while not self._stopped:
+            try:
+                self._ai_muted = await self.call_context.fetch_ai_muted()
+            except Exception:  # noqa: BLE001 - keep the last known value
+                pass
+            await asyncio.sleep(3.0)
 
     def _schedule_assistant_hangup(self) -> None:
         if self._stopped:
@@ -748,9 +834,17 @@ class CallConversation(_BaseConversation):
                 channels=frame.num_channels,
                 byte_count=len(frame.audio),
             )
-            if not self.call_active:
-                # Relays that predate the explicit call_active signal: caller
-                # audio only flows once the callee has picked up.
+            # Monitor: what the person on the call actually says. Published
+            # per frame; with no listeners it is a dict lookup and nothing else.
+            get_hub().publish(
+                self._session_id, DIRECTION_CALLER, frame.sample_rate, frame.audio
+            )
+            if not self.call_active and self._settings.answer_on_first_audio:
+                # Legacy relays only, explicitly opted in: caller audio is
+                # treated as proof the callee answered. The DEFAULT is off —
+                # the provider's answer event (ACAF `call_active`) is the
+                # source of truth, because early audio must never start the
+                # conversation timer while the phone is still ringing.
                 await self.note_call_active("first-inbound-audio")
         await self._task.queue_frame(frame)
 
@@ -785,6 +879,14 @@ class CallConversation(_BaseConversation):
         if self._stopped:
             return
         self._stopped = True
+        mute_task, self._mute_task = self._mute_task, None
+        if mute_task is not None:
+            mute_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await mute_task
+        # Tell any live monitors this call is over (they close cleanly); a
+        # monitor must never outlive the call it is listening to.
+        get_hub().close_room(self._session_id)
         clog("INFO", self._session_id, "conversation stopping", reason=reason, **self.stats())
         # Persist whatever the transcript has accumulated so far before the
         # pipeline is torn down — the end report then waits out the carrier's
@@ -795,9 +897,11 @@ class CallConversation(_BaseConversation):
         context = self.call_context
         if context is not None:
             active = self.call_active
-            duration = (
-                int(time.monotonic() - self._started_at) if self._started_at is not None else 0
-            )
+            # Talk duration runs from the ACTUAL answer (call_active) — the
+            # conversation timer's source of truth. A call that never
+            # connected has zero talk time; its ring time lives in
+            # answered_at/created_at on the row.
+            duration = self.talk_seconds()
             asyncio.create_task(
                 self._report_call_end(context, reason, active, duration),
                 name=f"call-end-report-{self._session_id}",
@@ -911,6 +1015,9 @@ class MockConversation(_BaseConversation):
             serializer=serializer,
             send_audio=send_audio,
             send_control=send_control,
+            on_chunk=lambda pcm, rate, channels: get_hub().publish(
+                session_id, DIRECTION_EMYSA, rate, pcm
+            ),
         )
         self._voiced = 0
         self._silent = 0
@@ -919,6 +1026,7 @@ class MockConversation(_BaseConversation):
 
     async def start(self) -> None:
         self.sender.start()
+        self._started_at = time.monotonic()
         clog("INFO", self._session_id, "mock conversation started")
 
     async def push_audio(self, frame: Any) -> None:
@@ -929,7 +1037,10 @@ class MockConversation(_BaseConversation):
             channels=frame.num_channels,
             byte_count=len(frame.audio),
         )
-        if not self.call_active:
+        get_hub().publish(
+            self._session_id, DIRECTION_CALLER, frame.sample_rate, frame.audio
+        )
+        if not self.call_active and self._settings.answer_on_first_audio:
             await self.note_call_active("first-inbound-audio")
 
         import array
@@ -962,6 +1073,7 @@ class MockConversation(_BaseConversation):
 
     async def stop(self, reason: str = "stopped") -> None:
         await self.sender.stop()
+        get_hub().close_room(self._session_id)
         clog("INFO", self._session_id, "conversation cleanup completed", reason=reason)
 
     def stats(self) -> dict[str, Any]:

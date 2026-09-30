@@ -349,6 +349,7 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .callBtn svg{width:29px; height:29px; color:#fff;}
 .callBtn.active .callBtnCircle{background:#fff; border-color:#fff;}
 .callBtn.active svg{color:#000;}
+.callBtn.monitorMuted .callBtnCircle{opacity:.45;}
 .callBtn.endCall .callBtnCircle{
   background:#880808;
   border:none; box-shadow:0 6px 18px -4px rgba(136,8,8,0.65);

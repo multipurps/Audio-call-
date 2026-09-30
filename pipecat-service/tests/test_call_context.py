@@ -150,12 +150,25 @@ class TestStatusTransitions:
         rest = FakeRest({"calls": [{"status": "ringing"}]})
         ctx = make_context(rest=rest)
         await ctx.set_in_progress()
-        assert rest.patches and rest.patches[0][2] == {"status": "in_progress"}
+        assert rest.patches, "expected an in_progress patch"
+        patch = rest.patches[0][2]
+        assert patch["status"] == "in_progress"
+        # The answer transition also stamps answered_at — the conversation
+        # timer and talk duration start at the actual answer.
+        assert patch.get("answered_at")
 
         rest2 = FakeRest({"calls": [{"status": "completed"}]})
         ctx2 = make_context(rest=rest2)
         await ctx2.set_in_progress()
         assert rest2.patches == []
+
+    async def test_answered_at_is_not_overwritten(self):
+        rest = FakeRest({"calls": [{"status": "ringing", "answered_at": "2026-01-01T00:00:00Z"}]})
+        ctx = make_context(rest=rest)
+        await ctx.set_in_progress()
+        patch = rest.patches[0][2]
+        assert patch["status"] == "in_progress"
+        assert "answered_at" not in patch
 
     async def test_happens_once_even_if_called_twice(self):
         rest = FakeRest({"calls": [{"status": "ringing"}]})

@@ -96,15 +96,16 @@ class FakeTTS(TTSService):
         yield TTSAudioRawFrame(audio=pcm, sample_rate=RATE, num_channels=1, context_id=context_id)
 
 
-def make_conversation(greeting="Hello from test"):
-    settings = load_settings(
-        {
-            "ASSISTANT_BRIDGE_SECRET": "x" * 32,
-            "OPENAI_API_KEY": "ok_test_key_value_123456",
-            "FISH_API_KEY": "fk_test_key_value_123456",
-            "ASSISTANT_GREETING": greeting,
-        }
-    )
+def make_conversation(greeting="Hello from test", extra_env=None):
+    env = {
+        "ASSISTANT_BRIDGE_SECRET": "x" * 32,
+        "OPENAI_API_KEY": "ok_test_key_value_123456",
+        "FISH_API_KEY": "fk_test_key_value_123456",
+        "ASSISTANT_GREETING": greeting,
+    }
+    if extra_env:
+        env.update(extra_env)
+    settings = load_settings(env)
     ser = TelegramFrameSerializer(
         "s1",
         params=TelegramFrameSerializer.InputParams(
@@ -171,14 +172,44 @@ class TestGreetingOnAnswer:
         finally:
             await conv.stop("test")
 
-    async def test_first_inbound_audio_also_triggers_the_greeting(self):
+    async def test_first_inbound_audio_does_not_fabricate_an_answer(self):
+        # The provider's answer event (ACAF call_active) is the source of
+        # truth. Early audio must never mark the call answered — that is what
+        # started the conversation timer while the phone was still ringing.
         conv, out, _, _ = make_conversation()
+        await conv.start()
+        try:
+            await conv.push_audio(caller_frame())
+            assert conv.call_active_source is None
+            assert conv.talk_seconds() == 0
+            await asyncio.sleep(0.6)
+            assert out == [], "no greeting before the real answer event"
+        finally:
+            await conv.stop("test")
+
+    async def test_first_inbound_audio_answers_only_when_opted_in(self):
+        # Legacy relays that cannot send the answer event can opt back in.
+        conv, out, _, _ = make_conversation(
+            extra_env={"ASSISTANT_ANSWER_ON_FIRST_AUDIO": "true"}
+        )
         await conv.start()
         try:
             await conv.push_audio(caller_frame())
             assert conv.call_active_source == "first-inbound-audio"
             await asyncio.sleep(1.2)
             assert out
+        finally:
+            await conv.stop("test")
+
+    async def test_talk_duration_runs_from_the_answer_not_from_dial(self):
+        conv, _, _, _ = make_conversation()
+        await conv.start()
+        try:
+            assert conv.talk_seconds() == 0
+            await conv.note_call_active("relay-signal")
+            await asyncio.sleep(0.35)
+            assert 0 <= conv.talk_seconds() <= 2
+            assert conv.ring_seconds() >= 0
         finally:
             await conv.stop("test")
 
@@ -324,8 +355,30 @@ class TestBridgeEndToEnd:
                 # The first thing back is the pong, not audio.
                 assert json.loads(ws.receive_text())["type"] == "pong"
 
-    def test_caller_audio_triggers_greeting_for_relays_without_the_signal(self):
+    def test_caller_audio_alone_never_triggers_the_greeting(self):
+        # Default: only the provider's answer event counts as an answer.
         app = create_app(load_settings({"ASSISTANT_MOCK_MODE": "true"}))
+        with TestClient(app) as client:
+            with client.websocket_connect("/stream") as ws:
+                ws.send_text(hello(platform="whatsapp"))
+                ws.receive_text()
+                ws.send_bytes(audio_frame(b"\x10\x00" * 320, seq=0))
+                ws.send_text(json.dumps({"type": "ping"}))
+                # The next thing back is the pong — no greeting audio.
+                message = ws.receive()
+                if message.get("bytes"):
+                    pytest.fail("greeting fired on first audio without an answer event")
+                assert json.loads(message["text"])["type"] == "pong"
+
+    def test_caller_audio_triggers_greeting_for_relays_without_the_signal(self):
+        app = create_app(
+            load_settings(
+                {
+                    "ASSISTANT_MOCK_MODE": "true",
+                    "ASSISTANT_ANSWER_ON_FIRST_AUDIO": "true",
+                }
+            )
+        )
         with TestClient(app) as client:
             with client.websocket_connect("/stream") as ws:
                 ws.send_text(hello(platform="whatsapp"))

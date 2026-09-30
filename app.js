@@ -1570,11 +1570,43 @@ let activeCallScreenId = null;
 let activeCallPollInterval = null;
 let callTimerInterval = null;
 let callAiMuted = false;
+// Ring vs talk time: the conversation timer runs from the ACTUAL answer
+// (calls.answered_at, written when the provider reports the answer event).
+// Until then the timer shows ring time — never a fabricated conversation.
+let callPlacedAtMs = null;
+let callAnsweredAtMs = null;
+
+function ensureCallTimer() {
+  clearInterval(callTimerInterval);
+  callTimerInterval = setInterval(() => {
+    const base = callAnsweredAtMs || callPlacedAtMs;
+    if (!base) {
+      $('callTimer').textContent = '00:00';
+      return;
+    }
+    const secs = Math.max(0, Math.floor((Date.now() - base) / 1000));
+    const m = String(Math.floor(secs / 60)).padStart(2, '0');
+    const s = String(secs % 60).padStart(2, '0');
+    $('callTimer').textContent = `${m}:${s}`;
+  }, 1000);
+}
+
+const CALL_ENDED_LABELS = {
+  completed: 'Call ended',
+  no_answer: 'No answer',
+  busy: 'Busy',
+  failed: 'Call failed',
+  canceled: 'Call canceled',
+};
 
 function applyCallStatusUpdate(callRow) {
   if (!callRow) return;
   if (Array.isArray(callRow.transcript)) {
     renderTranscript(callRow.transcript);
+  }
+  if (callRow.created_at && !callPlacedAtMs) {
+    callPlacedAtMs = new Date(callRow.created_at).getTime();
+    ensureCallTimer();
   }
   const st = callRow.status;
   if (st === 'queued') {
@@ -1582,6 +1614,13 @@ function applyCallStatusUpdate(callRow) {
   } else if (st === 'ringing') {
     setCallStatePill('connecting', 'Ringing…');
   } else if (st === 'in_progress' || st === 'in-progress') {
+    // The provider's answer event: talk time starts at answered_at. Rows
+    // written before this field existed fall back to the transition moment
+    // for display only — the recorded duration still comes from the server.
+    if (!callAnsweredAtMs) {
+      callAnsweredAtMs = callRow.answered_at ? new Date(callRow.answered_at).getTime() : Date.now();
+      ensureCallTimer();
+    }
     if (callAiMuted) {
       setCallStatePill('muted', 'Emysa muted');
     } else {
@@ -1595,7 +1634,7 @@ function applyCallStatusUpdate(callRow) {
       }
     }
   } else if (['completed', 'failed', 'no_answer', 'busy', 'canceled'].includes(st)) {
-    setCallStatePill('ended', st === 'completed' ? 'Call ended' : `Call ${st.replace('_', ' ')}`);
+    setCallStatePill('ended', CALL_ENDED_LABELS[st] || `Call ${String(st).replace('_', ' ')}`);
     clearActiveCall();
     closeCallScreen();
   }
@@ -1626,14 +1665,14 @@ function openCallScreen(callId, toNumber, contactName) {
     $('callMuteBtn').classList.remove('active');
     setCallStatePill('connecting', 'Connecting…');
 
-    const startedAt = Date.now();
-    clearInterval(callTimerInterval);
-    callTimerInterval = setInterval(() => {
-      const secs = Math.floor((Date.now() - startedAt) / 1000);
-      const m = String(Math.floor(secs / 60)).padStart(2, '0');
-      const s = String(secs % 60).padStart(2, '0');
-      $('callTimer').textContent = `${m}:${s}`;
-    }, 1000);
+    // Ring time until the provider's answer event lands (answered_at), then
+    // the conversation timer restarts from the real answer — see
+    // applyCallStatusUpdate. Never count talk time from the dial moment.
+    callPlacedAtMs = Date.now();
+    callAnsweredAtMs = null;
+    stopCallMonitor();
+    resetCallAudioBtn();
+    ensureCallTimer();
   }
 
   if (activeCallChannel) supabase.removeChannel(activeCallChannel);
@@ -1677,7 +1716,7 @@ function openCallScreen(callId, toNumber, contactName) {
     }).catch(() => {});
   };
 
-  $('callAudioBtn').onclick = () => $('callAudioBtn').classList.toggle('active');
+  $('callAudioBtn').onclick = () => toggleCallMonitor();
   $('callKeypadBtn').onclick = () => {
     $('dialStatus').textContent = '';
     updateDialMatch();
@@ -1685,11 +1724,144 @@ function openCallScreen(callId, toNumber, contactName) {
   };
 }
 
+// ---------- live call monitoring ----------
+// Hear BOTH sides of the real call: the person's speech (inbound) and Emysa's
+// TTS (outbound) streamed from the assistant service's /monitor websocket,
+// authenticated with a short-lived per-call token. Playback-only — this
+// never feeds audio back into the call, so muting or stopping it cannot
+// affect what the recipient hears, and there is no feedback loop into the
+// line. One monitor at a time: starting a new one closes the old first.
+let callMonitor = null;
+
+function resetCallAudioBtn() {
+  const btn = $('callAudioBtn');
+  if (!btn) return;
+  btn.classList.remove('active', 'monitorMuted');
+  btn.setAttribute('aria-label', 'Listen in to the call (hear both sides)');
+}
+
+function stopCallMonitor() {
+  const mon = callMonitor;
+  callMonitor = null;
+  if (!mon) return;
+  try { mon.ws?.close(); } catch {}
+  try { mon.ctx?.close(); } catch {}
+  resetCallAudioBtn();
+}
+
+async function toggleCallMonitor() {
+  if (callMonitor) {
+    if (callMonitor.state === 'live') {
+      // Local monitor mute only — Emysa keeps speaking to the recipient.
+      callMonitor.state = 'muted';
+      callMonitor.gain.gain.value = 0;
+      $('callAudioBtn').classList.remove('active');
+      $('callAudioBtn').classList.add('monitorMuted');
+      $('callAudioBtn').setAttribute('aria-label', 'Monitoring muted — tap to stop listening');
+      setCallStatePill('muted', 'Listening · muted');
+      return;
+    }
+    stopCallMonitor();
+    setCallStatePill('connected', 'Monitor off');
+    return;
+  }
+  const callId = activeCallScreenId;
+  if (!callId) return;
+  let payload = null;
+  try {
+    const resp = await authedFetch('/api/calls?action=monitor-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callId }),
+    });
+    payload = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      setCallStatePill('connecting', payload?.error || 'Monitoring unavailable');
+      return;
+    }
+  } catch {
+    setCallStatePill('connecting', 'Monitoring unavailable');
+    return;
+  }
+  if (activeCallScreenId !== callId) return; // screen changed while fetching
+
+  try {
+    startCallMonitor(payload.url, callId);
+  } catch (err) {
+    setCallStatePill('connecting', 'Monitoring unavailable');
+  }
+}
+
+function startCallMonitor(url, callId) {
+  stopCallMonitor(); // never two monitors / two AudioContexts for one screen
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) {
+    setCallStatePill('connecting', 'Audio not supported on this device');
+    return;
+  }
+  // Created inside the button's tap handler — the user gesture iOS Safari
+  // and the installed iOS PWA require before any audio may play.
+  const ctx = new AudioCtx();
+  const resume = ctx.resume?.();
+  if (resume?.catch) resume.catch(() => {});
+  const gain = ctx.createGain();
+  gain.gain.value = 1;
+  gain.connect(ctx.destination);
+
+  const ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+  const mon = { ws, ctx, gain, state: 'live', callId, nextTime: 0 };
+  callMonitor = mon;
+
+  ws.onmessage = (event) => {
+    if (callMonitor !== mon) return;
+    if (typeof event.data === 'string') {
+      try {
+        if (JSON.parse(event.data)?.type === 'ended') stopCallMonitor();
+      } catch {}
+      return;
+    }
+    const buf = event.data;
+    if (!buf || buf.byteLength < 6) return;
+    const view = new DataView(buf);
+    const rate = view.getUint32(1, true) || 16000;
+    const samples = new Int16Array(buf, 5, Math.floor((buf.byteLength - 5) / 2));
+    if (!samples.length) return;
+    const audio = ctx.createBuffer(1, samples.length, rate);
+    const channel = audio.getChannelData(0);
+    for (let i = 0; i < samples.length; i++) channel[i] = samples[i] / 32768;
+    const source = ctx.createBufferSource();
+    source.buffer = audio;
+    source.connect(gain);
+    // Gapless scheduling with a small lead; if the tab was backgrounded and
+    // the clock ran away, snap back to now rather than replaying stale audio.
+    const now = ctx.currentTime;
+    if (!mon.nextTime || mon.nextTime < now - 0.5 || mon.nextTime > now + 2) {
+      mon.nextTime = now + 0.08;
+    }
+    source.start(mon.nextTime);
+    mon.nextTime += audio.duration;
+  };
+  ws.onclose = () => {
+    if (callMonitor === mon) stopCallMonitor();
+  };
+  ws.onerror = () => {
+    if (callMonitor === mon) stopCallMonitor();
+  };
+
+  $('callAudioBtn').classList.add('active');
+  $('callAudioBtn').setAttribute('aria-label', 'Monitoring live — tap to mute listening');
+  setCallStatePill('connected', 'Listening in · both sides');
+}
+
 function closeCallScreen() {
   activeCallScreenId = null;
+  stopCallMonitor();
   clearInterval(callTimerInterval);
   clearInterval(activeCallPollInterval);
   activeCallPollInterval = null;
+  callPlacedAtMs = null;
+  callAnsweredAtMs = null;
   if (activeCallChannel) { supabase.removeChannel(activeCallChannel); activeCallChannel = null; }
   $('callScreen').classList.add('hidden');
   loadCalls();
