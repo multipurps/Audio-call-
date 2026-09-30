@@ -1141,21 +1141,20 @@ document.querySelectorAll('.callChannelItem').forEach((btn) => {
     $('callChannelMenu').classList.add('hidden');
     const channel = btn.dataset.channel;
     if (channel === 'emysa') {
-      $('emysaCallStatus').textContent = '';
-      $('emysaCallDialog').showModal();
+      // Direct in-app voice chat with Emysa — no phone number, no Twilio
+      // call, no inbound/outbound direction. iOS Safari only allows audio
+      // playback that traces back to a direct, synchronous tap — resuming
+      // the AudioContext here, inside the real tap, unlocks every later
+      // programmatic buffer playback on this context for the rest of the call.
+      const ctx = getAssistantAudioCtx();
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      if ('audioSession' in navigator) { try { navigator.audioSession.type = 'play-and-record'; } catch {} }
+      openAssistantCallScreen();
       return;
     }
     setCallChannel(channel);
   });
 });
-$('emysaCallForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const toNumber = normalizePhone($('emysaCallbackNumber').value);
-  if (!toNumber) { $('emysaCallStatus').textContent = 'Include your country code, for example +14155552671.'; return; }
-  $('emysaCallDialog').close();
-  beginPreCall({ toNumber, name: 'Emysa (callback to you)', kind: 'emysa' }, 'phone');
-});
-
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1682,10 +1681,6 @@ function renderCallsList(calls) {
   }
 }
 
-const CALL_TYPE_LABEL = {
-  inbound: { completed: 'Incoming Call', no_answer: 'Missed Call', failed: 'Missed Call' },
-  outbound: { completed: 'Outgoing Call', no_answer: 'No Answer', failed: 'Call Failed' },
-};
 function formatCallDuration(seconds) {
   if (!seconds) return null;
   if (seconds < 60) return `${seconds} second${seconds === 1 ? '' : 's'}`;
@@ -1705,11 +1700,12 @@ function openCallDetail(c, name, isKnown) {
     ? (isToday ? 'Today' : created.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }))
     : '';
   $('callDetailTime').textContent = created ? created.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '';
-  const direction = c.direction === 'inbound' ? 'inbound' : 'outbound';
-  const typeLabel = CALL_TYPE_LABEL[direction][c.status] || (direction === 'inbound' ? 'Incoming Call' : 'Outgoing Call');
-  $('callDetailType').textContent = typeLabel;
+  // Reuse the same status→sentence logic already trusted elsewhere in Recents,
+  // rather than guessing an Incoming/Outgoing/Missed label from `direction` —
+  // that doesn't cleanly apply to every kind of call this app places.
+  $('callDetailType').textContent = callSummaryLine(c) || '';
   const duration = formatCallDuration(c.duration_seconds);
-  $('callDetailDuration').textContent = duration || '';
+  $('callDetailDuration').textContent = duration ? `Duration: ${duration}` : '';
   $('callDetailDuration').classList.toggle('hidden', !duration);
   $('callDetailScriptCard').classList.toggle('hidden', !c.script);
   $('callDetailScript').textContent = c.script || '';
