@@ -59,6 +59,7 @@ from app.emotion import (
 )
 from app.providers import build_llm, build_stt, build_tts, build_vad
 from app.vocal import VocalisationPolicy, split_complete, to_transcript_text
+from app.expressive_context import build_personality_context
 
 #: System prompt for a natural phone conversation.
 #:
@@ -149,6 +150,11 @@ def build_system_prompt(
     overwritten by memory content.
     """
     prompt = settings.system_prompt or DEFAULT_SYSTEM_PROMPT
+    # Personality layer: who Emysa is beneath the behavioural rules. Only on
+    # the default prompt — an operator-supplied system_prompt owns persona
+    # outright. Prompt content only; no extra LLM call.
+    if not settings.system_prompt:
+        prompt = f"{prompt}\n\n{build_personality_context()}"
     emotion_block = format_emotion_state_block(emotion_state)
     prompt = f"{prompt}\n\n{emotion_block}"
     if extra_context:

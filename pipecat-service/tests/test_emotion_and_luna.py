@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 from app.config import Settings
 from app.emotion import (
     EmotionState,
@@ -96,3 +98,11 @@ class TestLunaConfig:
         assert "<emotion_state>" in prompt
         assert "[[END_CALL]]" in prompt
         assert "User prefers window seats" in prompt
+        # The expressive-personality layer is part of the default prompt.
+        assert "Who you are, underneath the technique" in prompt
+        # An operator-supplied system prompt owns the persona outright.
+        custom = build_system_prompt(
+            dataclasses.replace(s, system_prompt="You are a terse PA.")
+        )
+        assert "You are a terse PA." in custom
+        assert "Who you are, underneath the technique" not in custom
