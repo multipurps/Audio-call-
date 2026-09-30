@@ -26,7 +26,7 @@ from typing import Any
 
 from loguru import logger
 
-from app.config import Settings
+from app.config import Settings, llm_reasoning_extra
 
 # --------------------------------------------------------------------------
 # Mock audio
@@ -215,7 +215,10 @@ def build_llm(settings: Settings) -> Any:
         kwargs: dict[str, Any] = {
             "api_key": settings.resolved_llm_api_key(),
             "settings": OpenAILLMService.Settings(
-                model=settings.resolved_llm_model()
+                model=settings.resolved_llm_model(),
+                extra=llm_reasoning_extra(
+                    settings.resolved_llm_model(), settings.llm_reasoning_effort
+                ),
             ),
         }
         base_url = settings.resolved_llm_base_url()

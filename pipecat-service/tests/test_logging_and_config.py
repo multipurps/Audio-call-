@@ -384,3 +384,23 @@ class TestSanitizeVoiceId:
 
         for bad in (None, 123, "", "short", "has space in it 12345", "../etc/passwd12", 'a"b' * 5):
             assert sanitize_voice_id(bad) is None
+
+
+class TestLlmReasoningExtra:
+    def test_gpt6_luna_gets_effort_none(self):
+        from app.config import llm_reasoning_extra
+
+        assert llm_reasoning_extra("gpt-6-luna", "none") == {"reasoning_effort": "none"}
+        assert llm_reasoning_extra("openai/gpt-6-luna", "low") == {"reasoning_effort": "low"}
+
+    def test_non_reasoning_models_get_nothing(self):
+        from app.config import llm_reasoning_extra
+
+        assert llm_reasoning_extra("gpt-4o-mini", "none") == {}
+        assert llm_reasoning_extra("llama-3.3-70b", "none") == {}
+
+    def test_invalid_or_empty_effort_is_omitted(self):
+        from app.config import llm_reasoning_extra
+
+        assert llm_reasoning_extra("gpt-6-luna", "") == {}
+        assert llm_reasoning_extra("gpt-6-luna", "turbo") == {}

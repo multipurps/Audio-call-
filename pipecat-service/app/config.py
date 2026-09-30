@@ -143,6 +143,9 @@ class Settings:
     llm_base_url: str | None = None
     llm_temperature: float = 0.7
     llm_max_tokens: int = 200
+    #: reasoning_effort sent to OpenAI reasoning models (gpt-5+/gpt-6). "none"
+    #: keeps voice turns fast; "" disables sending it (e.g. non-reasoning models).
+    llm_reasoning_effort: str = "none"
     tts_provider: str = DEFAULT_TTS_PROVIDER
     tts_voice_id: str | None = None
     tts_model: str | None = None
@@ -369,6 +372,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         llm_base_url=_env(env, "ASSISTANT_LLM_BASE_URL") or _env(env, "LUNA_BASE_URL") or _env(env, "LLM_BASE_URL"),
         llm_temperature=_env_float(env, "ASSISTANT_LLM_TEMPERATURE", 0.7),
         llm_max_tokens=_env_int(env, "ASSISTANT_LLM_MAX_TOKENS", 200, minimum=1),
+        llm_reasoning_effort=(_env(env, "ASSISTANT_LLM_REASONING_EFFORT") or "none").strip().lower(),
         tts_provider=_env(env, "ASSISTANT_TTS_PROVIDER", DEFAULT_TTS_PROVIDER)
         or DEFAULT_TTS_PROVIDER,
         tts_voice_id=_env(env, "ASSISTANT_TTS_VOICE_ID"),
@@ -407,3 +411,21 @@ def sanitize_voice_id(value: object) -> str | None:
         return None
     value = value.strip()
     return value if _VOICE_ID_RE.match(value) else None
+
+
+_REASONING_MODEL_RE = re.compile(r"^(o[1-9]|gpt-[5-9])", re.IGNORECASE)
+_VALID_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
+
+
+def llm_reasoning_extra(model: str, effort: str) -> dict[str, str]:
+    """Extra request params for OpenAI reasoning models; {} for everything else.
+
+    gpt-6 defaults to a slow medium reasoning effort, which shows up on a phone
+    call as seconds of dead air. Non-reasoning models (gpt-4o-mini...) reject
+    the parameter, so it is only sent when the model name is a reasoning model.
+    """
+    bare = (model or "").split("/", 1)[-1]
+    if not _REASONING_MODEL_RE.match(bare):
+        return {}
+    effort = (effort or "").strip().lower()
+    return {"reasoning_effort": effort} if effort in _VALID_EFFORTS else {}
