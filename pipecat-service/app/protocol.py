@@ -255,12 +255,25 @@ CONTROL_PONG = "pong"
 CONTROL_ERROR = "error"
 CONTROL_STOPPED = "stopped"
 CONTROL_METRICS = "metrics"
+#: Relay -> assistant: the callee answered and audio now flows both ways.
+#: Until this arrives (or, for relays that predate it, the first inbound audio
+#: frame) the assistant holds its greeting, because the relay discards
+#: assistant audio produced while the call is still ringing.
+CONTROL_CALL_ACTIVE = "call_active"
 
 #: Control messages that carry no secrets and are safe to log verbatim.
 #: `hello` and `error` are excluded from automatic logging because `hello`
 #: carries the peer's session token and `error` may embed upstream detail.
 LOGGABLE_CONTROL_TYPES = frozenset(
-    {CONTROL_READY, CONTROL_INTERRUPT, CONTROL_HANGUP, CONTROL_PING, CONTROL_PONG, CONTROL_STOPPED}
+    {
+        CONTROL_READY,
+        CONTROL_INTERRUPT,
+        CONTROL_HANGUP,
+        CONTROL_PING,
+        CONTROL_PONG,
+        CONTROL_STOPPED,
+        CONTROL_CALL_ACTIVE,
+    }
 )
 
 

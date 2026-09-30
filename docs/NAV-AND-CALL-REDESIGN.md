@@ -1,3 +1,7 @@
+> **Note:** written before the call-system implementation pass. Mentions of
+> Groq below are historical — the app now uses OpenAI for the LLM/STT/vision
+> roles (see `docs/CALL-SYSTEM-IMPLEMENTATION-REPORT.md`).
+
 # Mobile navigation and confirmed calling
 
 ## What changed

@@ -9,7 +9,7 @@
 # `FishAudioTTSService.InputParams` was deprecated for `Settings`, and
 # `PipelineTask` moved under `pipecat.workers`). An unpinned range would let a
 # minor bump break call audio with no code change here.
-pipecat-ai[fish,groq,openai,silero,websocket]==1.11.0
+pipecat-ai[fish,openai,silero,websocket]==1.11.0
 
 # --- HTTP / ASGI -----------------------------------------------------------
 # FastAPI and uvicorn serve the ACAF bridge WebSocket and the health endpoints.
@@ -17,6 +17,12 @@ pipecat-ai[fish,groq,openai,silero,websocket]==1.11.0
 # explicitly so the runtime contract is visible in one place.
 fastapi==0.141.1
 uvicorn[standard]==0.53.0
+
+# --- Outbound HTTP (call context, transcript writes, end-of-call report) ----
+# app/call_context.py imports httpx directly. It was assumed to be a transitive
+# dependency, but Render's resolved install does not include it, which crashed
+# the service at import time (ModuleNotFoundError: httpx) on every boot.
+httpx>=0.27,<1
 
 # --- Structured logging ----------------------------------------------------
 loguru==0.7.3

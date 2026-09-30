@@ -26,7 +26,7 @@ from typing import Any
 
 from loguru import logger
 
-from app.config import Settings
+from app.config import Settings, llm_reasoning_extra
 
 # --------------------------------------------------------------------------
 # Mock audio
@@ -163,22 +163,41 @@ class MockTTS:
 # --------------------------------------------------------------------------
 
 
+#: Noise guidance for the transcription API: a fan, TV or generator behind
+#: the caller is the main source of hallucinated turns on phone audio, and
+#: OpenAI's transcription models accept a prompt that steers them away from
+#: transcribing background noise as speech. Same guidance the app's other
+#: call paths send (lib/sttClient.js).
+DEFAULT_STT_PROMPT = (
+    "Transcribe the caller's speech only. Ignore background noise such as "
+    "fans, air conditioners, televisions, generators, and music. If no "
+    "speech is present, return an empty transcript."
+)
+
+
 def build_stt(settings: Settings) -> Any:
     """Construct the STT service, or a mock when in mock mode."""
     if settings.mock_mode or settings.stt_provider == "mock":
         logger.info("using mock STT")
         return MockSTT()
 
-    if settings.stt_provider == "groq":
-        from pipecat.services.groq.stt import GroqSTTService
+    if settings.stt_provider == "openai":
+        from pipecat.services.openai.stt import OpenAISTTService
 
-        # Groq Whisper is batch, not streaming -- it cannot emit partial
-        # results. This is a known limitation, recorded here because the
-        # brief asks for partials "where supported" and this provider does
-        # not support them. See docs/AI-VOICE-ASSISTANT-REPORT.md.
-        return GroqSTTService(
-            api_key=settings.groq_api_key,
-            model=settings.resolved_stt_model(),
+        # Batch transcription per utterance (gated by the pipeline's Silero
+        # VAD): OpenAI's Audio API is request/response, so partial results
+        # are not possible on this provider -- a known limitation, recorded
+        # here because the brief asks for partials "where supported".
+        # Model ids verified against https://developers.openai.com/api/docs/models
+        # (gpt-4o-mini-transcribe default; ASSISTANT_STT_MODEL=whisper-1 as
+        # the manual fallback).
+        return OpenAISTTService(
+            api_key=settings.openai_api_key or settings.luna_api_key,
+            settings=OpenAISTTService.Settings(
+                model=settings.resolved_stt_model(),
+                prompt=settings.stt_prompt or DEFAULT_STT_PROMPT,
+                temperature=0.0,
+            ),
         )
 
     raise ValueError(f"unsupported STT provider {settings.stt_provider!r}")
@@ -190,21 +209,22 @@ def build_llm(settings: Settings) -> Any:
         logger.info("using mock LLM")
         return MockLLM()
 
-    if settings.llm_provider == "groq":
-        from pipecat.services.groq.llm import GroqLLMService
-
-        return GroqLLMService(
-            api_key=settings.groq_api_key,
-            model=settings.resolved_llm_model(),
-        )
-
-    if settings.llm_provider == "openai":
+    if settings.llm_provider in ("openai", "luna"):
         from pipecat.services.openai.llm import OpenAILLMService
 
-        return OpenAILLMService(
-            api_key=settings.openai_api_key,
-            model=settings.resolved_llm_model(),
-        )
+        kwargs: dict[str, Any] = {
+            "api_key": settings.resolved_llm_api_key(),
+            "settings": OpenAILLMService.Settings(
+                model=settings.resolved_llm_model(),
+                extra=llm_reasoning_extra(
+                    settings.resolved_llm_model(), settings.llm_reasoning_effort
+                ),
+            ),
+        }
+        base_url = settings.resolved_llm_base_url()
+        if base_url:
+            kwargs["base_url"] = base_url
+        return OpenAILLMService(**kwargs)
 
     raise ValueError(f"unsupported LLM provider {settings.llm_provider!r}")
 

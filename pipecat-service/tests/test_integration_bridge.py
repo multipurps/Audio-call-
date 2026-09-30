@@ -46,7 +46,7 @@ def real_settings():
     return load_settings(
         {
             "ASSISTANT_BRIDGE_SECRET": SECRET,
-            "GROQ_API_KEY": "gk_test_key_value_123456",
+            "OPENAI_API_KEY": "ok_test_key_value_123456",
             "FISH_API_KEY": "fk_test_key_value_123456",
         }
     )
@@ -63,6 +63,21 @@ def hello(**overrides) -> str:
     }
     body.update(overrides)
     return json.dumps(body)
+
+
+def receive_control(ws) -> str:
+    """Next *text* (control) message, skipping outbound audio frames.
+
+    The assistant now speaks on its own (greeting, replies), so binary audio
+    can legitimately arrive between control messages. Tests about the control
+    plane should not depend on whether the mock assistant has spoken yet.
+    """
+    while True:
+        message = ws.receive()
+        if message.get("text") is not None:
+            return message["text"]
+        if message.get("type") == "websocket.close":
+            raise AssertionError("socket closed while waiting for a control message")
 
 
 def audio_frame(payload: bytes, *, seq: int, rate: int = 16000) -> bytes:
@@ -98,8 +113,8 @@ class TestHealthEndpoints:
             response = client.get("/readyz")
         assert response.status_code == 200
         assert response.json()["providers"] == {
-            "stt": "groq",
-            "llm": "groq",
+            "stt": "openai",
+            "llm": "openai",
             "tts": "fish",
         }
 
@@ -225,7 +240,7 @@ class TestAudioFlow:
                 for seq in range(5):
                     ws.send_bytes(audio_frame(pcm16(*([1000] * 160)), seq=seq))
                 ws.send_text(json.dumps({"type": "ping"}))  # barrier
-                assert json.loads(ws.receive_text())["type"] == CONTROL_PONG
+                assert json.loads(receive_control(ws))["type"] == CONTROL_PONG
 
                 bridge = _bridge(client)
                 assert bridge.session.stats.frames_in == 5
@@ -240,7 +255,7 @@ class TestAudioFlow:
                 for seq in (0, 1, 2, 6):  # 3,4,5 missing
                     ws.send_bytes(audio_frame(pcm16(1), seq=seq))
                 ws.send_text(json.dumps({"type": "ping"}))
-                ws.receive_text()
+                receive_control(ws)
 
                 sequence = _bridge(client).session.inbound_sequences
                 assert sequence.missing == 3
@@ -254,7 +269,7 @@ class TestAudioFlow:
                 ws.send_bytes(b"this is not an ACAF frame")
                 ws.send_bytes(audio_frame(pcm16(1), seq=0))
                 ws.send_text(json.dumps({"type": "ping"}))
-                assert json.loads(ws.receive_text())["type"] == CONTROL_PONG
+                assert json.loads(receive_control(ws))["type"] == CONTROL_PONG
 
                 stats = _bridge(client).session.stats
                 # Only the valid frame counts as a received frame; the
@@ -351,7 +366,7 @@ class TestBargeIn:
                 ws.send_text(json.dumps({"type": "interrupt"}))
                 ws.send_bytes(audio_frame(pcm16(1), seq=0))
                 ws.send_text(json.dumps({"type": "ping"}))
-                assert json.loads(ws.receive_text())["type"] == CONTROL_PONG
+                assert json.loads(receive_control(ws))["type"] == CONTROL_PONG
                 assert _bridge(client).session.state is SessionState.ACTIVE
 
 
