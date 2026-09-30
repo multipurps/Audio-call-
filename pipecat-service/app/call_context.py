@@ -162,6 +162,9 @@ class CallContext:
     extra_context: str
     memories: list[str] = field(default_factory=list)
     prior_summaries: list[str] = field(default_factory=list)
+    #: ISO timestamp of the actual answer (set by ``set_in_progress``), so
+    #: talk duration can be measured from the answer rather than from dial.
+    answered_at: str | None = None
     _rest: _Rest | None = field(default=None, repr=False)
     _in_progress_done: bool = field(default=False, repr=False)
 
@@ -172,6 +175,9 @@ class CallContext:
 
         Conditional on the current status still being pre-connected so a
         completed/failed row is never resurrected by a late answer signal.
+        Records ``answered_at`` at the same moment — the conversation timer
+        and the recorded talk duration both start at the *actual answer*, not
+        at dial time and not at first audio frame.
         """
         if self._rest is None or self._in_progress_done:
             return
@@ -179,18 +185,22 @@ class CallContext:
         try:
             rows = await self._rest.select(
                 "calls",
-                select="status",
+                select="status, answered_at",
                 filters={"id": f"eq.{self.call_id}"},
                 limit=1,
             )
             current = rows[0].get("status") if rows else None
             if current in ("queued", "ringing"):
+                patch: dict[str, Any] = {"status": "in_progress"}
+                if rows and not rows[0].get("answered_at"):
+                    patch["answered_at"] = _iso_now()
                 await self._rest.patch(
                     "calls",
                     match={"id": f"eq.{self.call_id}"},
-                    body={"status": "in_progress"},
+                    body=patch,
                 )
                 self.status = "in_progress"
+                self.answered_at = patch.get("answered_at") or (rows[0].get("answered_at") if rows else None)
                 _log("INFO", self.session_id, "call status -> in_progress", callId=self.call_id)
         except Exception as exc:  # noqa: BLE001 - never break the audio path
             _log(
@@ -210,6 +220,18 @@ class CallContext:
             limit=1,
         )
         return rows[0].get("status") if rows else None
+
+    async def fetch_ai_muted(self) -> bool:
+        """The call screen's 'Emysa muted' toggle (recipient-side mute)."""
+        if self._rest is None:
+            return False
+        rows = await self._rest.select(
+            "calls",
+            select="ai_muted",
+            filters={"id": f"eq.{self.call_id}"},
+            limit=1,
+        )
+        return bool(rows[0].get("ai_muted")) if rows else False
 
     async def save_transcript(self, entries: list[dict[str, Any]]) -> None:
         """Debounced full-array write of the transcript (idempotent)."""

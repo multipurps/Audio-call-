@@ -118,6 +118,11 @@ async function relayCallStatus(req, res, supabase) {
   }
   if (!['whatsapp', 'telegram'].includes(platform)) return res.status(400).json({ error: 'platform must be whatsapp or telegram' });
 
+  // A real chat-session uuid. WaCalls sends the app's own chat session id
+  // here; the pipecat end-report and mp-relay send carrier bridge ids
+  // ("call-42") instead — never insert those as a chat session id (FK).
+  const bodySessionId = typeof sessionId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId) ? sessionId : null;
+
   const statusNormalizeMap = {
     ringing: 'ringing',
     answered: 'in_progress',
@@ -129,29 +134,50 @@ async function relayCallStatus(req, res, supabase) {
     ended: 'completed',
     'no-answer': 'no_answer',
     no_answer: 'no_answer',
-    busy: 'no_answer',
+    unanswered: 'no_answer',
+    rejected: 'no_answer',
+    declined: 'no_answer',
+    busy: 'busy',
+    canceled: 'canceled',
+    cancelled: 'canceled',
     failed: 'failed',
-    rejected: 'failed',
+    // "disconnected" with talk time is a completed call cut by the network;
+    // with no talk time it never connected at all. It MUST normalize to a
+    // terminal status — an unmapped value leaves the row stuck forever and
+    // no summary is ever generated.
+    disconnected: Number(durationSeconds) > 0 ? 'completed' : 'failed',
   };
   const callStatus = statusNormalizeMap[String(rawCallStatus).toLowerCase()] || rawCallStatus;
-  const isTerminal = ['completed', 'no_answer', 'failed'].includes(callStatus);
+  const isTerminal = ['completed', 'no_answer', 'failed', 'busy', 'canceled'].includes(callStatus);
+  const isAnswer = ['in_progress'].includes(callStatus);
+
+  // The provider call id may arrive directly, or encoded in the bridge
+  // session id ("call-42" -> "42"). Try every form so a report can always
+  // find the exact row it is about rather than falling back to "the most
+  // recent call to this number", which can hit the wrong call.
+  const platformCallIdCandidates = [];
+  if (platformCallId) platformCallIdCandidates.push(String(platformCallId));
+  if (typeof sessionId === 'string' && sessionId.startsWith('call-') && sessionId.length > 5) {
+    platformCallIdCandidates.push(sessionId.slice('call-'.length));
+  }
 
   let call = null;
   if (incomingCallId) {
     let q = supabase
       .from('calls')
-      .select('id, user_id, status, transcript, session_id')
+      .select('id, user_id, status, transcript, session_id, answered_at, created_at')
       .eq('id', incomingCallId);
     if (bodyUserId) q = q.eq('user_id', bodyUserId);
     const { data } = await q.maybeSingle();
     call = data;
   }
-  if (!call && platformCallId) {
+  for (const candidate of platformCallIdCandidates) {
+    if (call) break;
     let q = supabase
       .from('calls')
-      .select('id, user_id, status, transcript, session_id')
+      .select('id, user_id, status, transcript, session_id, answered_at, created_at')
       .eq('platform', platform)
-      .eq('platform_call_id', platformCallId);
+      .eq('platform_call_id', candidate);
     if (bodyUserId) q = q.eq('user_id', bodyUserId);
     const { data } = await q
       .order('created_at', { ascending: false })
@@ -160,14 +186,47 @@ async function relayCallStatus(req, res, supabase) {
     call = data;
   }
   const userId = bodyUserId || call?.user_id || null;
+  const activeStatuses = ['ringing', 'in_progress', 'queued'];
+  // Session-scoped matching first: this call was placed from a known chat
+  // conversation, so that conversation's own call is the one being reported
+  // on — never some other conversation's more recent call to the same person.
+  if (!call && bodySessionId && userId) {
+    let q = supabase
+      .from('calls')
+      .select('id, user_id, status, transcript, session_id, answered_at, created_at')
+      .eq('user_id', userId)
+      .eq('platform', platform)
+      .eq('session_id', bodySessionId)
+      .in('status', activeStatuses)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (peerIdentifier) q = q.eq('to_number', peerIdentifier);
+    const { data: rows } = await q;
+    call = rows?.[0] || null;
+    // Fall back to the session's own latest active call even when the peer
+    // number formatting differs slightly between report and row.
+    if (!call && peerIdentifier) {
+      const { data: looseRows } = await supabase
+        .from('calls')
+        .select('id, user_id, status, transcript, session_id, answered_at, created_at')
+        .eq('user_id', userId)
+        .eq('platform', platform)
+        .eq('session_id', bodySessionId)
+        .in('status', activeStatuses)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      call = looseRows;
+    }
+  }
   if (!call && peerIdentifier && userId) {
     const { data } = await supabase
       .from('calls')
-      .select('id, user_id, status, transcript, session_id')
+      .select('id, user_id, status, transcript, session_id, answered_at, created_at')
       .eq('user_id', userId)
       .eq('platform', platform)
       .eq('to_number', peerIdentifier)
-      .in('status', ['ringing', 'in_progress', 'queued'])
+      .in('status', activeStatuses)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -177,7 +236,20 @@ async function relayCallStatus(req, res, supabase) {
   if (call) {
     const callUpdate = { status: callStatus };
     if (durationSeconds) callUpdate.duration_seconds = durationSeconds;
-    if (isTerminal) callUpdate.ended_at = new Date().toISOString();
+    // The answer event stamps answered_at once — the conversation timer and
+    // the recorded talk duration both run from the actual answer.
+    if (isAnswer && !call.answered_at) {
+      callUpdate.answered_at = new Date().toISOString();
+    }
+    if (isTerminal) {
+      callUpdate.ended_at = new Date().toISOString();
+      // No provider duration? Derive the talk time from the answer; a call
+      // that never connected keeps zero rather than counting ring time.
+      if (!durationSeconds && call.answered_at) {
+        const talked = Math.round((Date.now() - new Date(call.answered_at).getTime()) / 1000);
+        if (Number.isFinite(talked) && talked > 0) callUpdate.duration_seconds = talked;
+      }
+    }
 
     if (Array.isArray(transcript)) {
       callUpdate.transcript = transcript;
@@ -206,23 +278,44 @@ async function relayCallStatus(req, res, supabase) {
     }
   }
 
-  // Post natural "the call ended" chat message into whichever chat session placed the call
-  // only when transitioning into a terminal state.
-  // Prefer the session id stored on the row (a real chat_sessions uuid). The
-  // body's sessionId is the CARRIER's bridge id (e.g. "call-42") for
-  // WaCalls/mp-relay/assistant reports — inserting that as a chat session id
-  // would violate the FK, and the follow-up would silently never appear.
-  const bodySessionId = typeof sessionId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId) ? sessionId : null;
+  // Post the call outcome into whichever chat session placed the call, once,
+  // only when transitioning into a terminal state. Prefer the session id
+  // stored on the row (a real chat_sessions uuid); bodySessionId is the same
+  // kind of id (WaCalls reports it), while mp-relay/assistant bridge ids like
+  // "call-42" are filtered out above — inserting those as a chat session id
+  // would violate the FK and the follow-up would silently never appear.
   const effectiveSessionId = call?.session_id || bodySessionId || null;
-  if (effectiveSessionId && isTerminal && call?.status !== callStatus) {
+  const transitionedToTerminal = isTerminal && call?.status !== callStatus;
+
+  // Finished calls get their structured summary (+ memory extraction) from
+  // the same shared service every other platform uses. Idempotent, so a
+  // duplicate callback costs nothing. Generated BEFORE the chat message so
+  // the message can carry the real summary instead of a generic "finished".
+  let summaryResult = { status: 'noop' };
+  if (call && isTerminal) {
+    summaryResult = await maybeGenerateCallSummary(supabase, call.id);
+  }
+
+  if (effectiveSessionId && transitionedToTerminal && userId) {
     const who = contactName || peerIdentifier || 'your contact';
     const channelName = platform === 'whatsapp' ? 'WhatsApp' : 'Telegram';
     const mins = durationSeconds ? Math.max(1, Math.round(durationSeconds / 60)) : null;
     let text;
-    if (callStatus === 'completed') {
+    if (summaryResult?.status === 'completed' && summaryResult.summary) {
+      // The real summary IS the report — never a generic "Call finished".
+      text = summaryResult.summary;
+    } else if (summaryResult?.status === 'skipped') {
+      text = callStatus === 'completed'
+        ? `Finished the call with ${who} on ${channelName}, but the conversation was not captured, so there is no summary.`
+        : `There is no summary for the call with ${who} on ${channelName} — there was no conversation to capture.`;
+    } else if (callStatus === 'completed') {
       text = mins ? `Finished the call with ${who} on ${channelName} (about ${mins} min).` : `Finished the call with ${who} on ${channelName}.`;
     } else if (callStatus === 'no_answer') {
       text = `I called ${who} on ${channelName}, but there was no answer.`;
+    } else if (callStatus === 'busy') {
+      text = `${who} was busy on ${channelName}.`;
+    } else if (callStatus === 'canceled') {
+      text = `The call with ${who} on ${channelName} was canceled.`;
     } else {
       text = `Couldn't complete the call with ${who} on ${channelName}.`;
     }
@@ -230,13 +323,7 @@ async function relayCallStatus(req, res, supabase) {
     await supabase.from('chat_sessions').update({ updated_at: new Date().toISOString() }).eq('id', effectiveSessionId);
   }
 
-  // Finished calls get their structured summary (+ memory extraction) from
-  // the same shared service every other platform uses. Idempotent, so a
-  // duplicate callback costs nothing.
-  if (call && isTerminal) {
-    await maybeGenerateCallSummary(supabase, call.id);
-  }
-  return res.status(200).json({ ok: true, callId: call?.id || null });
+  return res.status(200).json({ ok: true, callId: call?.id || null, summary: summaryResult?.status || null });
 }
 
 // Status is read straight from Supabase (fast, no relay round trip) — the
@@ -552,10 +639,22 @@ async function hangupSocialCall(req, res, supabase, userId) {
   }
 
   if (call?.id) {
+    // User-initiated hangup: 'completed' only if the call was actually
+    // answered (talk time runs from answered_at); an aborted ring is
+    // 'canceled' with no talk duration — never a fabricated conversation.
+    const nowIso = new Date().toISOString();
+    const update = call.answered_at
+      ? {
+          status: 'completed',
+          ended_at: nowIso,
+          duration_seconds: Math.max(0, Math.round((Date.now() - new Date(call.answered_at).getTime()) / 1000)),
+        }
+      : { status: 'canceled', ended_at: nowIso };
     await supabase
       .from('calls')
-      .update({ status: 'completed', ended_at: new Date().toISOString() })
-      .eq('id', call.id);
+      .update(update)
+      .eq('id', call.id)
+      .in('status', ['queued', 'ringing', 'in_progress']);
   }
   return res.status(200).json({ ok: true });
 }

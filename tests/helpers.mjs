@@ -19,7 +19,12 @@ export function database(seed = {}) {
       eq(key, value) { filters.push((r) => r[key] === value); return q; },
       neq(key, value) { filters.push((r) => r[key] !== value); return q; },
       gt(key, value) { filters.push((r) => r[key] > value); return q; },
-      is(key, value) { return q.eq(key, value); },
+      is(key, value) {
+        // Postgres `IS NULL` matches both NULL and absent columns; the
+        // in-memory rows use undefined for absent, so compare loosely for null.
+        if (value === null) { filters.push((r) => r[key] == null); return q; }
+        return q.eq(key, value);
+      },
       not(key, op, value) { return q.neq(key, value); },
       in(key, values) { filters.push((r) => values.includes(r[key])); return q; },
       order(key, options) { ordering = { key, ...options }; return q; },
@@ -56,6 +61,17 @@ export async function loadApi(file, db, fetcher, extraEnv = {}) {
       TWILIO_AUTH_TOKEN: 'test-only', TWILIO_FROM_NUMBER: '+14155550000', PUBLIC_APP_URL: 'https://example.test', ...extraEnv } },
   });
   const cache = new Map();
+  const builtins = new Map();
+  async function loadBuiltin(specifier) {
+    if (builtins.has(specifier)) return builtins.get(specifier);
+    const ns = await import(specifier);
+    const keys = Object.keys(ns);
+    const module = new vm.SyntheticModule(keys, function () {
+      for (const key of keys) this.setExport(key, ns[key]);
+    }, { context, identifier: specifier });
+    builtins.set(specifier, module);
+    return module;
+  }
   async function load(path) {
     if (cache.has(path)) return cache.get(path);
     let module;
@@ -68,7 +84,12 @@ export async function loadApi(file, db, fetcher, extraEnv = {}) {
       module = new vm.SourceTextModule(await readFile(path, 'utf8'), { context, identifier: path });
     }
     cache.set(path, module);
-    await module.link((specifier) => load(resolve(dirname(path), specifier)));
+    await module.link((specifier) => {
+      if (specifier.startsWith('node:') || (!specifier.startsWith('.') && !specifier.startsWith('/'))) {
+        return loadBuiltin(specifier);
+      }
+      return load(resolve(dirname(path), specifier));
+    });
     return module;
   }
   const module = await load(resolve(file));

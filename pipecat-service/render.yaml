@@ -66,6 +66,12 @@ services:
         value: "10"
       - key: ASSISTANT_MAX_CALL_SECONDS
         value: "1800"
+      # The provider's answer event (ACAF `call_active`) is the source of
+      # truth for "the callee answered"; first inbound audio is NOT, so the
+      # conversation timer cannot start while the phone is still ringing.
+      # Set "true" only for a legacy relay that cannot send the answer event.
+      - key: ASSISTANT_ANSWER_ON_FIRST_AUDIO
+        value: "false"
       - key: PYTHON_VERSION
         value: "3.11.9"
       # Supabase creds power the call-context resolver (objective/person

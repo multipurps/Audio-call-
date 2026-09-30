@@ -1,6 +1,6 @@
 import { LANGUAGE_NAMES } from '../lib/callLanguages.js';
 import { prepareCall, saveCallPlan, confirmCallPlan, attachCallPlans } from '../lib/callPlans.js';
-import { formatEmotionStateBlock, extractAndStripControlTags, shouldEndCall } from '../lib/emotionEngine.js';
+import { formatEmotionStateBlock, extractAndStripControlTags, shouldEndCall, toFishTtsText } from '../lib/emotionEngine.js';
 import { createChatCompletion, hasConfiguredLlm } from '../lib/llmClient.js';
 import { prepareTurnContext, consolidateAndStoreMemories, inferMemoryType } from '../lib/memoryManager.js';
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
@@ -90,8 +90,12 @@ async function speakText(req, res, supabase, userId) {
   const { text } = req.body || {};
   if (typeof text !== 'string' || !text.trim() || text.length > 4000) return res.status(400).json({ error: 'Text required (maximum 4000 characters)' });
 
-  const { cleanText } = extractAndStripControlTags(text);
-  const spokenText = (cleanText || text).trim().slice(0, 600);
+  // This HTTP path speaks Fish model s1, whose vocalisation tags are the
+  // (paren) set. Emysa's canonical markers ([laughing] etc.) are translated
+  // to the model's REAL audio tags so laughs/sighs/throat-clears are heard,
+  // internal [[...]] control tags are stripped, and unknown tags are dropped
+  // rather than read out loud. Verified against Fish's emotion-control docs.
+  const spokenText = toFishTtsText(text, { model: 's1' }).trim().slice(0, 600);
   if (!spokenText) return res.status(400).json({ error: 'Text required' });
 
   const { data: voice } = await supabase.from('voice_profiles').select('*').eq('user_id', userId).maybeSingle();
@@ -385,6 +389,7 @@ async function sendMessage(req, res, supabase, userId) {
     '- Speak like a perceptive, caring human friend — never a scripted corporate bot. Use natural contractions and rhythm.',
     '- Adapt to the user\'s emotional state: be gentle and unhurried if they are stressed or sad, playful when they are joking, and crisp when they are in a hurry.',
     '- Avoid repeating stock phrases like "How can I assist you today?" or "I understand your frustration."',
+    '- VOCAL EXPRESSION: when your reply is spoken aloud you may include occasional, contextual vocalisation markers — [laughing], [chuckling], [giggling], [sighing], [clearing throat], [gasping], [humming], and tone markers [soft], [whispering], [emphasis]. They become real sounds in your voice. A genuinely funny joke may earn [chuckling] before you answer; an awkward moment may fit [giggling]; a thinking pause may fit [sighing] or just "Hmm.". Serious, sad or business moments stay serious — never force laughter. Keep these occasional (several minutes apart at most), varied, and never use one instead of actually answering.',
     msgSource === 'call'
       ? '- You are currently speaking out loud on a live voice call with the user. Keep "reply" concise (1-2 spoken sentences), natural for TTS, with no markdown or bullet lists. If the user says goodbye or asks to end/hang up the call, include [[END_CALL]] at the very end of "reply".'
       : '',
@@ -471,38 +476,55 @@ async function sendMessage(req, res, supabase, userId) {
     }
 
     if (intent.action === 'retry') {
-      // Retry looks at the call history of the *chosen* line only. Twilio
-      // calls live in `calls`; WhatsApp/Telegram calls live in
-      // `social_calls`. Retrying on WhatsApp must never pick up (and
-      // re-dial) the last Twilio call, or vice versa.
-      if (callChannel === 'phone') {
-        const { data: lastCall } = await supabase
-          .from('calls')
-          .select('contact_id,to_number,objective')
+      // Retry resolves against THIS conversation's own call history — never
+      // the user's global "most recent call". The bug this replaces:
+      // WhatsApp/Telegram retries looked up the last `social_calls` row for
+      // the user, so after calling B from B's chat, "call him again" in A's
+      // chat dialled B. A conversation that already identifies a contact
+      // must never be redirected by another conversation's history, and a
+      // conversation with nobody identifiable must ask, not guess.
+      const { data: sessionCalls } = await supabase
+        .from('calls')
+        .select('contact_id,to_number,objective,platform,created_at')
+        .eq('user_id', userId)
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      const priorCalls = sessionCalls || [];
+      // The call to repeat: this conversation's most recent call on the
+      // chosen line; failing that, its most recent call on any line (the
+      // person is a property of the conversation, the line is not).
+      const lastCall = callChannel
+        ? priorCalls.find((c) => c.platform === callChannel) || null
+        : priorCalls[0] || null;
+      const identityRow = lastCall || priorCalls[0] || null;
+      if (identityRow?.contact_id) {
+        const { data: c } = await supabase.from('contacts').select('*').eq('id', identityRow.contact_id).maybeSingle();
+        contact = c;
+      }
+      retryToNumber = identityRow?.to_number || null;
+      retryObjective = lastCall?.objective || identityRow?.objective || null;
+
+      if (!retryToNumber) {
+        // A phone call prepared through the plan flow is this conversation's
+        // only trace of who to call.
+        const { data: plans } = await supabase
+          .from('call_plans')
+          .select('to_number,contact_id,objective')
           .eq('user_id', userId)
           .eq('session_id', sessionId)
           .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (lastCall?.contact_id) {
-          const { data: c } = await supabase.from('contacts').select('*').eq('id', lastCall.contact_id).maybeSingle();
+          .limit(1);
+        const plan = plans?.[0] || null;
+        if (plan?.contact_id && !contact) {
+          const { data: c } = await supabase.from('contacts').select('*').eq('id', plan.contact_id).maybeSingle();
           contact = c;
         }
-        retryToNumber = lastCall?.to_number || null;
-        retryObjective = lastCall?.objective || null;
-      } else {
-        const { data: lastSocial } = await supabase
-          .from('social_calls')
-          .select('peer_identifier')
-          .eq('user_id', userId)
-          .eq('platform', callChannel)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        retryToNumber = lastSocial?.peer_identifier || null;
-        if (retryToNumber) {
-          contact = (contacts || []).find((c) => (c.phone_number || '').replace(/[\s()-]/g, '') === retryToNumber) || null;
-        }
+        retryToNumber = plan?.to_number || null;
+        retryObjective = plan?.objective || retryObjective;
+      }
+      if (!retryToNumber && contact?.phone_number) {
+        retryToNumber = contact.phone_number;
       }
     } else if (target?.contactId) {
       contact = (contacts || []).find((c) => c.id === target.contactId);
