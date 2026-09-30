@@ -1,8 +1,6 @@
 import { confirmCallPlan } from '../lib/callPlans.js';
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
-import { wacallsHangup } from '../lib/wacallsClient.js';
-import { mpRelayRequest } from '../lib/mpRelayClient.js';
-import { maybeGenerateCallSummary } from '../lib/callSession.js';
+import { endCallRow } from '../lib/callHangup.js';
 import { createHmac } from 'node:crypto';
 
 export default async function handler(req, res) {
@@ -90,26 +88,6 @@ async function getCall(req, res, supabase, userId) {
 }
 
 
-// One place where a hangup finishes a call: terminal status + ended_at, then
-// the shared summary/memory pass. maybeGenerateCallSummary is idempotent, so
-// racing the provider's own end-of-call callback costs at most one LLM call.
-// The status and duration are truthful: a call hung up before anyone answered
-// is 'canceled' with no talk time; a connected call is 'completed' with the
-// duration measured from the actual answer (answered_at).
-async function completeCall(supabase, call) {
-  const callId = call?.id || call;
-  const nowIso = new Date().toISOString();
-  const update = call?.answered_at
-    ? {
-        status: 'completed',
-        ended_at: nowIso,
-        duration_seconds: Math.max(0, Math.round((Date.now() - new Date(call.answered_at).getTime()) / 1000)),
-      }
-    : { status: 'canceled', ended_at: nowIso };
-  await supabase.from('calls').update(update).eq('id', callId).in('status', ['queued', 'ringing', 'in_progress']);
-  await maybeGenerateCallSummary(supabase, callId);
-}
-
 async function hangupCall(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { callId } = req.body || {};
@@ -118,65 +96,9 @@ async function hangupCall(req, res, supabase, userId) {
   const { data: call } = await supabase.from('calls').select('*').eq('id', callId).eq('user_id', userId).maybeSingle();
   if (!call) return res.status(404).json({ error: 'Call not found' });
 
-  if (['completed', 'failed', 'no_answer', 'busy', 'canceled'].includes(call.status)) {
-    return res.status(200).json({ ok: true, alreadyEnded: true });
-  }
-
-  if (call.platform === 'whatsapp') {
-    if (call.platform_call_id) {
-      const { data: waRow } = await supabase.from('whatsapp_accounts').select('wacalls_session_id').eq('user_id', userId).maybeSingle();
-      if (waRow?.wacalls_session_id) {
-        await wacallsHangup(userId, waRow.wacalls_session_id, call.platform_call_id).catch((err) => {
-          console.error('wacallsHangup failed:', err.message); // best-effort - still mark completed below
-        });
-      }
-      try {
-        await supabase.from('social_calls').update({ status: 'completed', ended_at: new Date().toISOString() }).eq('id', call.platform_call_id).eq('user_id', userId);
-      } catch {}
-    }
-    await completeCall(supabase, call);
-    return res.status(200).json({ ok: true });
-  }
-
-  if (call.platform === 'telegram') {
-    if (call.platform_call_id) {
-      await mpRelayRequest(`/calls/${call.platform_call_id}`, { method: 'DELETE' }).catch((err) => {
-        console.error('mp-relay hangup failed:', err.message); // best-effort - still mark completed below
-      });
-      try {
-        await supabase.from('social_calls').update({ status: 'completed', ended_at: new Date().toISOString() }).eq('id', call.platform_call_id).eq('user_id', userId);
-      } catch {}
-    }
-    await completeCall(supabase, call);
-    return res.status(200).json({ ok: true });
-  }
-
-  if (call.platform === 'in_app' || (!call.twilio_call_sid && call.platform)) {
-    await completeCall(supabase, call);
-    return res.status(200).json({ ok: true });
-  }
-
-  if (!call.twilio_call_sid) return res.status(400).json({ error: 'Call has no active Twilio sid' });
-
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-
-  const resp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${call.twilio_call_sid}.json`, {
-    method: 'POST',
-    headers: {
-      Authorization: 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({ Status: 'completed' }),
-  });
-
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => '');
-    return res.status(502).json({ error: 'Twilio could not end the call', detail });
-  }
-
-  await completeCall(supabase, call);
-  return res.status(200).json({ ok: true });
+  const result = await endCallRow(supabase, userId, call);
+  if (!result.ok) return res.status(result.httpStatus || 502).json({ error: result.error, detail: result.detail });
+  return res.status(200).json(result.alreadyEnded ? { ok: true, alreadyEnded: true } : { ok: true });
 }
 
 async function muteCall(req, res, supabase, userId) {
