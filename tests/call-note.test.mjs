@@ -25,3 +25,25 @@ test('reports unsupported call, not-live and unreachable', async () => {
   const down = await sendCallNote({ platform_call_id: 'a' }, 'x', { env, fetchImpl: async () => { throw new Error('x'); } });
   assert.match(down.error, /could not reach/);
 });
+
+import { callSessionId } from '../lib/callNote.js';
+import { pcm16ToMulawSample, packFrame, parseFrame } from '../server/twilio-bridge.js';
+
+test('session id: social uses provider id, phone uses calls.id only when bridged', () => {
+  assert.equal(callSessionId({ platform: 'whatsapp', platform_call_id: 'w1', id: 'u' }, {}), 'call-w1');
+  assert.equal(callSessionId({ platform: 'phone', id: 'u1', platform_call_id: 'CA1' }, {}), null);
+  assert.equal(callSessionId({ platform: 'phone', id: 'u1' }, { TWILIO_VIA_PIPECAT: 'true' }), 'call-u1');
+});
+
+test('mu-law encode round-trips against known G.711 values', () => {
+  assert.equal(pcm16ToMulawSample(0), 0xff);
+  assert.equal(pcm16ToMulawSample(32124), 0x80);
+  assert.equal(pcm16ToMulawSample(-32124), 0x00);
+});
+
+test('ACAF frame pack/parse round trip', () => {
+  const buf = packFrame({ type: 1, encoding: 2, sampleRate: 8000, sequence: 5, payload: Buffer.from([1, 2, 3]) });
+  assert.equal(buf.length, 31);
+  const f = parseFrame(buf);
+  assert.deepEqual([f.type, f.encoding, f.sampleRate, [...f.payload]], [1, 2, 8000, [1, 2, 3]]);
+});

@@ -88,11 +88,11 @@ test('monitor-token refuses finished calls and lines with no monitor stream', as
   const done = await request(f.handler, 'monitor-token', { callId: 'call-done' });
   assert.equal(done.code, 409);
   assert.match(done.data.error, /not live/i);
-  // Twilio/PSTN relays expose no monitor websocket — say so instead of
-  // handing back a socket that will never carry audio.
+  // Phone calls only expose a monitor stream once bridged to the assistant
+  // service (TWILIO_VIA_PIPECAT) — say so instead of handing back a dead socket.
   const phone = await request(f.handler, 'monitor-token', { callId: 'call-phone' });
   assert.equal(phone.code, 409);
-  assert.match(phone.data.error, /WhatsApp and Telegram/i);
+  assert.match(phone.data.error, /not enabled/i);
 });
 
 test('monitor-token reports missing configuration honestly', async () => {

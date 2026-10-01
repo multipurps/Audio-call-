@@ -2,6 +2,7 @@ import { confirmCallPlan } from '../lib/callPlans.js';
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { endCallRow } from '../lib/callHangup.js';
 import { createHmac } from 'node:crypto';
+import { callSessionId } from '../lib/callNote.js';
 
 export default async function handler(req, res) {
   const supabase = getServiceClient();
@@ -46,10 +47,9 @@ async function monitorToken(req, res, supabase, userId) {
   if (!['queued', 'ringing', 'in_progress'].includes(call.status)) {
     return res.status(409).json({ error: 'Call is not live' });
   }
-  if (!call.platform_call_id) {
-    // Phone/Twilio calls run on the Twilio relays, which do not expose a
-    // monitor stream. Say so instead of handing back a dead socket.
-    return res.status(409).json({ error: 'Monitoring is available for WhatsApp and Telegram calls' });
+  const sessionId = callSessionId(call);
+  if (!sessionId) {
+    return res.status(409).json({ error: 'Listening in is not enabled for this call type yet' });
   }
 
   const secret = process.env.ASSISTANT_BRIDGE_SECRET;
@@ -58,7 +58,6 @@ async function monitorToken(req, res, supabase, userId) {
     return res.status(501).json({ error: 'Live monitoring is not configured (set PUBLIC_ASSISTANT_WS_URL and ASSISTANT_BRIDGE_SECRET)' });
   }
 
-  const sessionId = `call-${call.platform_call_id}`;
   const exp = Math.floor(Date.now() / 1000) + 6 * 3600;
   const sig = createHmac('sha256', secret)
     .update(`monitor:${sessionId}:${userId}:${exp}`)

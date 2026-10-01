@@ -385,7 +385,7 @@ async function sendMessage(req, res, supabase, userId) {
     const { data: noteCall } = await supabase.from('calls').select('*')
       .eq('user_id', userId).eq('session_id', sessionId).in('status', LIVE_CALL_STATUSES)
       .order('created_at', { ascending: false }).limit(1).maybeSingle();
-    if (noteCall?.platform_call_id) {
+    if (noteCall) {
       const result = await sendCallNote(noteCall, text.trim());
       const replyText = result.ok
         ? "Passed to Emysa. She'll work it in when the moment's right."

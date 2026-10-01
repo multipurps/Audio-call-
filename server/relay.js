@@ -12,7 +12,8 @@ import {
 import { maybeGenerateCallSummary } from '../lib/callSession.js';
 import { transcribeAudioBuffer } from '../lib/sttClient.js';
 import { isSpeechLikePcm16 } from './audioUtils.js';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, WebSocket } from 'ws';
+import { bridgeEnabled, handleTwilioViaPipecat } from './twilio-bridge.js';
 import { createClient } from '@supabase/supabase-js';
 
 const PORT = process.env.PORT || 8080;
@@ -30,6 +31,8 @@ if (process.env.NODE_ENV !== 'test') {
   console.log(`relay listening on :${PORT}`);
 
   wss.on('connection', (ws, req) => {
+    // Phone calls run on the Pipecat assistant service when enabled.
+    if (bridgeEnabled()) return handleTwilioViaPipecat(ws, req, { WS: WebSocket });
     const url = new URL(req.url, 'http://localhost');
     const callId = url.searchParams.get('callId');
     const state = {
