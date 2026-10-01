@@ -170,6 +170,41 @@ class TestStatusTransitions:
         assert patch["status"] == "in_progress"
         assert "answered_at" not in patch
 
+    async def test_still_marks_in_progress_when_answered_at_column_is_missing(self):
+        """Migration 018 not applied: selecting answered_at fails. The row must
+        still leave 'ringing' (status-only update) instead of staying on the
+        ringing screen for the whole conversation."""
+
+        class NoAnsweredAtRest(FakeRest):
+            async def select(self, table, *, select, filters, limit=None, order=None):
+                if "answered_at" in select:
+                    raise RuntimeError("select calls failed: HTTP 400 column calls.answered_at does not exist")
+                return await super().select(table, select=select, filters=filters, limit=limit, order=order)
+
+        rest = NoAnsweredAtRest({"calls": [{"status": "ringing"}]})
+        ctx = make_context(rest=rest)
+        await ctx.set_in_progress()
+        assert rest.patches, "row never left ringing"
+        body = rest.patches[0][2]
+        assert body == {"status": "in_progress"}
+
+    async def test_failed_write_can_be_retried_by_the_next_signal(self):
+        class FlakyRest(FakeRest):
+            fail = True
+
+            async def patch(self, table, *, match, body):
+                if self.fail:
+                    self.fail = False
+                    raise RuntimeError("patch calls failed: HTTP 503")
+                await super().patch(table, match=match, body=body)
+
+        rest = FlakyRest({"calls": [{"status": "ringing"}]})
+        ctx = make_context(rest=rest)
+        await ctx.set_in_progress()
+        assert rest.patches == []
+        await ctx.set_in_progress()
+        assert rest.patches and rest.patches[0][2]["status"] == "in_progress"
+
     async def test_happens_once_even_if_called_twice(self):
         rest = FakeRest({"calls": [{"status": "ringing"}]})
         ctx = make_context(rest=rest)

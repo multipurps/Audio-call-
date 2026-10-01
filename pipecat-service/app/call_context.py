@@ -129,7 +129,7 @@ class _Rest:
             f"{self._base}/rest/v1/{table}", params=params, headers=self._headers
         )
         if resp.status_code >= 400:
-            raise RuntimeError(f"select {table} failed: HTTP {resp.status_code}")
+            raise RuntimeError(f"select {table} failed: HTTP {resp.status_code} {_err_snippet(resp)}")
         data = resp.json()
         return data if isinstance(data, list) else []
 
@@ -142,7 +142,16 @@ class _Rest:
             json=body,
         )
         if resp.status_code >= 400:
-            raise RuntimeError(f"patch {table} failed: HTTP {resp.status_code}")
+            raise RuntimeError(f"patch {table} failed: HTTP {resp.status_code} {_err_snippet(resp)}")
+
+
+def _err_snippet(resp: Any) -> str:
+    """PostgREST's error body ("column calls.answered_at does not exist") says
+    exactly what is wrong and holds no secrets; the bare status code did not."""
+    try:
+        return (resp.text or "")[:200]
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 @dataclass
@@ -183,16 +192,34 @@ class CallContext:
             return
         self._in_progress_done = True
         try:
-            rows = await self._rest.select(
-                "calls",
-                select="status, answered_at",
-                filters={"id": f"eq.{self.call_id}"},
-                limit=1,
-            )
+            # `answered_at` comes from migration 018. If it hasn't been applied
+            # the select/patch below fail, which used to mean the row stayed
+            # "ringing" for the whole call. Degrade to a status-only update so
+            # the screen still shows Connected; the migration restores the
+            # exact answer timestamp.
+            have_answered_col = True
+            try:
+                rows = await self._rest.select(
+                    "calls",
+                    select="status, answered_at",
+                    filters={"id": f"eq.{self.call_id}"},
+                    limit=1,
+                )
+            except RuntimeError as exc:
+                have_answered_col = False
+                _log("ERROR", self.session_id,
+                     "calls.answered_at unreadable - apply sql/018_call_answered_at.sql",
+                     error=str(exc))
+                rows = await self._rest.select(
+                    "calls",
+                    select="status",
+                    filters={"id": f"eq.{self.call_id}"},
+                    limit=1,
+                )
             current = rows[0].get("status") if rows else None
             if current in ("queued", "ringing"):
                 patch: dict[str, Any] = {"status": "in_progress"}
-                if rows and not rows[0].get("answered_at"):
+                if have_answered_col and rows and not rows[0].get("answered_at"):
                     patch["answered_at"] = _iso_now()
                 await self._rest.patch(
                     "calls",
@@ -203,11 +230,12 @@ class CallContext:
                 self.answered_at = patch.get("answered_at") or (rows[0].get("answered_at") if rows else None)
                 _log("INFO", self.session_id, "call status -> in_progress", callId=self.call_id)
         except Exception as exc:  # noqa: BLE001 - never break the audio path
+            self._in_progress_done = False  # let the next signal retry
             _log(
                 "WARNING",
                 self.session_id,
                 "failed to mark call in_progress",
-                error=type(exc).__name__,
+                error=str(exc)[:300],
             )
 
     async def current_status(self) -> str | None:

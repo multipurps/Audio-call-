@@ -962,6 +962,7 @@ async function sendCallPhoto(file) {
 }
 
 function minimizeCallScreenToChat() {
+  stopRingback();
   $('callScreen').classList.add('hidden');
   if (assistantCallOpen || activeCallScreenId) {
     $('homeHeaderLogoWrap').classList.remove('hidden');
@@ -1578,17 +1579,82 @@ let callAnsweredAtMs = null;
 
 function ensureCallTimer() {
   clearInterval(callTimerInterval);
+  // The conversation timer only runs from the provider's answer event. While
+  // the phone is still ringing it holds at 00:00 (ring time is not talk time).
   callTimerInterval = setInterval(() => {
-    const base = callAnsweredAtMs || callPlacedAtMs;
-    if (!base) {
+    if (!callAnsweredAtMs) {
       $('callTimer').textContent = '00:00';
       return;
     }
-    const secs = Math.max(0, Math.floor((Date.now() - base) / 1000));
+    const secs = Math.max(0, Math.floor((Date.now() - callAnsweredAtMs) / 1000));
     const m = String(Math.floor(secs / 60)).padStart(2, '0');
     const s = String(secs % 60).padStart(2, '0');
     $('callTimer').textContent = `${m}:${s}`;
   }, 1000);
+  $('callTimer').textContent = '00:00';
+}
+
+// -- Local call tones ------------------------------------------------------
+// WhatsApp's own ringing plays on the recipient's phone and is not sent to
+// us, so the caller side would otherwise be silent. This is a locally
+// synthesised ringback (clearly a UI cue, not provider audio) that plays only
+// while the real status is 'ringing', plus a short chime on the real answer.
+let callToneCtx = null;
+let ringbackTimer = null;
+let ringbackActive = false;
+
+function getCallToneCtx() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    if (!callToneCtx || callToneCtx.state === 'closed') callToneCtx = new Ctx();
+    if (callToneCtx.state === 'suspended') callToneCtx.resume().catch(() => {});
+    return callToneCtx;
+  } catch {
+    return null;
+  }
+}
+
+function playToneBurst(freqs, durMs, gain = 0.06) {
+  const ctx = getCallToneCtx();
+  if (!ctx || ctx.state !== 'running') return;
+  const t0 = ctx.currentTime;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(gain, t0 + 0.03);
+  g.gain.setValueAtTime(gain, t0 + durMs / 1000 - 0.05);
+  g.gain.linearRampToValueAtTime(0, t0 + durMs / 1000);
+  g.connect(ctx.destination);
+  for (const f of freqs) {
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = f;
+    o.connect(g);
+    o.start(t0);
+    o.stop(t0 + durMs / 1000 + 0.02);
+  }
+}
+
+function startRingback() {
+  if (ringbackActive) return;
+  ringbackActive = true;
+  const ring = () => {
+    if (!ringbackActive) return;
+    playToneBurst([440, 480], 2000); // standard 2s ring, 4s cadence
+  };
+  ring();
+  ringbackTimer = setInterval(ring, 6000);
+}
+
+function stopRingback() {
+  ringbackActive = false;
+  clearInterval(ringbackTimer);
+  ringbackTimer = null;
+}
+
+function playConnectedChime() {
+  playToneBurst([660], 140, 0.07);
+  setTimeout(() => playToneBurst([880], 200, 0.07), 170);
 }
 
 const CALL_ENDED_LABELS = {
@@ -1613,13 +1679,16 @@ function applyCallStatusUpdate(callRow) {
     setCallStatePill('connecting', 'Starting call…');
   } else if (st === 'ringing') {
     setCallStatePill('connecting', 'Ringing…');
+    startRingback();
   } else if (st === 'in_progress' || st === 'in-progress') {
     // The provider's answer event: talk time starts at answered_at. Rows
     // written before this field existed fall back to the transition moment
     // for display only — the recorded duration still comes from the server.
+    stopRingback();
     if (!callAnsweredAtMs) {
       callAnsweredAtMs = callRow.answered_at ? new Date(callRow.answered_at).getTime() : Date.now();
       ensureCallTimer();
+      playConnectedChime();
     }
     if (callAiMuted) {
       setCallStatePill('muted', 'Emysa muted');
@@ -1634,6 +1703,7 @@ function applyCallStatusUpdate(callRow) {
       }
     }
   } else if (['completed', 'failed', 'no_answer', 'busy', 'canceled'].includes(st)) {
+    stopRingback();
     setCallStatePill('ended', CALL_ENDED_LABELS[st] || `Call ${String(st).replace('_', ' ')}`);
     clearActiveCall();
     closeCallScreen();
@@ -1670,6 +1740,8 @@ function openCallScreen(callId, toNumber, contactName) {
     // applyCallStatusUpdate. Never count talk time from the dial moment.
     callPlacedAtMs = Date.now();
     callAnsweredAtMs = null;
+    stopRingback();
+    getCallToneCtx(); // unlock WebAudio while we're still inside the tap that placed the call
     stopCallMonitor();
     resetCallAudioBtn();
     ensureCallTimer();
@@ -1855,6 +1927,7 @@ function startCallMonitor(url, callId) {
 }
 
 function closeCallScreen() {
+  stopRingback();
   activeCallScreenId = null;
   stopCallMonitor();
   clearInterval(callTimerInterval);
