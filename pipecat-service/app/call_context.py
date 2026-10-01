@@ -609,7 +609,21 @@ async def resolve_call_context(
     then proceeds with the default system prompt and without transcript
     persistence rather than failing outright.
     """
-    if settings.mock_mode or not settings.supabase_url or not settings.supabase_service_role_key:
+    if settings.mock_mode:
+        return None
+    if not settings.supabase_url or not settings.supabase_service_role_key:
+        # This used to be a silent `return None`, which made every call run
+        # with NO objective, NO person context, NO memory and NO transcript
+        # persistence, with nothing in the logs to say why. Say it loudly.
+        _log(
+            "ERROR",
+            session_id,
+            "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set on this service; "
+            "the call runs WITHOUT instructions, memory, live transcript or summary. "
+            "Set both env vars on the assistant service and redeploy",
+            urlSet=bool(settings.supabase_url),
+            serviceKeySet=bool(settings.supabase_service_role_key),
+        )
         return None
 
     rest = _Rest(settings.supabase_url, settings.supabase_service_role_key, timeout_secs=5.0)

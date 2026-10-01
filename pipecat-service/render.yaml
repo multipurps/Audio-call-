@@ -81,11 +81,14 @@ services:
       # two creds. PUBLIC_APP_URL lets the service report a call's end back
       # through /api/social-calling when the carrier's own callback never
       # arrived, which is what triggers the shared summary for such calls:
-      #   - key: SUPABASE_URL
-      #     sync: false
-      #   - key: SUPABASE_SERVICE_ROLE_KEY
-      #     sync: false
-      #   - key: ASSISTANT_ENABLE_PERSISTENT_MEMORY
-      #     value: "true"
+      # SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are REQUIRED for real
+      # calls: without them the call has no instructions, memory, live
+      # transcript or summary (the service logs an ERROR per call).
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ASSISTANT_ENABLE_PERSISTENT_MEMORY
+        value: "true"
       #   - key: PUBLIC_APP_URL
       #     value: https://your-app.vercel.app

@@ -6,6 +6,7 @@ import { prepareTurnContext, consolidateAndStoreMemories, inferMemoryType } from
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { wacallsPlaceAICall } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
+import { endCallRow, isEndCallRequest, LIVE_CALL_STATUSES } from '../lib/callHangup.js';
 import { createCallRecord, markCallPlaced, markCallFailed, findDuplicateActiveCall } from '../lib/callSession.js';
 import { transcribeAudioBuffer, resolveSttApiKey } from '../lib/sttClient.js';
 
@@ -350,6 +351,31 @@ async function sendMessage(req, res, supabase, userId) {
   const userMsg = await insertMessage(supabase, userId, sessionId, 'user', text.trim(), null, msgSource);
   const newMessages = [userMsg];
   const respond = (extra = {}) => res.status(200).json({ messages: newMessages, sessionId, isNewSession, ...extra });
+
+  // "End the call" typed/spoken in chat ends THIS conversation's live call.
+  // Scoped by the chat session id, never by "the most recent call overall",
+  // so it can't hang up a different person's call (same rule as retries).
+  if (isEndCallRequest(text)) {
+    const { data: liveCall } = await supabase.from('calls').select('*')
+      .eq('user_id', userId).eq('session_id', sessionId).in('status', LIVE_CALL_STATUSES)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    let replyText;
+    if (!liveCall) {
+      replyText = "There's no active call in this chat right now.";
+    } else {
+      let who = liveCall.to_number || 'them';
+      if (liveCall.contact_id) {
+        const { data: c } = await supabase.from('contacts').select('name').eq('id', liveCall.contact_id).eq('user_id', userId).maybeSingle();
+        if (c?.name) who = c.name;
+      }
+      const result = await endCallRow(supabase, userId, liveCall);
+      replyText = result.ok
+        ? (result.alreadyEnded ? `The call with ${who} had already ended.` : `Ended the call with ${who}.`)
+        : `I couldn't end the call with ${who}: ${result.error}. Use the End button on the call screen.`;
+    }
+    newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', replyText, liveCall?.id || null, msgSource));
+    return respond();
+  }
 
   if (!hasConfiguredLlm(process.env)) {
     newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "I'm not fully set up yet — the assistant's API key hasn't been added on the server.", null, msgSource));
