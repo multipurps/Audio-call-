@@ -39,7 +39,7 @@ import signal
 import time
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from loguru import logger
 
@@ -184,7 +184,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def monitor(session_id: str, websocket: WebSocket) -> None:
         await _handle_monitor(session_id, websocket, state)
 
+    @app.post("/calls/{session_id}/note")
+    async def call_note(session_id: str, request: Request) -> JSONResponse:
+        return await _handle_note(session_id, request, state)
+
     return app
+
+
+async def _handle_note(session_id: str, request: Request, state: ServiceState) -> JSONResponse:
+    """Server-to-server: the app's API passes the call owner's live note.
+
+    Authenticated with the bridge secret as a bearer token (the browser never
+    sees it; Vercel calls this after checking the user owns the call). The
+    note only enters the model's context; it never interrupts speech.
+    """
+    import hmac
+
+    from app.conversation import get_live_conversation
+
+    secret = state.settings.bridge_secret or ""
+    supplied = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+    if not secret or not hmac.compare_digest(secret.encode(), supplied.encode()):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+    text = body.get("text") if isinstance(body, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        return JSONResponse({"error": "text required"}, status_code=400)
+    conversation = get_live_conversation(session_id)
+    if conversation is None or not conversation.add_operator_note(text):
+        return JSONResponse({"error": "call not live"}, status_code=409)
+    return JSONResponse({"ok": True})
 
 
 async def _handle_monitor(session_id: str, websocket: WebSocket, state: ServiceState) -> None:

@@ -7,6 +7,7 @@ import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { wacallsPlaceAICall } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
 import { endCallRow, isEndCallRequest, LIVE_CALL_STATUSES } from '../lib/callHangup.js';
+import { sendCallNote } from '../lib/callNote.js';
 import { createCallRecord, markCallPlaced, markCallFailed, findDuplicateActiveCall } from '../lib/callSession.js';
 import { transcribeAudioBuffer, resolveSttApiKey } from '../lib/sttClient.js';
 
@@ -375,6 +376,23 @@ async function sendMessage(req, res, supabase, userId) {
     }
     newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', replyText, liveCall?.id || null, msgSource));
     return respond();
+  }
+
+  // While a call from THIS chat is live, a typed message is a note for Emysa
+  // (new info to pass along). Scoped by chat session like "end the call".
+  // Dial requests are left alone so "call Sam" still places a call.
+  if (msgSource !== 'call' && !/^\s*(call|dial|ring|phone)\b/i.test(text)) {
+    const { data: noteCall } = await supabase.from('calls').select('*')
+      .eq('user_id', userId).eq('session_id', sessionId).in('status', LIVE_CALL_STATUSES)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (noteCall?.platform_call_id) {
+      const result = await sendCallNote(noteCall, text.trim());
+      const replyText = result.ok
+        ? "Passed to Emysa. She'll work it in when the moment's right."
+        : `I couldn't pass that to Emysa: ${result.error}.`;
+      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', replyText, noteCall.id, msgSource));
+      return respond();
+    }
   }
 
   if (!hasConfiguredLlm(process.env)) {

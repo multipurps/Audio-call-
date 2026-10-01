@@ -631,6 +631,27 @@ class _TransportShim:
 # --------------------------------------------------------------------------
 
 
+#: Live real-pipeline conversations by bridge session id, so the control-plane
+#: `/calls/{session_id}/note` route can reach the one call a note is for.
+#: Registered when the LLM context exists, removed on stop.
+_LIVE_CONVERSATIONS: dict[str, Any] = {}
+
+
+def get_live_conversation(session_id: str) -> Any | None:
+    return _LIVE_CONVERSATIONS.get(session_id)
+
+
+#: Wrapper for a note from the person Emysa is calling on behalf of. The
+#: recipient cannot see or hear it; the model is told how to use it.
+OPERATOR_NOTE_PREFIX = (
+    "[Private note from the person you are calling on behalf of. The person on "
+    "the phone cannot see or hear this. Do not read it out, do not announce it, "
+    "and do not stop or restart what you are saying. Work it into the "
+    "conversation at the next natural moment, in your own words.] "
+)
+MAX_NOTE_CHARS = 1000
+
+
 class CallConversation(_BaseConversation):
     """Runs the real Pipecat pipeline for one bridged call."""
 
@@ -728,6 +749,7 @@ class CallConversation(_BaseConversation):
         holder["out"] = self._output
 
         self._context = build_llm_context()
+        _LIVE_CONVERSATIONS[self._session_id] = self
         pipeline, _llm = build_pipeline(
             settings=self._settings,
             transport=_TransportShim(BridgeInput(), self._output),
@@ -825,6 +847,22 @@ class CallConversation(_BaseConversation):
                 with contextlib.suppress(Exception):
                     await self._on_ended(reason)
 
+    def add_operator_note(self, text: str) -> bool:
+        """Add a live note from the call's owner to the model's context.
+
+        Appended to the context only: it does NOT run the model, so whatever
+        Emysa is saying right now is untouched and she picks the note up on
+        her next turn. Returns False if the call is not in a state to take it.
+        """
+        clean = " ".join((text or "").split())[:MAX_NOTE_CHARS]
+        if not clean or self._stopped or self._context is None:
+            return False
+        self._context.add_message(
+            {"role": "system", "content": OPERATOR_NOTE_PREFIX + clean}
+        )
+        clog("INFO", self._session_id, "operator note added", chars=len(clean))
+        return True
+
     async def push_audio(self, frame: Any) -> None:
         if self._stopped or self._task is None:
             return
@@ -879,6 +917,8 @@ class CallConversation(_BaseConversation):
         if self._stopped:
             return
         self._stopped = True
+        if _LIVE_CONVERSATIONS.get(self._session_id) is self:
+            _LIVE_CONVERSATIONS.pop(self._session_id, None)
         mute_task, self._mute_task = self._mute_task, None
         if mute_task is not None:
             mute_task.cancel()
