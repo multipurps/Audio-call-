@@ -376,11 +376,14 @@ def build_pipeline(
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=vad,
-            # 0.8 s of silence ends a turn. Shorter cuts people off mid-thought
-            # (a hesitation before a sentence reads as "done"); longer makes
-            # the assistant feel slow to respond. Pipecat's VAD makes this a
-            # real speech-end decision rather than a fixed timer.
-            user_turn_stop_timeout=0.8,
+            # Safety net only. Pipecat 1.11's default stop strategy is Smart
+            # Turn v3: it ends the turn at once when the sentence is complete
+            # and waits (up to its own 3 s silence limit) when the caller
+            # pauses mid-thought. This timeout force-ends a turn that no
+            # strategy has ended; at 0.8 s it fired before Smart Turn could
+            # wait, chopping speech into fragments and making Emysa answer
+            # half-sentences. Keep it above Smart Turn's 3 s.
+            user_turn_stop_timeout=4.0,
             audio_idle_timeout=1.0,
         ),
     )

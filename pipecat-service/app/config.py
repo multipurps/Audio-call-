@@ -28,7 +28,7 @@ from typing import Mapping
 # actually exists in app/providers.py -- this list is not aspirational.
 # --------------------------------------------------------------------------
 
-STT_PROVIDERS = ("openai", "mock")
+STT_PROVIDERS = ("openai", "deepgram", "mock")
 LLM_PROVIDERS = ("luna", "openai", "mock")
 TTS_PROVIDERS = ("fish", "mock")
 
@@ -50,6 +50,7 @@ OPENAI_COMPATIBLE_BASE_URLS = {
 #: manual fallback via ASSISTANT_STT_MODEL=whisper-1 if ever needed.
 #: gpt-6-luna is OpenAI's current general-purpose chat model.
 DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe"
+DEFAULT_DEEPGRAM_STT_MODEL = "nova-3-general"
 DEFAULT_LLM_MODEL = "gpt-6-luna"
 
 
@@ -152,6 +153,8 @@ class Settings:
 
     # -- credentials -----------------------------------------------------
     openai_api_key: str | None = None
+    #: Deepgram key; required only when ASSISTANT_STT_PROVIDER=deepgram.
+    deepgram_api_key: str | None = None
     luna_api_key: str | None = None
     fish_api_key: str | None = None
 
@@ -278,6 +281,10 @@ class Settings:
                 "ASSISTANT_STT_PROVIDER=openai. Groq STT was removed; there "
                 "is no other provider to fall back to."
             )
+        if self.stt_provider == "deepgram" and not self.deepgram_api_key:
+            raise ConfigError(
+                "DEEPGRAM_API_KEY is required when ASSISTANT_STT_PROVIDER=deepgram"
+            )
         if self.llm_provider in ("openai", "luna") and not (
             self.luna_api_key or self.openai_api_key
         ):
@@ -330,6 +337,8 @@ class Settings:
         )
 
     def resolved_stt_model(self) -> str:
+        if self.stt_provider == "deepgram":
+            return self.stt_model or DEFAULT_DEEPGRAM_STT_MODEL
         return self.stt_model or DEFAULT_STT_MODEL
 
     def resolved_llm_model(self) -> str:
@@ -385,6 +394,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         tts_voice_id=_env(env, "ASSISTANT_TTS_VOICE_ID"),
         tts_model=_env(env, "ASSISTANT_TTS_MODEL"),
         openai_api_key=_env(env, "OPENAI_API_KEY"),
+        deepgram_api_key=_env(env, "DEEPGRAM_API_KEY"),
         luna_api_key=luna_key,
         fish_api_key=_env(env, "FISH_API_KEY"),
         system_prompt=_env(env, "ASSISTANT_SYSTEM_PROMPT"),

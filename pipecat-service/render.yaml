@@ -50,6 +50,9 @@ services:
         sync: false
       - key: FISH_API_KEY
         sync: false
+      # Only needed if ASSISTANT_STT_PROVIDER=deepgram (streaming STT).
+      - key: DEEPGRAM_API_KEY
+        sync: false
 
       # --- Non-secret configuration ---------------------------------------
       - key: ASSISTANT_STT_PROVIDER

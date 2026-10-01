@@ -279,7 +279,7 @@ class TestSettingsValidation:
     def test_unknown_provider_rejected_with_the_valid_list(self):
         with pytest.raises(ConfigError, match="ASSISTANT_STT_PROVIDER must be one of"):
             load_settings(
-                {"ASSISTANT_MOCK_MODE": "true", "ASSISTANT_STT_PROVIDER": "deepgram"}
+                {"ASSISTANT_MOCK_MODE": "true", "ASSISTANT_STT_PROVIDER": "groq"}
             )
 
     def test_unknown_llm_provider_rejected(self):

@@ -200,6 +200,21 @@ def build_stt(settings: Settings) -> Any:
             ),
         )
 
+    if settings.stt_provider == "deepgram":
+        from pipecat.services.deepgram.stt import DeepgramSTTService
+
+        # Streaming WebSocket STT: interim results flow while the caller is
+        # still speaking and the final transcript lands right after VAD stop,
+        # unlike OpenAI's batch API which only starts transcribing at turn end.
+        return DeepgramSTTService(
+            api_key=settings.deepgram_api_key,
+            settings=DeepgramSTTService.Settings(
+                model=settings.resolved_stt_model(),
+                punctuate=True,
+                interim_results=True,
+            ),
+        )
+
     raise ValueError(f"unsupported STT provider {settings.stt_provider!r}")
 
 
