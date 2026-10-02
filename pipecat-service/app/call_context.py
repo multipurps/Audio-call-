@@ -154,6 +154,23 @@ def _err_snippet(resp: Any) -> str:
         return ""
 
 
+#: Mirrors lib/callLanguages.js (the app's Settings language list).
+LANGUAGE_NAMES = {
+    "en": "English", "es": "Spanish", "fr": "French", "pt": "Portuguese", "de": "German",
+    "ha": "Hausa", "yo": "Yoruba", "ig": "Igbo", "sw": "Swahili", "ar": "Arabic",
+    "hi": "Hindi", "zh": "Chinese",
+}
+
+
+async def _fetch_language(rest, *, user_id):
+    try:
+        rows = await rest.select("profiles", select="language", filters={"user_id": f"eq.{user_id}"}, limit=1)
+    except Exception:  # noqa: BLE001 - language is best-effort; default English
+        return "en"
+    code = str((rows[0] if rows else {}).get("language") or "en").lower()
+    return code if code in LANGUAGE_NAMES else "en"
+
+
 @dataclass
 class CallContext:
     """The resolved ``calls`` row plus the writes the call makes against it."""
@@ -171,6 +188,9 @@ class CallContext:
     extra_context: str
     memories: list[str] = field(default_factory=list)
     prior_summaries: list[str] = field(default_factory=list)
+    #: The user's chosen language from Settings (ISO code). Drives STT and the
+    #: reply language so a mis-heard word can never switch the call language.
+    language: str = "en"
     #: ISO timestamp of the actual answer (set by ``set_in_progress``), so
     #: talk duration can be measured from the answer rather than from dial.
     answered_at: str | None = None
@@ -610,6 +630,14 @@ def build_extra_context(context: CallContext) -> str:
         "This is a live phone call — everything you write is spoken aloud.",
         f"You are speaking with: {context.contact_name}.",
     ]
+    lang_name = LANGUAGE_NAMES.get(context.language)
+    if lang_name:
+        lines.append(
+            f"Speak only {lang_name} for the whole call, whatever the other person's words "
+            f"look like they were transcribed as. Never switch language on your own; if a "
+            f"transcript looks like another language it is almost certainly a mis-hearing, "
+            f"so answer in {lang_name} or ask them to repeat."
+        )
     if context.objective:
         lines.append(f"Objective for this call: {context.objective}")
     if context.instructions and context.instructions != context.objective:
@@ -684,7 +712,7 @@ async def resolve_call_context(
         contact_id = str(contact_id) if contact_id else None
         to_number = str(row.get("to_number") or "")
 
-        contact_name, memories, summaries = await asyncio.gather(
+        contact_name, memories, summaries, language = await asyncio.gather(
             _fetch_contact_name(rest, contact_id=contact_id, to_number=to_number, session_id=session_id),
             _fetch_memories(rest, user_id=db_user_id, contact_id=contact_id, session_id=session_id)
             if settings.enable_persistent_memory and db_user_id
@@ -692,6 +720,7 @@ async def resolve_call_context(
             _fetch_prior_summaries(rest, user_id=db_user_id, contact_id=contact_id, session_id=session_id)
             if db_user_id
             else _empty(),
+            _fetch_language(rest, user_id=db_user_id) if db_user_id else _default_language(),
         )
 
         context = CallContext(
@@ -708,6 +737,7 @@ async def resolve_call_context(
             extra_context="",
             memories=memories,
             prior_summaries=summaries,
+            language=language if isinstance(language, str) else "en",
             _rest=rest,
         )
         context.extra_context = build_extra_context(context)
@@ -735,6 +765,10 @@ async def resolve_call_context(
         # so it is only closed when we return None.
         if row is None:
             await rest.aclose()
+
+
+async def _default_language() -> str:
+    return "en"
 
 
 async def _empty() -> list[str]:  # pragma: no cover - trivial

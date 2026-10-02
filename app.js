@@ -309,6 +309,7 @@ supabase.auth.onAuthStateChange((_event, session) => {
   } else {
     currentUser = null;
     currentSession = null;
+    homeChatInitializedFor = null;
     stopMessagePolling();
     $('authBoot').style.display = 'none';
     $('pendingBox').style.display = 'none';
@@ -364,8 +365,15 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') window.__warmBackends?.();
 });
 
+let homeChatInitializedFor = null;
 async function initHomeChat() {
   if (!currentUser) return;
+  // Supabase re-fires sign-in on every token refresh and whenever the app comes
+  // back to the foreground. Resetting here threw away the open chat and showed
+  // a blank new one each time. Start fresh only once per sign-in; new chats are
+  // opened manually with the pencil button.
+  if (homeChatInitializedFor === currentUser.id) return;
+  homeChatInitializedFor = currentUser.id;
   chatRevision++;
   clearPreCallContext();
   savedContacts = [];
@@ -1043,7 +1051,9 @@ function openAssistantCallScreen() {
   // waits on you, and it means you hear the voice working immediately
   // rather than only after your own input round-trips successfully.
   (async () => {
-    const greeting = "Hi, it's Emysa. What's on your mind?";
+    // Short and varied so it never sounds like a script.
+    const openers = ['Yeah, go ahead.', 'Mm-hm, I’m listening.', 'Okay, tell me.', 'Yes? What’s going on?'];
+    const greeting = openers[Math.floor(Math.random() * openers.length)];
     appendCallTranscriptLine('ai', greeting);
     await speakReply(greeting);
     if (assistantCallOpen && !assistantMuted) startAssistantListening();
@@ -2061,10 +2071,18 @@ function renderCallsList(calls) {
         <div class="recentPreview">${escapeHtml(subtitle)}</div>
       </div>`;
 
-    const open = () => openCallDetail(c, name, isKnown);
+    const details = () => openCallDetail(c, name, isKnown);
+    el.querySelector('.recentBody').insertAdjacentHTML('afterend', `<button type="button" class="recentInfoBtn" aria-label="Call details"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9.25" stroke="currentColor" stroke-width="1.5"/><path d="M12 11v5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="8" r="1.1" fill="currentColor"/></svg></button>`);
+    el.querySelector('.recentInfoBtn').addEventListener('click', (event) => { event.stopPropagation(); details(); });
+    // Tapping a call opens its chat. Only a call that has no chat falls back
+    // to the details sheet.
+    const open = () => {
+      if (c.session_id) { openChatSession(c.session_id); document.querySelector('[data-tab=home]').click(); }
+      else details();
+    };
     el.tabIndex = 0;
     el.setAttribute('role', 'button');
-    el.setAttribute('aria-label', `Call details for ${name}`);
+    el.setAttribute('aria-label', `Open conversation with ${name}`);
     el.onclick = open;
     el.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } };
     list.appendChild(el);

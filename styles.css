@@ -860,16 +860,48 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 
 .transcriptEndReason{align-self:center; text-align:center; max-width:92%; margin:14px 0 4px; padding:12px 14px; border-radius:16px; background:rgba(255,69,58,.14); color:#ffd6d2; font-size:14.5px; line-height:1.4;}
 
-/* ---------- Recent: calls list ---------- */
-#screen-recent .recentSubTabs{background:none; border:none; padding:0; gap:26px; width:auto; align-self:flex-start; margin:max(env(safe-area-inset-top,0px),46px) 0 14px 6px;}
-#screen-recent .recentSubTabBtn{flex:none; padding:0; border-radius:0; font-size:21px; font-weight:500; color:#8e8e93; background:none;}
-#screen-recent .recentSubTabBtn.active{background:none; color:#fff; font-weight:500;}
-#screen-recent .searchBar{background:#1c1c1e; border-radius:999px; padding:14px 16px; margin-bottom:18px;}
-#screen-recent .searchBar input{font-size:18px;}
-#callsList{display:flex; flex-direction:column; gap:12px;}
-.recentRow{background:#1c1c1c; border-radius:26px; padding:20px 18px; margin:0; border:none; align-items:center; gap:14px; cursor:pointer;}
-.recentAvatar{width:56px; height:56px; font-size:22px; font-weight:500; background:radial-gradient(circle at 30% 25%, #c97a7a 0%, #7a3a3f 45%, #4a3f6b 100%);}
-.recentTop{display:flex; align-items:baseline; justify-content:space-between; gap:10px;}
-.recentName{font-size:22px; font-weight:500; margin:0; color:#f2e6e6; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-.recentDate{font-size:16px; color:#cfc3c3;}
-.recentPreview{font-size:18px; color:#cfc3c3; margin-top:4px;}
+/* ---------- Recent: compact list in the app theme ---------- */
+#screen-recent h1.pageTitle{display:none;}
+#screen-recent .recentSubTabs{background:none; border:none; padding:0; gap:20px; width:auto; align-self:flex-start; margin:calc(var(--safe-top) + 14px) 0 12px 4px;}
+#screen-recent .recentSubTabBtn{flex:none; padding:0; border-radius:0; font-size:16px; font-weight:600; color:var(--dim); background:none;}
+#screen-recent .recentSubTabBtn.active{background:none; color:#fff;}
+#screen-recent .searchBar{background:#1c1c1e; border-radius:12px; padding:9px 12px; margin-bottom:12px; gap:8px;}
+#screen-recent .searchBar svg{width:16px; height:16px;}
+#screen-recent .searchBar input{font-size:15px;}
+#callsList, #recentChatsList{display:flex; flex-direction:column; gap:8px; padding-bottom:120px;}
+.recentRow{background:#1c1c1e; border-radius:16px; padding:9px 12px; margin:0; border:none; align-items:center; gap:10px; cursor:pointer;}
+.recentRow:active{background:#262628;}
+.recentAvatar{width:40px; height:40px; font-size:16px; font-weight:600; background:var(--accent); color:#04202a;}
+.recentAvatar svg{width:22px; height:22px; color:#04202a;}
+.recentTop{display:flex; align-items:baseline; justify-content:space-between; gap:8px;}
+.recentName{font-size:15.5px; font-weight:600; margin:0; color:#fff; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.recentDate{font-size:12px; color:#8e8e93; flex:none;}
+.recentPreview{font-size:13px; color:#8e8e93; margin-top:1px;}
+
+/* Tab bar: icons and labels on one baseline whatever the icon's own height. */
+.tabBtn{justify-content:flex-start; padding-top:6px;}
+.tabBtn svg{height:23px; flex:none;}
+
+/* No focus box on buttons: dialogs auto-focus their first button (Done) and
+   iOS drew a heavy outline around it. */
+dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-visible{outline:none; box-shadow:none;}
+
+/* ---------- iOS-style call menu ---------- */
+.callChannelMenu{
+  top:calc(100% + 8px); right:0; width:236px; padding:0; overflow:hidden;
+  background:rgba(40,40,44,.72); -webkit-backdrop-filter:blur(28px) saturate(180%); backdrop-filter:blur(28px) saturate(180%);
+  border:.5px solid rgba(255,255,255,.14); border-radius:14px; box-shadow:0 14px 40px rgba(0,0,0,.45);
+  transform-origin:top right; animation:callMenuIn .16s cubic-bezier(.2,.9,.3,1);
+}
+@keyframes callMenuIn{from{opacity:0; transform:scale(.94);}to{opacity:1; transform:scale(1);}}
+.callChannelItem{
+  flex-direction:row-reverse; justify-content:space-between; gap:12px; padding:12px 16px;
+  border-radius:0; font-size:17px; font-weight:400; color:#fff;
+}
+.callChannelItem + .callChannelItem{border-top:.5px solid rgba(255,255,255,.12);}
+.callChannelItem:active{background:rgba(255,255,255,.12);}
+.callChannelIcon{width:24px; height:24px; border-radius:0; background:none;}
+.callChannelIcon.emysa{border-radius:50%;}
+.callChannelIcon.phone{background:none; color:#fff;}
+.callChannelIcon.phone svg{width:22px; height:22px;}
+.callChannelIcon.whatsapp svg, .callChannelIcon.telegram svg{width:24px; height:24px;}

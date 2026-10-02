@@ -758,6 +758,7 @@ class CallConversation(_BaseConversation):
             services=self._services,
             on_end_call=self._schedule_assistant_hangup,
             transcript=self.transcript,
+            language=self.call_context.language if self.call_context else None,
         )
         self._task = PipelineTask(
             pipeline,

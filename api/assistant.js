@@ -1,4 +1,7 @@
 import { LANGUAGE_NAMES } from '../lib/callLanguages.js';
+// Languages the transcription model accepts as a pinned language. Igbo is not
+// one of them, so it is left to auto-detect.
+const STT_LANGUAGES = new Set(['en', 'es', 'fr', 'pt', 'de', 'ha', 'yo', 'sw', 'ar', 'hi', 'zh']);
 import { prepareCall, saveCallPlan, confirmCallPlan, attachCallPlans } from '../lib/callPlans.js';
 import { formatEmotionStateBlock, extractAndStripControlTags, shouldEndCall, toFishTtsText } from '../lib/emotionEngine.js';
 import { createChatCompletion, hasConfiguredLlm } from '../lib/llmClient.js';
@@ -423,10 +426,13 @@ async function sendMessage(req, res, supabase, userId) {
   const recentHistory = (history || []).reverse();
   const { emotionState, memoryBundle, commitTurn } = turnContext;
 
+  const { data: langProfile } = await supabase.from('profiles').select('language').eq('user_id', userId).maybeSingle();
+  const userLanguage = LANGUAGE_NAMES[langProfile?.language] || 'English';
   const contactsList = (contacts || []).map((c) => `- ${c.name}`).join('\n') || '(no contacts saved yet)';
   const emotionBlock = formatEmotionStateBlock(emotionState);
   const systemPrompt = [
     'You are Emysa — a warm, emotionally observant, witty, and grounded personal companion and calling assistant.',
+    `LANGUAGE: always reply in ${userLanguage}, the language chosen in Settings. If the user's text looks like another language it is most likely a speech-to-text mistake: do not switch languages, answer in ${userLanguage} or ask them to repeat. Only change language if they explicitly ask you to.`,
     'The user can chat with you naturally about anything, or tell you who to call and what to say so you can place the call for them.',
     'Known contacts:',
     contactsList,
@@ -834,7 +840,12 @@ async function transcribeAudio(req, res, supabase, userId) {
   try {
     const audioBytes = Buffer.from(audioBase64, 'base64');
     const ext = (mimeType || 'audio/webm').split('/')[1]?.split(';')[0] || 'webm';
+    // Pin the language from Settings. Auto-detect on short or noisy audio was
+    // guessing German, and Emysa then answered in German.
+    const { data: langRow } = await supabase.from('profiles').select('language').eq('user_id', userId).maybeSingle();
+    const language = STT_LANGUAGES.has(langRow?.language) ? langRow.language : undefined;
     const result = await transcribeAudioBuffer({
+      language,
       bytes: audioBytes,
       filename: `voice.${ext}`,
       mimeType: mimeType || 'audio/webm',

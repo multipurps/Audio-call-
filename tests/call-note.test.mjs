@@ -47,3 +47,10 @@ test('ACAF frame pack/parse round trip', () => {
   const f = parseFrame(buf);
   assert.deepEqual([f.type, f.encoding, f.sampleRate, [...f.payload]], [1, 2, 8000, [1, 2, 3]]);
 });
+
+import { readFileSync } from 'node:fs';
+test('in-app voice path pins the Settings language for STT and replies', () => {
+  const src = readFileSync(new URL('../api/assistant.js', import.meta.url), 'utf8');
+  assert.match(src, /language,\s*\n\s*bytes: audioBytes/);
+  assert.match(src, /LANGUAGE: always reply in \$\{userLanguage\}/);
+});

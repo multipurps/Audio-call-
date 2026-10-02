@@ -61,3 +61,21 @@ def test_empty_note_and_stopped_call_refused(client):
     assert client.post("/calls/call-1/note", json={"text": "  "}, headers=h).status_code == 400
     c._stopped = True
     assert client.post("/calls/call-1/note", json={"text": "hi"}, headers=h).status_code == 409
+
+
+def test_call_prompt_pins_the_users_language():
+    from app.call_context import CallContext, build_extra_context
+
+    ctx = CallContext(
+        call_id="c", user_id="u", contact_id=None, contact_name="Sam", platform="whatsapp",
+        session_id="s", to_number="+1", objective="say hi", instructions="", status="queued",
+        extra_context="", language="yo",
+    )
+    text = build_extra_context(ctx)
+    assert "Speak only Yoruba" in text and "mis-hearing" in text
+
+
+def test_stt_language_follows_setting_and_falls_back_to_multi():
+    from app.providers import _DEEPGRAM_LANGS
+
+    assert "de" in _DEEPGRAM_LANGS and "yo" not in _DEEPGRAM_LANGS

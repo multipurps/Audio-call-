@@ -175,7 +175,12 @@ DEFAULT_STT_PROMPT = (
 )
 
 
-def build_stt(settings: Settings) -> Any:
+#: Languages Deepgram nova-3 can be pinned to. Others (Hausa, Yoruba, Igbo, ...)
+#: fall back to its multilingual mode rather than guessing one wrongly.
+_DEEPGRAM_LANGS = {"en", "es", "fr", "pt", "de", "hi", "zh", "ar"}
+
+
+def build_stt(settings: Settings, language: str | None = None) -> Any:
     """Construct the STT service, or a mock when in mock mode."""
     if settings.mock_mode or settings.stt_provider == "mock":
         logger.info("using mock STT")
@@ -212,6 +217,7 @@ def build_stt(settings: Settings) -> Any:
                 model=settings.resolved_stt_model(),
                 punctuate=True,
                 interim_results=True,
+                language=(language if language in _DEEPGRAM_LANGS else "multi") if language else "en",
             ),
         )
 

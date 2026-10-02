@@ -189,6 +189,7 @@ def build_pipeline(
     services: tuple[Any, Any, Any, Any] | None = None,
     on_end_call: Any = None,
     transcript: Any = None,
+    language: str | None = None,
 ) -> tuple[Any, Any]:
     """Assemble the real Pipecat pipeline.
 
@@ -218,7 +219,7 @@ def build_pipeline(
         # Pipecat aggregators and pipeline with offline stand-in services.
         stt, llm, tts, vad = services
     else:
-        stt = build_stt(settings)
+        stt = build_stt(settings, language)
         llm = build_llm(settings)
         tts = build_tts(settings)
         vad = build_vad(settings.bridge_sample_rate)
