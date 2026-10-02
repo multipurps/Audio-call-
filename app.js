@@ -1,4 +1,5 @@
 import { normalizePhone } from './lib/phoneNumbers.js';
+import { decodeMonitorFrame } from './lib/monitorFrame.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // Installed PWAs (especially iOS "Add to Home Screen") can keep showing a
@@ -1893,12 +1894,9 @@ function startCallMonitor(url, callId) {
       } catch {}
       return;
     }
-    const buf = event.data;
-    if (!buf || buf.byteLength < 6) return;
-    const view = new DataView(buf);
-    const rate = view.getUint32(1, true) || 16000;
-    const samples = new Int16Array(buf, 5, Math.floor((buf.byteLength - 5) / 2));
-    if (!samples.length) return;
+    const frame = decodeMonitorFrame(event.data);
+    if (!frame) return;
+    const { rate, samples } = frame;
     const audio = ctx.createBuffer(1, samples.length, rate);
     const channel = audio.getChannelData(0);
     for (let i = 0; i < samples.length; i++) channel[i] = samples[i] / 32768;
