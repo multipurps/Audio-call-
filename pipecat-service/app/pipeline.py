@@ -336,8 +336,25 @@ def build_pipeline(
             self._hold = ""
 
         def _transform(self, raw: str) -> str | None:
+            """Clean one streamed chunk while keeping its edge whitespace.
+
+            Chunks are tokens like " here" / " you". The helpers below strip
+            their output, which glued every word together ("Canyouhearme")
+            in both the transcript and the text sent to TTS (rushed, robotic
+            speech). The chunk's own leading/trailing whitespace is put back.
+            """
             if not raw:
                 return None
+            if not raw.strip():
+                return raw  # a bare space between words must survive
+            lead = raw[: len(raw) - len(raw.lstrip())]
+            trail = raw[len(raw.rstrip()) :]
+            out = self._transform_core(raw)
+            if not out:
+                return None
+            return lead + out.strip() + trail
+
+        def _transform_core(self, raw: str) -> str | None:
             mood, mood_intensity = parse_mood_tag(raw)
             if mood:
                 emotion_state["state"] = apply_inline_mood(

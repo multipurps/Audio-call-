@@ -397,3 +397,44 @@ class TestBridgeEndToEnd:
             while time.monotonic() < deadline and len(app.state.service.registry):
                 time.sleep(0.05)
             assert len(app.state.service.registry) == 0
+
+
+class ChunkedLLM(FakeLLM):
+    """Streams the reply as OpenAI does: word tokens with their leading space."""
+
+    async def process_frame(self, frame, direction):
+        if isinstance(frame, LLMContextFrame):
+            await FrameProcessor.process_frame(self, frame, direction)
+            self.contexts.append([m.get("content") for m in frame.context.get_messages()])
+            await self.push_frame(LLMFullResponseStartFrame())
+            for chunk in ["Sure,", " happy", " to", " help", " you", " out."]:
+                await self.push_frame(LLMTextFrame(chunk))
+            await self.push_frame(LLMFullResponseEndFrame())
+            return
+        await super().process_frame(frame, direction)
+
+
+class RecordingTTS(FakeTTS):
+    def __init__(self) -> None:
+        super().__init__()
+        self.spoken: list[str] = []
+
+    async def run_tts(self, text, context_id):
+        self.spoken.append(text)
+        async for frame in super().run_tts(text, context_id):
+            yield frame
+
+
+class TestStreamedReplyKeepsItsSpaces:
+    async def test_tts_and_transcript_text_keep_word_spacing(self):
+        conv, out, _, _ = make_conversation(greeting="")
+        tts = RecordingTTS()
+        conv._services = (FakeSTT(), ChunkedLLM(), tts, None)
+        await conv.start()
+        try:
+            await conv.note_call_active("relay-signal")
+            await asyncio.sleep(1.5)
+            spoken = "".join(tts.spoken)
+            assert "happy to help you out" in spoken, spoken
+        finally:
+            await conv.stop("test")
