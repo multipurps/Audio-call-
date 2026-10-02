@@ -274,6 +274,10 @@ def build_tts(settings: Settings) -> Any:
             kwargs["reference_id"] = settings.tts_voice_id
         if settings.tts_model:
             kwargs["model_id"] = settings.tts_model
+        kwargs["settings"] = FishAudioTTSService.Settings(
+            prosody_speed=settings.tts_speed,
+            prosody_volume=settings.tts_volume,
+        )
         return FishAudioTTSService(**kwargs)
 
     raise ValueError(f"unsupported TTS provider {settings.tts_provider!r}")

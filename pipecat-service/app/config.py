@@ -54,6 +54,14 @@ DEFAULT_DEEPGRAM_STT_MODEL = "nova-3-general"
 DEFAULT_LLM_MODEL = "gpt-6-luna"
 
 
+def _clamp_float(raw, default, lo, hi):
+    try:
+        value = float(raw) if raw not in (None, '') else float(default)
+    except (TypeError, ValueError):
+        value = float(default)
+    return max(lo, min(hi, value))
+
+
 class ConfigError(RuntimeError):
     """Raised for invalid or missing configuration. Always fatal at startup."""
 
@@ -149,6 +157,10 @@ class Settings:
     llm_reasoning_effort: str = "none"
     tts_provider: str = DEFAULT_TTS_PROVIDER
     tts_voice_id: str | None = None
+    #: Fish speech speed (0.5-2.0) and volume in dB (-20..20). Calmer and
+    #: quieter than Fish's defaults, which sounded rushed and loud on calls.
+    tts_speed: float = 0.92
+    tts_volume: int = -3
     tts_model: str | None = None
 
     # -- credentials -----------------------------------------------------
@@ -392,6 +404,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         tts_provider=_env(env, "ASSISTANT_TTS_PROVIDER", DEFAULT_TTS_PROVIDER)
         or DEFAULT_TTS_PROVIDER,
         tts_voice_id=_env(env, "ASSISTANT_TTS_VOICE_ID"),
+        tts_speed=_clamp_float(_env(env, "ASSISTANT_TTS_SPEED"), 0.92, 0.5, 2.0),
+        tts_volume=int(_clamp_float(_env(env, "ASSISTANT_TTS_VOLUME"), -3, -20, 20)),
         tts_model=_env(env, "ASSISTANT_TTS_MODEL"),
         openai_api_key=_env(env, "OPENAI_API_KEY"),
         deepgram_api_key=_env(env, "DEEPGRAM_API_KEY"),

@@ -1,16 +1,19 @@
 import { getServiceClient } from '../lib/supabaseAdmin.js';
 import { maybeGenerateCallSummary } from '../lib/callSession.js';
+import { describeCallEnd } from '../lib/callOutcome.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const supabase = getServiceClient();
 
   const callId = req.query?.callId;
-  const { CallStatus, CallDuration, RecordingUrl } = req.body || {};
+  const { CallStatus, CallDuration, RecordingUrl, SipResponseCode, ErrorCode, AnsweredBy } = req.body || {};
   if (!callId) return res.status(400).send('missing callId');
 
   const statusMap = {
-    initiated: 'ringing',
+    // `initiated` only means Twilio accepted the request. Nothing is ringing
+    // yet, so it must not show as ringing.
+    initiated: 'queued',
     ringing: 'ringing',
     'in-progress': 'in_progress',
     completed: 'completed',
@@ -24,11 +27,28 @@ export default async function handler(req, res) {
   const { data: call } = await supabase.from('calls').select('user_id, contact_id, session_id, status').eq('id', callId).maybeSingle();
 
   const update = { status };
+  const terminal = ['busy', 'no-answer', 'failed', 'canceled'].includes(CallStatus);
+  if (terminal) {
+    // Real reason + what happened next, from what the carrier reported.
+    const { data: who } = call?.contact_id
+      ? await supabase.from('contacts').select('name').eq('id', call.contact_id).maybeSingle()
+      : { data: null };
+    const outcome = describeCallEnd({
+      twilioStatus: CallStatus, sipResponseCode: SipResponseCode, errorCode: ErrorCode,
+      answeredBy: AnsweredBy, name: who?.name || 'them',
+      byUser: call?.status === 'canceling',
+    });
+    update.status = outcome.status;
+    if (outcome.summary) update.outcome_summary = outcome.summary;
+  }
   if (RecordingUrl) update.recording_url = RecordingUrl;
   if (CallDuration) {
     update.duration_seconds = parseInt(CallDuration, 10);
     update.ended_at = new Date().toISOString();
   }
+  // Never let a late `initiated`/`ringing` callback move a finished call back.
+  const finished = ['no_answer', 'failed', 'completed'].includes(call?.status);
+  if (finished && ['queued', 'ringing'].includes(update.status)) return res.status(200).send('ok');
   await supabase.from('calls').update(update).eq('id', callId);
 
   // Increment usage only once the call actually ends, using Twilio's
@@ -49,7 +69,7 @@ export default async function handler(req, res) {
   // Legacy calls without a chat session cannot receive a follow-up.
 
   if (call?.user_id && call?.session_id && ['no_answer', 'completed', 'failed'].includes(status) && status !== call.status) {
-    await postAssistantFollowUp(supabase, call.user_id, call.contact_id, call.session_id, callId, status, CallDuration);
+    await postAssistantFollowUp(supabase, call.user_id, call.contact_id, call.session_id, callId, update.status, CallDuration, update.outcome_summary);
   }
 
   // Twilio calls are now terminal: run the shared summary + memory pass.
@@ -62,7 +82,7 @@ export default async function handler(req, res) {
   return res.status(200).send('ok');
 }
 
-async function postAssistantFollowUp(supabase, userId, contactId, sessionId, callId, status, callDuration) {
+async function postAssistantFollowUp(supabase, userId, contactId, sessionId, callId, status, callDuration, outcomeSummary) {
   const { data: contact } = contactId ? await supabase.from('contacts').select('name').eq('id', contactId).eq('user_id', userId).maybeSingle() : { data: null };
   const { data: plan } = await supabase.from('call_plans').select('label').eq('call_id', callId).eq('user_id', userId).maybeSingle();
   const name = contact?.name || plan?.label || 'the requested number';
@@ -81,7 +101,9 @@ async function postAssistantFollowUp(supabase, userId, contactId, sessionId, cal
   const autoRetry = settings?.auto_retry ?? true;
 
   let content;
-  if (status === 'no_answer') {
+  if (outcomeSummary) {
+    content = outcomeSummary;
+  } else if (status === 'no_answer') {
     if (!autoRetry) {
       content = `I tried calling ${name}, but the line was busy.`;
     } else {

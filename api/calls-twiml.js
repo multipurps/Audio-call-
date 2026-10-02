@@ -11,6 +11,7 @@
 // this webhook fires — so a voicemail never reaches the relay at all, it's
 // hung up right here instead.
 import { getServiceClient } from '../lib/supabaseAdmin.js';
+import { describeCallEnd } from '../lib/callOutcome.js';
 
 export default async function handler(req, res) {
   const callId = req.query?.callId || (req.body && req.body.callId) || '';
@@ -19,7 +20,12 @@ export default async function handler(req, res) {
   if (answeredBy.startsWith('machine') || answeredBy === 'fax') {
     if (callId) {
       const supabase = getServiceClient();
-      await supabase.from('calls').update({ status: 'no_answer', outcome_summary: 'Reached voicemail — hung up automatically.' }).eq('id', callId);
+      const { data: row } = await supabase.from('calls').select('contact_id').eq('id', callId).maybeSingle();
+      const { data: who } = row?.contact_id
+        ? await supabase.from('contacts').select('name').eq('id', row.contact_id).maybeSingle()
+        : { data: null };
+      const out = describeCallEnd({ twilioStatus: 'completed', answeredBy, name: who?.name || 'them' });
+      await supabase.from('calls').update({ status: out.status, outcome_summary: out.summary }).eq('id', callId);
     }
     res.setHeader('Content-Type', 'text/xml');
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>`);

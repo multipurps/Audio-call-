@@ -770,7 +770,9 @@ async function postCallSummary() {
     body: JSON.stringify({ sessionId: currentChatSessionId, summary }),
   });
   const resp = await authedFetch(`/api/assistant?action=messages&sessionId=${encodeURIComponent(currentChatSessionId)}`);
-  if (resp.ok) { const { messages } = await resp.json(); renderHomeMessages(messages || [], false); }
+  // Only refresh a chat that is already on screen. A voice call must never
+  // open a chat by itself.
+  if (resp.ok && !$('homeChat').classList.contains('hidden')) { const { messages } = await resp.json(); renderHomeMessages(messages || [], false); }
   callTranscriptForSummary = [];
 }
 let assistantListening = false;
@@ -1041,7 +1043,7 @@ function openAssistantCallScreen() {
   // waits on you, and it means you hear the voice working immediately
   // rather than only after your own input round-trips successfully.
   (async () => {
-    const greeting = 'Hey! What can I help you with?';
+    const greeting = "Hi, it's Emysa. What's on your mind?";
     appendCallTranscriptLine('ai', greeting);
     await speakReply(greeting);
     if (assistantCallOpen && !assistantMuted) startAssistantListening();
@@ -1707,9 +1709,28 @@ function applyCallStatusUpdate(callRow) {
     stopRingback();
     setCallStatePill('ended', CALL_ENDED_LABELS[st] || `Call ${String(st).replace('_', ' ')}`);
     clearActiveCall();
+    // A call that never connected: say the real reason and what happened,
+    // and leave it on screen long enough to read, instead of vanishing.
+    const never = !callAnsweredAtMs && st !== 'completed';
+    if (never && callEndShownFor !== callRow.id) {
+      callEndShownFor = callRow.id;
+      const reason = callRow.outcome_summary || callSummaryLine(callRow);
+      const panel = $('transcriptPanel');
+      if (panel && reason) {
+        panel.querySelector('.transcriptEmptyHint')?.remove();
+        const note = document.createElement('div');
+        note.className = 'transcriptEndReason';
+        note.textContent = reason;
+        panel.appendChild(note);
+        panel.scrollTop = panel.scrollHeight;
+        setTimeout(() => closeCallScreen(), 6000);
+        return;
+      }
+    }
     closeCallScreen();
   }
 }
+let callEndShownFor = null;
 
 function openCallScreen(callId, toNumber, contactName) {
   const isSameCall = activeCallScreenId === callId && !$('callScreen').classList.contains('hidden');
@@ -2028,30 +2049,24 @@ function renderCallsList(calls) {
       ? `<div class="recentAvatar">${escapeHtml((name || '?')[0].toUpperCase())}</div>`
       : `<div class="recentAvatar"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1c0-2.76-3.58-5-8-5z"/></svg></div>`;
 
-    const subtitle = isKnown
-      ? (PLATFORM_LABEL[c.platform] ? `${PLATFORM_LABEL[c.platform]} Audio` : callSummaryLine(c))
-      : 'unknown';
+    const subtitle = callSummaryLine(c) || (isKnown ? '' : 'unknown');
 
     el.innerHTML = `
       ${avatarHtml}
       <div class="recentBody">
-        <div class="recentName${isKnown ? '' : ' recentName--unknown'}">${escapeHtml(name)}</div>
+        <div class="recentTop">
+          <div class="recentName${isKnown ? '' : ' recentName--unknown'}">${escapeHtml(name)}</div>
+          <div class="recentDate">${relativeCallDate(c.created_at)}</div>
+        </div>
         <div class="recentPreview">${escapeHtml(subtitle)}</div>
-      </div>
-      <div class="recentMeta">
-        <div class="recentDate">${relativeCallDate(c.created_at)}</div>
-        <button type="button" class="recentInfoBtn" aria-label="Call details"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9.25" stroke="currentColor" stroke-width="1.5"/><path d="M12 11v5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="8" r="1.1" fill="currentColor"/></svg></button>
       </div>`;
 
-    el.querySelector('.recentInfoBtn').addEventListener('click', (event) => { event.stopPropagation(); openCallDetail(c, name, isKnown); });
-    if (c.session_id) {
-      const resume = () => { openChatSession(c.session_id); document.querySelector('[data-tab=home]').click(); };
-      el.tabIndex = 0;
-      el.setAttribute('role', 'button');
-      el.setAttribute('aria-label', `Resume call conversation with ${name}`);
-      el.onclick = resume;
-      el.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); resume(); } };
-    }
+    const open = () => openCallDetail(c, name, isKnown);
+    el.tabIndex = 0;
+    el.setAttribute('role', 'button');
+    el.setAttribute('aria-label', `Call details for ${name}`);
+    el.onclick = open;
+    el.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } };
     list.appendChild(el);
   }
 }

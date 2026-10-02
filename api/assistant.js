@@ -107,7 +107,11 @@ async function speakText(req, res, supabase, userId) {
     const resp = await fetch('https://api.fish.audio/v1/tts', {
       method: 'POST',
       headers: { Authorization: `Bearer ${fishKey}`, 'Content-Type': 'application/json', model: 's1' },
-      body: JSON.stringify({ text: spokenText, reference_id: referenceId, format: 'mp3' }),
+      body: JSON.stringify({
+        text: spokenText, reference_id: referenceId, format: 'mp3',
+        // Fish defaults (speed 1, 0 dB) came out rushed and loud on the call.
+        prosody: { speed: Number(process.env.FISH_TTS_SPEED) || 0.92, volume: Number.isFinite(Number(process.env.FISH_TTS_VOLUME)) && process.env.FISH_TTS_VOLUME ? Number(process.env.FISH_TTS_VOLUME) : -3 },
+      }),
     });
     if (!resp.ok) {
       const detail = await resp.text().catch(() => '');
@@ -268,7 +272,7 @@ async function sendImage(req, res, supabase, userId) {
   if (!sessionId) {
     const { data: session, error } = await supabase
       .from('chat_sessions')
-      .insert({ user_id: userId, title: 'Photo' })
+      .insert({ user_id: userId, title: 'Photo', archived: msgSource === 'call' })
       .select()
       .single();
     if (error) return res.status(500).json({ error: error.message });
@@ -341,7 +345,7 @@ async function sendMessage(req, res, supabase, userId) {
   if (!sessionId) {
     const { data: session, error } = await supabase
       .from('chat_sessions')
-      .insert({ user_id: userId, title: titleFromText(text) || 'New chat' })
+      .insert({ user_id: userId, title: titleFromText(text) || 'New chat', archived: msgSource === 'call' }) // voice calls with Emysa must not pile up in Recent
       .select()
       .single();
     if (error) return res.status(500).json({ error: error.message });
@@ -435,7 +439,7 @@ async function sendMessage(req, res, supabase, userId) {
     '- Avoid repeating stock phrases like "How can I assist you today?" or "I understand your frustration."',
     '- VOCAL EXPRESSION: when your reply is spoken aloud you may include occasional, contextual vocalisation markers — [laughing], [chuckling], [giggling], [sighing], [clearing throat], [gasping], [humming], and tone markers [soft], [whispering], [emphasis]. They become real sounds in your voice. A genuinely funny joke may earn [chuckling] before you answer; an awkward moment may fit [giggling]; a thinking pause may fit [sighing] or just "Hmm.". Serious, sad or business moments stay serious — never force laughter. Keep these occasional (several minutes apart at most), varied, and never use one instead of actually answering.',
     msgSource === 'call'
-      ? '- You are currently speaking out loud on a live voice call with the user. Keep "reply" concise (1-2 spoken sentences), natural for TTS, with no markdown or bullet lists. If the user says goodbye or asks to end/hang up the call, include [[END_CALL]] at the very end of "reply".'
+      ? '- Never start a reply with "Hey", "Hi" or "Hello" except the very first greeting of the call; vary how you open and just answer. Speak calmly, never rushed. You are currently speaking out loud on a live voice call with the user. Keep "reply" concise (1-2 spoken sentences), natural for TTS, with no markdown or bullet lists. If the user says goodbye or asks to end/hang up the call, include [[END_CALL]] at the very end of "reply".'
       : '',
     '',
     "About the app, for when the user asks (answer naturally and conversationally in \"reply\" — don't deflect these to a phone-number prompt): this app lets you tell Emysa (you) who to call and what to say, then Emysa places a real phone, WhatsApp, or Telegram call and carries the conversation. You can call any phone number or a saved contact, ask for the same person again with something like \"call him again\", and Emysa remembers context from past conversations and calls.",

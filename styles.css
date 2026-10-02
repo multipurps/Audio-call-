@@ -1,4 +1,5 @@
 :root{
+  --safe-top: env(safe-area-inset-top, 0px);
   --accent:#0f9d68;
   --accent-grad: var(--accent);
   --panel:#3a2a20;
@@ -852,3 +853,23 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .memoryEditBtn,.memoryCard .memoryDelete{position:static; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--dim); background:rgba(255,255,255,.06);}
 .memoryCard{position:relative; padding-right:74px;}
 
+
+/* The minimize chevron sat under the status bar (battery) because --safe-top
+   was never defined. It now clears the safe area. */
+.callMinimizeBtn{top:calc(var(--safe-top) + 8px);}
+
+.transcriptEndReason{align-self:center; text-align:center; max-width:92%; margin:14px 0 4px; padding:12px 14px; border-radius:16px; background:rgba(255,69,58,.14); color:#ffd6d2; font-size:14.5px; line-height:1.4;}
+
+/* ---------- Recent: calls list ---------- */
+#screen-recent .recentSubTabs{background:none; border:none; padding:0; gap:26px; width:auto; align-self:flex-start; margin:max(env(safe-area-inset-top,0px),46px) 0 14px 6px;}
+#screen-recent .recentSubTabBtn{flex:none; padding:0; border-radius:0; font-size:21px; font-weight:500; color:#8e8e93; background:none;}
+#screen-recent .recentSubTabBtn.active{background:none; color:#fff; font-weight:500;}
+#screen-recent .searchBar{background:#1c1c1e; border-radius:999px; padding:14px 16px; margin-bottom:18px;}
+#screen-recent .searchBar input{font-size:18px;}
+#callsList{display:flex; flex-direction:column; gap:12px;}
+.recentRow{background:#1c1c1c; border-radius:26px; padding:20px 18px; margin:0; border:none; align-items:center; gap:14px; cursor:pointer;}
+.recentAvatar{width:56px; height:56px; font-size:22px; font-weight:500; background:radial-gradient(circle at 30% 25%, #c97a7a 0%, #7a3a3f 45%, #4a3f6b 100%);}
+.recentTop{display:flex; align-items:baseline; justify-content:space-between; gap:10px;}
+.recentName{font-size:22px; font-weight:500; margin:0; color:#f2e6e6; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.recentDate{font-size:16px; color:#cfc3c3;}
+.recentPreview{font-size:18px; color:#cfc3c3; margin-top:4px;}
