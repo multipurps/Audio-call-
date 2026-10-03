@@ -257,6 +257,9 @@ async function enterApp(session) {
   ensureNotificationsEnabled();
   renderProfileHeader();
   initHomeChat();
+  // Quiet preload so beginPreCall() can find an existing per-contact thread
+  // to continue even if the person hasn't opened Recent yet this session.
+  loadRecentChats();
 
   redeemPendingReferral();
 }
@@ -743,28 +746,6 @@ let callTranscriptForSummary = [];
 // actually belongs in the home chat log. Skipped entirely if nothing but
 // the opening greeting happened — a call nobody spoke on isn't worth a
 // line in the history.
-async function postCallSummary() {
-  if (callTranscriptForSummary.length === 0 || !currentChatSessionId) return;
-  const transcriptText = callTranscriptForSummary.map((t) => `${t.role === 'user' ? 'You' : 'Emysa'}: ${t.content}`).join('\n');
-  let summary = 'Had a quick call with Emysa.';
-  try {
-    const falResp = await authedFetch('/api/assistant?action=summarizeCall', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transcript: transcriptText }),
-    });
-    const falData = await falResp.json();
-    if (falResp.ok && falData.summary) summary = falData.summary;
-  } catch {}
-  await authedFetch('/api/assistant?action=logCallSummary', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId: currentChatSessionId, summary }),
-  });
-  const resp = await authedFetch(`/api/assistant?action=messages&sessionId=${encodeURIComponent(currentChatSessionId)}`);
-  if (resp.ok) { const { messages } = await resp.json(); renderHomeMessages(messages || [], false); }
-  callTranscriptForSummary = [];
-}
 let assistantListening = false;
 let assistantMuted = false;
 let assistantSpeaking = false;
@@ -815,6 +796,28 @@ let assistantAudioCtx = null;
 function getAssistantAudioCtx() {
   if (!assistantAudioCtx) assistantAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
   return assistantAudioCtx;
+}
+// A standard US phone ring is two tones (440Hz + 480Hz) together. There's no
+// bundled ringtone asset, so this synthesizes one short ring cycle directly
+// on the call's own AudioContext rather than depending on an external file.
+function playRingTone(ctx, durationMs = 1800) {
+  return new Promise((resolve) => {
+    const gain = ctx.createGain();
+    gain.gain.value = 0.18;
+    gain.connect(ctx.destination);
+    const oscA = ctx.createOscillator();
+    const oscB = ctx.createOscillator();
+    oscA.frequency.value = 440;
+    oscB.frequency.value = 480;
+    oscA.connect(gain);
+    oscB.connect(gain);
+    oscA.start();
+    oscB.start();
+    setTimeout(() => {
+      oscA.stop(); oscB.stop();
+      resolve();
+    }, durationMs);
+  });
 }
 function base64ToArrayBuffer(base64) {
   const binary = atob(base64);
@@ -970,7 +973,7 @@ function endAssistantCall() {
   $('callScreen').classList.remove('assistantMode');
   $('callContactAvatar').style.display = '';
   if (!activeHeaderCall) $('homeHeaderLogoWrap').classList.remove('calling');
-  postCallSummary();
+  callTranscriptForSummary = [];
 }
 
 function openAssistantCallScreen() {
@@ -1028,10 +1031,16 @@ function openAssistantCallScreen() {
     else if (!assistantListening && !assistantSpeaking) startAssistantListening();
   };
 
-  // Speak first, on connect — a real call has a greeting before it ever
-  // waits on you, and it means you hear the voice working immediately
-  // rather than only after your own input round-trips successfully.
+  // Ring once, like a real call being placed, before Emysa "picks up" —
+  // then speak first on connect, since a real call has a greeting before
+  // it ever waits on you rather than only after your own input round-trips.
   (async () => {
+    setCallStatePill('connecting', 'Ringing…');
+    const ctx = getAssistantAudioCtx();
+    if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
+    await playRingTone(ctx);
+    if (!assistantCallOpen) return;
+    setCallStatePill('listening', 'Connected · Listening');
     const greeting = 'Hey! What can I help you with?';
     appendCallTranscriptLine('ai', greeting);
     await speakReply(greeting);
@@ -1379,6 +1388,16 @@ function showPreCallContext(target, channel) {
   $('briefInput').placeholder = 'Call instructions…';
 }
 function beginPreCall(target, channel) {
+  // Keep one running thread per person: if this contact (or this bare
+  // number, when there's no saved contact) already has a session, pick it
+  // back up instead of leaving whatever chat happened to be open — that's
+  // what lets "Mr A"'s whole call history live under one row in Recent.
+  const existing = recentChatSessions.find((s) => (
+    target.contactId ? s.contact_id === target.contactId : s.call_label === (target.name || target.toNumber)
+  ));
+  if (existing && existing.id !== currentChatSessionId) {
+    openChatSession(existing.id);
+  }
   showPreCallContext(target, channel);
   document.querySelector('[data-tab=home]').click();
   $('briefInput').focus();
@@ -2065,24 +2084,8 @@ function openCallDetail(c, name, isKnown) {
   loadCallDetailHistory(c);
 }
 
-let recentSubTab = 'calls';
 let recentChatSessions = [];
 let recentChatMenuTargetId = null;
-
-document.querySelectorAll('.recentSubTabBtn').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.recentSubTabBtn').forEach((b) => { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
-    btn.setAttribute('aria-pressed', 'true');
-    btn.classList.add('active');
-    recentSubTab = btn.dataset.subtab;
-    $('recentChatsList').classList.toggle('hidden', recentSubTab !== 'chats');
-    $('callsList').classList.toggle('hidden', recentSubTab !== 'calls');
-    $('recentSearch').value = '';
-    renderRecentChatsList(recentChatSessions);
-    renderCallsList(lastLoadedCalls);
-    $('recentSearch').placeholder = recentSubTab === 'chats' ? 'Search chats' : 'Search conversations';
-  });
-});
 
 async function loadRecentChats() {
   const resp = await authedFetch('/api/assistant?action=sessions&callRelated=true').catch(() => null);
@@ -2092,18 +2095,42 @@ async function loadRecentChats() {
   renderRecentChatsList(recentChatSessions);
 }
 
+// Sessions come back newest-first, one per call ever placed — which meant
+// calling the same contact five times produced five separate rows, each
+// just a raw number if the call_plan didn't carry a contact name. Collapse
+// them to one row per contact (or per number, for calls with no saved
+// contact), keeping only the most recent session for that person: that
+// becomes "their" thread going forward, same one beginPreCall() reuses.
+function groupSessionsByContact(sessions) {
+  const seen = new Map();
+  const ordered = [];
+  for (const s of sessions) {
+    const key = s.contact_id || s.call_label || s.id;
+    if (seen.has(key)) continue;
+    seen.set(key, s);
+    ordered.push(s);
+  }
+  return ordered;
+}
+
 function renderRecentChatsList(sessions) {
   const list = $('recentChatsList');
   list.innerHTML = '';
-  if (!sessions?.length) {
+  const grouped = groupSessionsByContact(sessions || []);
+  if (!grouped.length) {
     list.innerHTML = `<div class="authHint" style="text-align:left;">No call chats yet — prepare a call from Contacts or call Emysa.</div>`;
     return;
   }
-  for (const s of sessions) {
+  for (const s of grouped) {
     const row = document.createElement('div');
     row.className = 'savedChatRow';
+    // Lead with who it is (a saved contact's name, or the number if that's
+    // all we have) rather than the session's generic title — a contact's
+    // name reads far better in a call list than "Smart conversation".
+    const primary = s.call_label || s.title;
+    const secondary = s.call_label ? s.title : null;
     row.innerHTML = `
-      <div class="recentBody"><div class="savedChatTitle">${escapeHtml(s.title)}</div>${s.call_label ? `<div class="recentPreview">${escapeHtml(s.call_label)} · ${s.call_id ? 'Call conversation' : 'Call setup'}</div>` : ''}</div>
+      <div class="recentBody"><div class="savedChatTitle">${escapeHtml(primary)}</div>${secondary ? `<div class="recentPreview">${escapeHtml(secondary)}</div>` : ''}</div>
       <div class="chatRowActions">
         <div class="savedChatDate">${shortDateLabel(s.updated_at)}</div>
         <button class="recentChatKebabBtn" aria-label="More"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg></button>
@@ -2157,11 +2184,7 @@ $('recentChatMenu').querySelector('[data-action="delete"]').addEventListener('cl
 
 $('recentSearch').addEventListener('input', () => {
   const q = $('recentSearch').value.trim().toLowerCase();
-  if (recentSubTab === 'chats') {
-    renderRecentChatsList(!q ? recentChatSessions : recentChatSessions.filter((s) => (s.title || '').toLowerCase().includes(q)));
-  } else {
-    renderCallsList(!q ? lastLoadedCalls : lastLoadedCalls.filter((c) => (c.contact_name || c.to_number || '').toLowerCase().includes(q)));
-  }
+  renderRecentChatsList(!q ? recentChatSessions : recentChatSessions.filter((s) => (s.call_label || s.title || '').toLowerCase().includes(q)));
 });
 
 async function loadCalls() {

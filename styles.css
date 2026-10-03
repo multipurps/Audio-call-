@@ -579,10 +579,7 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .savedChatTitle{font-size:14.5px; font-weight:650; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .savedChatDate{font-size:12.5px; color:var(--dim); flex:none;}
 
-/* ---------- Recent > Chats sub-tab ---------- */
-.recentSubTabs{display:flex; gap:6px; background:var(--glass-bg); border:1px solid var(--glass-border); border-radius:14px; padding:4px; margin:2px 0 14px;}
-.recentSubTabBtn{flex:1; border-radius:10px; padding:9px 0; font-size:13.5px; font-weight:650; color:var(--dim); background:none;}
-.recentSubTabBtn.active{background:var(--accent-grad); color:#fff;}
+/* ---------- Recent > Chats row menu ---------- */
 .recentChatKebabBtn{width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--dim); flex:none;}
 .recentChatKebabBtn svg{width:18px; height:18px;}
 .recentChatMenu{
@@ -596,13 +593,7 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 
 /* ---------- recent calls — exact copy of the reference iOS screenshot ---------- */
 #screen-recent.active{display:flex; flex-direction:column; background:#000;}
-#screen-recent h1.pageTitle{font-size:27px; font-weight:800; color:#fff; padding-top:4px; margin-bottom:12px;}
-#screen-recent .recentSubTabs{
-  order:-1; display:flex; gap:0; background:#3a3a3c; border:none; border-radius:9px; padding:2px;
-  margin:max(env(safe-area-inset-top,0px),46px) 0 16px; width:min(320px, 100%); align-self:center;
-}
-#screen-recent .recentSubTabBtn{flex:1; border-radius:7px; padding:6px 0; font-size:13px; font-weight:500; color:#fff; background:none;}
-#screen-recent .recentSubTabBtn.active{background:#636366; font-weight:600;}
+#screen-recent h1.pageTitle{font-size:27px; font-weight:800; color:#fff; padding-top:max(env(safe-area-inset-top,0px),46px); margin-bottom:12px;}
 #screen-recent .searchBar{background:#1c1c1e; border:none; border-radius:11px; color:#8e8e93;}
 #screen-recent .searchBar svg{color:#8e8e93;}
 #screen-recent .searchBar input{color:#fff; font-size:14px;}

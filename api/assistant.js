@@ -123,10 +123,11 @@ async function listSessions(req, res, supabase, userId) {
     .eq('user_id', userId).eq('archived', archived);
   let relatedCalls = [];
   let plans = [];
+  let contactNamesById = new Map();
   if (req.query?.callRelated === 'true') {
     const [callsResult, plansResult] = await Promise.all([
       supabase.from('calls').select('id,session_id,to_number,contact_id,created_at').eq('user_id', userId).not('session_id', 'is', null).order('created_at', { ascending: false }).limit(1000),
-      supabase.from('call_plans').select('session_id,label,created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(1000),
+      supabase.from('call_plans').select('session_id,label,contact_id,created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(1000),
     ]);
     if (callsResult.error || plansResult.error) return res.status(500).json({ error: 'Could not load call conversations' });
     relatedCalls = callsResult.data || [];
@@ -134,13 +135,27 @@ async function listSessions(req, res, supabase, userId) {
     const ids = [...new Set([...relatedCalls, ...plans].map((r) => r.session_id))];
     if (!ids.length) return res.status(200).json({ sessions: [] });
     query = query.in('id', ids);
+    const contactIds = [...new Set([...relatedCalls, ...plans].map((r) => r.contact_id).filter(Boolean))];
+    if (contactIds.length) {
+      const { data: contacts } = await supabase.from('contacts').select('id,name').in('id', contactIds);
+      contactNamesById = new Map((contacts || []).map((c) => [c.id, c.name]));
+    }
   }
   const { data, error } = await query.order('updated_at', { ascending: false }).limit(100);
   if (error) return res.status(500).json({ error: error.message });
-  const sessions = (data || []).map((session) => ({ ...session,
-    call_label: plans.find((p) => p.session_id === session.id)?.label || relatedCalls.find((c) => c.session_id === session.id)?.to_number || null,
-    call_id: relatedCalls.find((c) => c.session_id === session.id)?.id || null,
-  }));
+  const sessions = (data || []).map((session) => {
+    const call = relatedCalls.find((c) => c.session_id === session.id);
+    const plan = plans.find((p) => p.session_id === session.id);
+    const contactId = call?.contact_id || plan?.contact_id || null;
+    return {
+      ...session,
+      contact_id: contactId,
+      // Prefer the saved contact's real name over a plan's free-text label
+      // or a bare phone number, so the list reads "Mr A" instead of digits.
+      call_label: (contactId && contactNamesById.get(contactId)) || plan?.label || call?.to_number || null,
+      call_id: call?.id || null,
+    };
+  });
   return res.status(200).json({ sessions });
 }
 
