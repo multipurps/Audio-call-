@@ -620,7 +620,20 @@ async function sendChatMessage(text, onReply, source = 'text', channel = null) {
     if (onReply) { await onReply(errText, null); return; }
     throw new Error(errText);
   }
+  const switchedChat = data.sessionSwitched && data.sessionId && data.sessionId !== currentChatSessionId;
   if (data.sessionId) currentChatSessionId = data.sessionId;
+  if (switchedChat && !isCall) {
+    // This person already has a conversation: show it (with this turn folded in)
+    // instead of leaving the user in a one-message chat.
+    await openChatSession(data.sessionId);
+    if (data.callId && data.toNumber) {
+      trackActiveCall(data.callId, data.toNumber, data.contactName);
+      clearPreCallContext();
+      openCallScreen(data.callId, data.toNumber, data.contactName);
+    }
+    if (onReply) await onReply('', data);
+    return;
+  }
   if (data.callId && data.toNumber) {
     trackActiveCall(data.callId, data.toNumber, data.contactName);
     clearPreCallContext();
@@ -1912,9 +1925,22 @@ function startCallMonitor(url, callId) {
   gain.gain.value = 1;
   gain.connect(ctx.destination);
 
+  // Each direction is its own gapless timeline. They used to share ONE
+  // timeline, so the caller's audio and Emysa's audio were queued one after
+  // the other: two real-time streams demanded two seconds of playback per
+  // second, the queue fell behind, and the resync then started new audio on
+  // top of buffers that were still playing - the "voice on voice" overlay.
+  // Mixed by the browser instead, each side plays at its own real-time pace.
+  const lanes = {
+    1: { nextTime: 0, sources: new Set(), gain: ctx.createGain() }, // caller (what the other person says)
+    2: { nextTime: 0, sources: new Set(), gain: ctx.createGain() }, // Emysa (what she says to them)
+  };
+  for (const lane of Object.values(lanes)) { lane.gain.gain.value = 1; lane.gain.connect(gain); }
+  let lastEmysaAudioAt = 0;
+
   const ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
-  const mon = { ws, ctx, gain, state: 'live', callId, nextTime: 0 };
+  const mon = { ws, ctx, gain, state: 'live', callId, lanes };
   callMonitor = mon;
 
   ws.onmessage = (event) => {
@@ -1927,21 +1953,35 @@ function startCallMonitor(url, callId) {
     }
     const frame = decodeMonitorFrame(event.data);
     if (!frame) return;
+    const lane = lanes[frame.direction];
+    if (!lane) return;
     const { rate, samples } = frame;
     const audio = ctx.createBuffer(1, samples.length, rate);
     const channel = audio.getChannelData(0);
     for (let i = 0; i < samples.length; i++) channel[i] = samples[i] / 32768;
     const source = ctx.createBufferSource();
     source.buffer = audio;
-    source.connect(gain);
-    // Gapless scheduling with a small lead; if the tab was backgrounded and
-    // the clock ran away, snap back to now rather than replaying stale audio.
+    source.connect(lane.gain);
     const now = ctx.currentTime;
-    if (!mon.nextTime || mon.nextTime < now - 0.5 || mon.nextTime > now + 2) {
-      mon.nextTime = now + 0.08;
+    // Small jitter buffer. If this lane fell behind (tab backgrounded, network
+    // stall) drop what it still had queued and restart from now, so old audio
+    // can never play underneath new audio.
+    if (!lane.nextTime || lane.nextTime < now - 0.05 || lane.nextTime > now + 0.6) {
+      for (const old of lane.sources) { try { old.stop(); } catch {} }
+      lane.sources.clear();
+      lane.nextTime = now + 0.12;
     }
-    source.start(mon.nextTime);
-    mon.nextTime += audio.duration;
+    source.start(lane.nextTime);
+    lane.nextTime += audio.duration;
+    lane.sources.add(source);
+    source.onended = () => lane.sources.delete(source);
+
+    // The far end often hears Emysa through a speaker, so their mic sends a
+    // delayed copy of her voice back. Duck the caller lane while she is
+    // talking so that echo does not sound like a second Emysa.
+    if (frame.direction === 2) lastEmysaAudioAt = performance.now();
+    const emysaTalking = performance.now() - lastEmysaAudioAt < 450;
+    lanes[1].gain.gain.setTargetAtTime(emysaTalking ? 0.3 : 1, now, 0.05);
   };
   ws.onclose = () => {
     if (callMonitor === mon) stopCallMonitor();
@@ -2041,6 +2081,91 @@ function hueForName(name) {
 
 let lastLoadedCalls = [];
 
+// ---------- swipe / hold to delete ----------
+// Wraps `row` so that dragging it left (or holding it) slides it off a red
+// Delete pane; tapping the pane runs onDelete. Only one row is open at a time.
+function makeSwipeDelete(row, onDelete, { remove = true } = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'swipeWrap';
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'swipeDelete';
+  del.textContent = 'Delete';
+  row.classList.add('swipeFront');
+  row.parentNode?.replaceChild(wrap, row);
+  wrap.append(del, row);
+
+  const OPEN = 92;
+  let startX = 0, startY = 0, dx = 0, tracking = false, moved = false, holdTimer = null, swallowClick = false;
+  const closeOthers = () => document.querySelectorAll('.swipeWrap.open').forEach((w) => { if (w !== wrap) w.classList.remove('open'); });
+  const setOpen = (open) => { wrap.classList.toggle('open', open); row.style.transform = ''; if (open) closeOthers(); };
+
+  row.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    startX = e.clientX; startY = e.clientY; dx = 0; tracking = true; moved = false;
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => { if (tracking && !moved) { swallowClick = true; setOpen(true); } }, 550);
+  });
+  row.addEventListener('pointermove', (e) => {
+    if (!tracking) return;
+    const mx = e.clientX - startX, my = e.clientY - startY;
+    if (!moved && Math.abs(my) > 10 && Math.abs(my) > Math.abs(mx)) { tracking = false; clearTimeout(holdTimer); return; }
+    if (Math.abs(mx) > 8) { moved = true; clearTimeout(holdTimer); wrap.classList.add('dragging'); }
+    if (!moved) return;
+    const base = wrap.classList.contains('open') ? -OPEN : 0;
+    dx = Math.max(-OPEN * 1.3, Math.min(0, base + mx));
+    row.style.transform = `translateX(${dx}px)`;
+  });
+  const end = () => {
+    clearTimeout(holdTimer);
+    if (!tracking) return;
+    tracking = false;
+    wrap.classList.remove('dragging');
+    if (moved) { swallowClick = true; setOpen(dx < -OPEN / 2); }
+    else row.style.transform = '';
+  };
+  row.addEventListener('pointerup', end);
+  row.addEventListener('pointercancel', end);
+  row.addEventListener('pointerleave', () => { if (tracking && !moved) { clearTimeout(holdTimer); } });
+  // A swipe or hold must not also count as a tap that opens the row.
+  row.addEventListener('click', (e) => {
+    if (swallowClick) { e.stopImmediatePropagation(); e.preventDefault(); swallowClick = false; return; }
+    if (wrap.classList.contains('open')) { e.stopImmediatePropagation(); e.preventDefault(); setOpen(false); }
+  }, true);
+  row.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  del.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    del.disabled = true;
+    try {
+      await onDelete();
+      if (remove) {
+        wrap.classList.add('removing');
+        setTimeout(() => wrap.remove(), 200);
+      } else {
+        del.disabled = false;
+        setOpen(false);
+      }
+    } catch {
+      del.disabled = false;
+      setOpen(false);
+    }
+  });
+  return wrap;
+}
+
+document.addEventListener('pointerdown', (e) => {
+  if (!e.target.closest('.swipeWrap')) document.querySelectorAll('.swipeWrap.open').forEach((w) => w.classList.remove('open'));
+});
+
+// Same person, any format of their number -> the same key.
+function personKeyForCall(c) {
+  const digits = String(c.to_number || '').replace(/\D/g, '');
+  if (digits.length >= 7) return `p:${digits}`;
+  if (c.contact_id) return `c:${c.contact_id}`;
+  return `i:${c.id}`;
+}
+
 function renderCallsList(calls) {
   const list = $('callsList');
   list.innerHTML = '';
@@ -2048,10 +2173,18 @@ function renderCallsList(calls) {
     list.innerHTML = `<div class="authHint" style="text-align:left;">No calls yet.</div>`;
     return;
   }
-  const PLATFORM_LABEL = { whatsapp: 'WhatsApp', telegram: 'Telegram' };
+  // One row per person (newest call first within each), never one row per call.
+  const groups = new Map();
   for (const c of calls) {
+    const key = personKeyForCall(c);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(c);
+  }
+  for (const group of groups.values()) {
+    const c = group.find((x) => x.contact_name) || group[0];
+    const latest = group[0];
     const isKnown = !!c.contact_name;
-    const name = c.contact_name || c.to_number;
+    const name = c.contact_name || latest.to_number;
     const el = document.createElement('div');
     el.className = 'recentRow';
 
@@ -2059,25 +2192,27 @@ function renderCallsList(calls) {
       ? `<div class="recentAvatar">${escapeHtml((name || '?')[0].toUpperCase())}</div>`
       : `<div class="recentAvatar"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1c0-2.76-3.58-5-8-5z"/></svg></div>`;
 
-    const subtitle = callSummaryLine(c) || (isKnown ? '' : 'unknown');
+    const subtitle = callSummaryLine(latest) || (isKnown ? '' : 'unknown');
+    const countBadge = group.length > 1 ? `<span class="recentCount">${group.length}</span>` : '';
 
     el.innerHTML = `
       ${avatarHtml}
       <div class="recentBody">
         <div class="recentTop">
-          <div class="recentName${isKnown ? '' : ' recentName--unknown'}">${escapeHtml(name)}</div>
-          <div class="recentDate">${relativeCallDate(c.created_at)}</div>
+          <div class="recentName${isKnown ? '' : ' recentName--unknown'}">${escapeHtml(name)}${countBadge}</div>
+          <div class="recentDate">${relativeCallDate(latest.created_at)}</div>
         </div>
         <div class="recentPreview">${escapeHtml(subtitle)}</div>
       </div>`;
 
-    const details = () => openCallDetail(c, name, isKnown);
+    const details = () => openCallDetail(latest, name, isKnown);
     el.querySelector('.recentBody').insertAdjacentHTML('afterend', `<button type="button" class="recentInfoBtn" aria-label="Call details"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9.25" stroke="currentColor" stroke-width="1.5"/><path d="M12 11v5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="8" r="1.1" fill="currentColor"/></svg></button>`);
     el.querySelector('.recentInfoBtn').addEventListener('click', (event) => { event.stopPropagation(); details(); });
-    // Tapping a call opens its chat. Only a call that has no chat falls back
-    // to the details sheet.
+    // Tapping a person opens their single conversation (any of their calls'
+    // chats works: placing a call folds them into one).
+    const sessionId = group.map((x) => x.session_id).find(Boolean);
     const open = () => {
-      if (c.session_id) { openChatSession(c.session_id); document.querySelector('[data-tab=home]').click(); }
+      if (sessionId) { openChatSession(sessionId); document.querySelector('[data-tab=home]').click(); }
       else details();
     };
     el.tabIndex = 0;
@@ -2086,6 +2221,23 @@ function renderCallsList(calls) {
     el.onclick = open;
     el.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } };
     list.appendChild(el);
+
+    const live = group.some((x) => ['queued', 'ringing', 'in_progress', 'in-progress'].includes(x.status));
+    if (!live) {
+      const ids = group.map((x) => x.id);
+      const sessions = [...new Set(group.map((x) => x.session_id).filter(Boolean))];
+      makeSwipeDelete(el, async () => {
+        const r = await authedFetch('/api/calls?action=delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callIds: ids }) });
+        if (!r.ok) throw new Error('delete failed');
+        for (const sid of sessions) {
+          await authedFetch('/api/assistant?action=deleteSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: sid }) }).catch(() => {});
+          if (sid === currentChatSessionId) startNewChat();
+        }
+        const gone = new Set(ids);
+        lastLoadedCalls = lastLoadedCalls.filter((x) => !gone.has(x.id));
+        recentChatSessions = recentChatSessions.filter((x) => !sessions.includes(x.id));
+      });
+    }
   }
 }
 
@@ -2369,7 +2521,7 @@ document.querySelectorAll('.recentSubTabBtn').forEach((btn) => {
 
 async function loadRecentChats() {
   const resp = await authedFetch('/api/assistant?action=sessions&callRelated=true').catch(() => null);
-  if (!resp?.ok) { $('recentChatsList').textContent = 'Could not load call chats. Tap Recent to retry.'; return; }
+  if (!resp?.ok) { $('recentChatsList').textContent = 'Couldn\'t load chats.'; return; }
   const { sessions } = await resp.json();
   recentChatSessions = sessions || [];
   renderRecentChatsList(recentChatSessions);
@@ -2379,7 +2531,7 @@ function renderRecentChatsList(sessions) {
   const list = $('recentChatsList');
   list.innerHTML = '';
   if (!sessions?.length) {
-    list.innerHTML = `<div class="authHint" style="text-align:left;">No call chats yet — prepare a call from Contacts or call Emysa.</div>`;
+    list.innerHTML = `<div class="authHint" style="text-align:left;">No chats yet.</div>`;
     return;
   }
   for (const s of sessions) {
@@ -2403,6 +2555,12 @@ function renderRecentChatsList(sessions) {
       openRecentChatMenu(e.currentTarget, s.id);
     });
     list.appendChild(row);
+    makeSwipeDelete(row, async () => {
+      const r = await authedFetch('/api/assistant?action=deleteSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: s.id }) });
+      if (!r.ok) throw new Error('delete failed');
+      recentChatSessions = recentChatSessions.filter((x) => x.id !== s.id);
+      if (s.id === currentChatSessionId) startNewChat();
+    });
   }
 }
 
@@ -2450,7 +2608,7 @@ $('recentSearch').addEventListener('input', () => {
 async function loadCalls() {
   if (!currentSession) return;
   const resp = await authedFetch('/api/calls?action=list').catch(() => null);
-  if (!resp?.ok) { $('callsList').textContent = 'Could not load calls. Tap Recent to retry.'; return; }
+  if (!resp?.ok) { $('callsList').textContent = 'Couldn\'t load calls.'; return; }
   const { calls } = await resp.json();
   lastLoadedCalls = calls || [];
   renderCallsList(lastLoadedCalls);
@@ -2907,7 +3065,8 @@ async function refreshVoiceStatus() {
   const ready = status === 'ready';
   $('voiceCloneSection').style.display = ready ? 'none' : 'flex';
   $('voicePreviewRow').classList.toggle('hidden', !ready);
-  $('voiceRecordStatus').textContent = status === 'pending' ? 'Cloning your voice…' : status === 'failed' ? 'Last attempt failed — try again with a longer, quieter sample.' : '10–30s of clear speech, quiet room, no music.';
+  if (ready) ensureVoiceSwipeDelete();
+  $('voiceRecordStatus').textContent = status === 'pending' ? 'Cloning your voice…' : status === 'failed' ? 'Cloning failed.' : '';
 }
 
 async function uploadVoiceClip(blob, mimeType) {
@@ -2973,12 +3132,16 @@ $('voicePreviewAudio').addEventListener('play', () => { $('voicePreviewBtn').inn
 $('voicePreviewAudio').addEventListener('pause', () => { $('voicePreviewBtn').innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'; });
 $('voicePreviewAudio').addEventListener('ended', () => { $('voicePreviewBtn').innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'; });
 
-$('deleteVoiceBtn').addEventListener('click', async () => {
-  if (!confirm('Delete your cloned voice? You can record or upload a new one any time.')) return;
-  await authedFetch('/api/voice-clone', { method: 'DELETE' });
-  $('voicePreviewAudio').removeAttribute('src');
-  refreshVoiceStatus();
-});
+let voiceSwipeWrap = null;
+function ensureVoiceSwipeDelete() {
+  if (voiceSwipeWrap && voiceSwipeWrap.isConnected) return;
+  voiceSwipeWrap = makeSwipeDelete($('voicePreviewRow'), async () => {
+    const r = await authedFetch('/api/voice-clone', { method: 'DELETE' });
+    if (!r.ok) throw new Error('delete failed');
+    $('voicePreviewAudio').removeAttribute('src');
+    setTimeout(refreshVoiceStatus, 250);
+  }, { remove: false });
+}
 
 $('voiceBtn').addEventListener('click', () => { openSheet('sheet-voice'); refreshVoiceStatus(); });
 $('socialCallingBtn').addEventListener('click', () => { openSheet('sheet-social-calling'); loadSocialAccounts(); });

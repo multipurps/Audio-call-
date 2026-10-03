@@ -905,3 +905,15 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .callChannelIcon.phone{background:none; color:#fff;}
 .callChannelIcon.phone svg{width:22px; height:22px;}
 .callChannelIcon.whatsapp svg, .callChannelIcon.telegram svg{width:24px; height:24px;}
+
+/* Swipe / hold to delete rows. The only visible affordance is the red Delete
+   pane that the row slides off of; no instruction text anywhere. */
+.swipeWrap{position:relative; overflow:hidden; border-radius:16px; touch-action:pan-y;}
+.swipeWrap > .swipeDelete{position:absolute; top:0; right:0; bottom:0; width:92px; display:flex; align-items:center; justify-content:center; background:#e5484d; color:#fff; font-weight:600; font-size:15px; border:0; cursor:pointer;}
+.swipeWrap > .swipeFront{position:relative; z-index:1; transition:transform .18s ease; will-change:transform;}
+.swipeWrap.open > .swipeFront{transform:translateX(-92px);}
+.swipeWrap.dragging > .swipeFront{transition:none;}
+.swipeWrap.removing{opacity:0; transition:opacity .2s ease;}
+.recentCount{font-size:12px; color:var(--muted,#8e8e93); margin-left:6px;}
+
+.swipeFront{-webkit-user-select:none; user-select:none; -webkit-touch-callout:none;}

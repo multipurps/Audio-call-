@@ -37,6 +37,10 @@ async function cloneVoice(req, res, supabase, userId, fishKey) {
     form.append('title', `user-${userId}`);
     form.append('visibility', 'private');
     form.append('train_mode', 'fast');
+    // Fish removes background noise and normalises the recording before
+    // training; a noisy phone-mic sample is the most common reason a clone
+    // sounds flat and "generic AI".
+    form.append('enhance_audio_quality', 'true');
     form.append('voices', new Blob([audioBytes], { type: mimeType || 'audio/webm' }), 'sample.webm');
 
     const resp = await fetch('https://api.fish.audio/model', {
@@ -79,7 +83,7 @@ async function previewVoice(req, res, supabase, userId, fishKey) {
   try {
     const resp = await fetch('https://api.fish.audio/v1/tts', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${fishKey}`, 'Content-Type': 'application/json', model: 's1' },
+      headers: { Authorization: `Bearer ${fishKey}`, 'Content-Type': 'application/json', model: process.env.FISH_TTS_MODEL || 's2.1-pro' },
       body: JSON.stringify({
         text: "Hi, this is what your cloned voice sounds like. I'll use this voice on your calls.",
         reference_id: profile.provider_voice_id,

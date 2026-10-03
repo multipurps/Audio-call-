@@ -5,7 +5,10 @@ import { database, loadApi, request } from './helpers.mjs';
 const ENV = { WACALLS_RELAY_URL: 'https://relay.test', WACALLS_INTERNAL_SECRET: 'secret-test-value' };
 
 function fixture({ start, attach, hangup } = {}) {
-  const db = database({ whatsapp_accounts: [{ user_id: 'user-1', wacalls_session_id: 'wa-sess-1', status: 'connected' }] });
+  const db = database({
+    whatsapp_accounts: [{ user_id: 'user-1', wacalls_session_id: 'wa-sess-1', status: 'connected' }],
+    chat_sessions: [{ id: 'chat-1', user_id: 'user-1', title: 'New chat', archived: false }],
+  });
   const calls = [];
   const fetcher = async (url, options = {}) => {
     const path = url.replace('https://relay.test', '');

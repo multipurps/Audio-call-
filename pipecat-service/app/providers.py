@@ -280,10 +280,18 @@ def build_tts(settings: Settings) -> Any:
             kwargs["reference_id"] = settings.tts_voice_id
         if settings.tts_model:
             kwargs["model_id"] = settings.tts_model
-        kwargs["settings"] = FishAudioTTSService.Settings(
-            prosody_speed=settings.tts_speed,
-            prosody_volume=settings.tts_volume,
-        )
+        tts_kwargs: dict[str, Any] = {
+            "prosody_speed": settings.tts_speed,
+            "prosody_volume": settings.tts_volume,
+        }
+        # Only passed when explicitly configured; otherwise Fish's defaults apply.
+        if settings.tts_latency:
+            tts_kwargs["latency"] = settings.tts_latency
+        if settings.tts_temperature is not None:
+            tts_kwargs["temperature"] = settings.tts_temperature
+        if settings.tts_top_p is not None:
+            tts_kwargs["top_p"] = settings.tts_top_p
+        kwargs["settings"] = FishAudioTTSService.Settings(**tts_kwargs)
         return FishAudioTTSService(**kwargs)
 
     raise ValueError(f"unsupported TTS provider {settings.tts_provider!r}")

@@ -159,8 +159,12 @@ class Settings:
     tts_voice_id: str | None = None
     #: Fish speech speed (0.5-2.0) and volume in dB (-20..20). Calmer and
     #: quieter than Fish's defaults, which sounded rushed and loud on calls.
-    tts_speed: float = 0.92
-    tts_volume: int = -3
+    tts_speed: float = 1.0
+    tts_volume: int = 0
+    # Fish sampling/latency knobs. None = the provider's own default.
+    tts_latency: str | None = None
+    tts_temperature: float | None = None
+    tts_top_p: float | None = None
     tts_model: str | None = None
 
     # -- credentials -----------------------------------------------------
@@ -404,8 +408,11 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         tts_provider=_env(env, "ASSISTANT_TTS_PROVIDER", DEFAULT_TTS_PROVIDER)
         or DEFAULT_TTS_PROVIDER,
         tts_voice_id=_env(env, "ASSISTANT_TTS_VOICE_ID"),
-        tts_speed=_clamp_float(_env(env, "ASSISTANT_TTS_SPEED"), 0.92, 0.5, 2.0),
-        tts_volume=int(_clamp_float(_env(env, "ASSISTANT_TTS_VOLUME"), -3, -20, 20)),
+        tts_speed=_clamp_float(_env(env, "ASSISTANT_TTS_SPEED"), 1.0, 0.5, 2.0),
+        tts_volume=int(_clamp_float(_env(env, "ASSISTANT_TTS_VOLUME"), 0, -20, 20)),
+        tts_latency=(_env(env, "ASSISTANT_TTS_LATENCY") or "").lower() if (_env(env, "ASSISTANT_TTS_LATENCY") or "").lower() in ("normal", "balanced") else None,
+        tts_temperature=_clamp_float(_env(env, "ASSISTANT_TTS_TEMPERATURE"), -1, 0.0, 1.0) if _env(env, "ASSISTANT_TTS_TEMPERATURE") else None,
+        tts_top_p=_clamp_float(_env(env, "ASSISTANT_TTS_TOP_P"), -1, 0.0, 1.0) if _env(env, "ASSISTANT_TTS_TOP_P") else None,
         tts_model=_env(env, "ASSISTANT_TTS_MODEL"),
         openai_api_key=_env(env, "OPENAI_API_KEY"),
         deepgram_api_key=_env(env, "DEEPGRAM_API_KEY"),

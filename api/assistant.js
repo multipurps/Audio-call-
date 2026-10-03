@@ -9,6 +9,7 @@ import { prepareTurnContext, consolidateAndStoreMemories, inferMemoryType } from
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { wacallsPlaceAICall } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
+import { resolvePersonSession } from '../lib/personSession.js';
 import { endCallRow, isEndCallRequest, LIVE_CALL_STATUSES } from '../lib/callHangup.js';
 import { sendCallNote } from '../lib/callNote.js';
 import { createCallRecord, markCallPlaced, markCallFailed, findDuplicateActiveCall } from '../lib/callSession.js';
@@ -358,7 +359,8 @@ async function sendMessage(req, res, supabase, userId) {
 
   const userMsg = await insertMessage(supabase, userId, sessionId, 'user', text.trim(), null, msgSource);
   const newMessages = [userMsg];
-  const respond = (extra = {}) => res.status(200).json({ messages: newMessages, sessionId, isNewSession, ...extra });
+  let sessionSwitched = false;
+  const respond = (extra = {}) => res.status(200).json({ messages: newMessages, sessionId, isNewSession, sessionSwitched, ...extra });
 
   // "End the call" typed/spoken in chat ends THIS conversation's live call.
   // Scoped by the chat session id, never by "the most recent call overall",
@@ -675,6 +677,15 @@ async function sendMessage(req, res, supabase, userId) {
         return respond({ channelUsed: callChannel, callId: duplicate.id, toNumber: digitsOnly, contactName: contact?.name || null });
       }
 
+      // One person = one conversation: if this number already has a chat, this
+      // chat folds into it and the client is told to switch to it.
+      const person = await resolvePersonSession(supabase, userId, {
+        sessionId, toNumber: digitsOnly, contactNumber: contact?.phone_number || null, contactId: contact?.id || null, label,
+      });
+      if (person.sessionId && person.sessionId !== sessionId) {
+        sessionId = person.sessionId;
+        sessionSwitched = true;
+      }
       const callRow = await createSocialRow();
       try {
         let platformCallId = null;

@@ -2,6 +2,7 @@ import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { resolveWhatsappStatus } from '../lib/whatsappStatus.js';
 import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsPlaceAICall, wacallsHangup } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
+import { resolvePersonSession } from '../lib/personSession.js';
 import {
   createCallRecord,
   markCallPlaced,
@@ -501,20 +502,25 @@ async function placeCall(req, res, supabase, userId) {
     // pipeline resolves its bridge session ("call-" + provider id) back to
     // this row to load instructions/memories and persist the transcript,
     // and the live call screen opens as soon as the row appears.
+    // One person = one conversation (see lib/personSession.js).
+    const person = await resolvePersonSession(supabase, userId, {
+      sessionId: sessionId || null, toNumber: to, contactId: contactId || null, label: contactName || null,
+    });
+    const effectiveSession = person.sessionId || sessionId || null;
     const dbCall = await createCallRecord(supabase, userId, {
       platform: 'whatsapp',
       toNumber: to,
       objective: objective || '',
       instructions: instructions || null,
       contactId: contactId || null,
-      sessionId: sessionId || null,
+      sessionId: effectiveSession,
     });
     try {
       // Place the call AND attach the assistant. This used to only start the
       // call, so a WhatsApp call placed through this action rang, was
       // answered, and nothing ever spoke.
       const placed = await wacallsPlaceAICall(userId, row.wacalls_session_id, to, {
-        appSessionId: sessionId || null,
+        appSessionId: effectiveSession,
         contactName: contactName || null,
         // Runs after the relay returns the provider call id but BEFORE the
         // assistant bridge dials in (attach), so the row carries the id the

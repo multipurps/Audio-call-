@@ -17,6 +17,7 @@ export default async function handler(req, res) {
     case 'hangup': return hangupCall(req, res, supabase, userId);
     case 'mute': return muteCall(req, res, supabase, userId);
     case 'list': return listCalls(req, res, supabase, userId);
+    case 'delete': return deleteCalls(req, res, supabase, userId);
     case 'get': return getCall(req, res, supabase, userId);
     case 'monitor-token': return monitorToken(req, res, supabase, userId);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
@@ -110,6 +111,18 @@ async function muteCall(req, res, supabase, userId) {
   return res.status(200).json({ ok: true });
 }
 
+// Removes calls (and their transcripts/summaries) from Recent. Scoped to the
+// signed-in user; live calls are never deleted out from under the call screen.
+async function deleteCalls(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const ids = Array.isArray(req.body?.callIds) ? req.body.callIds.filter((x) => typeof x === 'string' && /^[0-9a-f-]{36}$/i.test(x)).slice(0, 500) : [];
+  if (!ids.length) return res.status(400).json({ error: 'callIds required' });
+  const { error } = await supabase.from('calls').delete()
+    .eq('user_id', userId).in('id', ids).not('status', 'in', '(queued,ringing,in_progress)');
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ ok: true });
+}
+
 async function listCalls(req, res, supabase, userId) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
   const { data, error } = await supabase
@@ -117,7 +130,7 @@ async function listCalls(req, res, supabase, userId) {
     .select('*')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
-    .limit(50);
+    .limit(200);
   if (error) return res.status(500).json({ error: error.message });
 
   const contactIds = [...new Set((data || []).map((c) => c.contact_id).filter(Boolean))];
