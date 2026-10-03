@@ -431,7 +431,15 @@ async function sendMessage(req, res, supabase, userId) {
     try {
       const parsed = JSON.parse(err.message);
       const text = parsed?.error?.failed_generation;
-      if (text && typeof text === 'string') recovered = text.trim();
+      // `failed_generation` is meant to hold the model's actual attempted
+      // reply text when it just forgot to wrap it in our JSON schema - but
+      // some provider failures put a validator's own complaint in that same
+      // field instead (schema/pattern-mismatch messages, not anything the
+      // model meant to say to the user). Surfacing those verbatim as if
+      // they were Emysa's reply is worse than the generic fallback below.
+      const looksLikeValidatorError = typeof text === 'string'
+        && /\b(did not match|expected pattern|invalid schema|schema valid|json valid|does not match the|must match)\b/i.test(text);
+      if (text && typeof text === 'string' && !looksLikeValidatorError) recovered = text.trim();
     } catch {
       // err.message wasn't JSON (a network error, etc.) - nothing to recover.
     }
