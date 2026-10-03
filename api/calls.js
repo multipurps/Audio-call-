@@ -3,6 +3,7 @@ import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { endCallRow } from '../lib/callHangup.js';
 import { createHmac } from 'node:crypto';
 import { callSessionId } from '../lib/callNote.js';
+import { maybeGenerateCallSummary, waitForCallSummary } from '../lib/callSession.js';
 
 export default async function handler(req, res) {
   const supabase = getServiceClient();
@@ -20,6 +21,7 @@ export default async function handler(req, res) {
     case 'delete': return deleteCalls(req, res, supabase, userId);
     case 'get': return getCall(req, res, supabase, userId);
     case 'monitor-token': return monitorToken(req, res, supabase, userId);
+    case 'summarize': return summarizeCall(req, res, supabase, userId);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
   }
 }
@@ -70,6 +72,32 @@ async function monitorToken(req, res, supabase, userId) {
     sessionId,
     sampleRate: 16000,
     url: `${base}/monitor/${encodeURIComponent(sessionId)}?token=${encodeURIComponent(token)}`,
+  });
+}
+
+// On-demand summary for a finished call that has a transcript but no summary
+// (generation failed, or never ran). Same shared, idempotent generator as the
+// automatic path; returns the real failure reason so it can be shown/fixed.
+async function summarizeCall(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { callId } = req.body || {};
+  if (!callId) return res.status(400).json({ error: 'callId required' });
+  const { data: call } = await supabase
+    .from('calls').select('id').eq('id', callId).eq('user_id', userId).maybeSingle();
+  if (!call) return res.status(404).json({ error: 'Call not found' });
+
+  let result = await maybeGenerateCallSummary(supabase, callId);
+  if (result?.status === 'claimed-elsewhere') {
+    result = await waitForCallSummary(supabase, callId, { timeoutMs: 15_000 });
+  }
+  const { data: fresh } = await supabase
+    .from('calls').select('outcome_summary, summary_json, summary_status').eq('id', callId).maybeSingle();
+  return res.status(200).json({
+    status: result?.status || 'unknown',
+    summary: fresh?.outcome_summary || null,
+    summary_json: fresh?.summary_json || null,
+    summary_status: fresh?.summary_status || null,
+    error: result?.error || fresh?.summary_json?.error || null,
   });
 }
 

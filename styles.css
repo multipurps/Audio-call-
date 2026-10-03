@@ -908,3 +908,6 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .recentCount{font-size:12px; color:var(--muted,#8e8e93); margin-left:6px;}
 
 .swipeFront{-webkit-user-select:none; user-select:none; -webkit-touch-callout:none;}
+
+.callDetailSummaryBtn { margin-top: 10px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--accent, #22d3ee); background: transparent; color: var(--accent, #22d3ee); font: inherit; font-weight: 600; cursor: pointer; }
+.callDetailSummaryBtn:disabled { opacity: .6; cursor: default; }

@@ -9,7 +9,7 @@
 <title>Emysa</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-09-27.1">
+<link rel="stylesheet" href="styles.css?v=2026-10-03.3">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -89,7 +89,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-09-27.1').catch(function (err) {
+        import('./app.js?v=2026-10-03.3').catch(function (err) {
           showBootError('Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -1092,6 +1092,7 @@
   <div class="callDetailCard hidden" id="callDetailSummaryCard">
     <div class="callDetailLabel">Summary</div>
     <p class="callDetailText" id="callDetailSummary"></p>
+    <button type="button" class="callDetailSummaryBtn hidden" id="callDetailSummaryBtn">Generate summary</button>
   </div>
   <div class="callDetailCard hidden" id="callDetailTranscriptCard">
     <div class="callDetailLabel">Transcript</div>

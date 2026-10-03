@@ -2485,6 +2485,62 @@ async function callAgainFromDetail() {
   }
 }
 
+// A finished call with a transcript but no summary (generation failed, or
+// never ran) used to show only the transcript with no explanation. Try once
+// automatically when the detail opens, and keep a button so it can be retried;
+// show the real failure reason if it fails.
+const summaryAutoTried = new Set();
+function setupSummaryRecovery(c, summaryText) {
+  const card = $('callDetailSummaryCard');
+  const text = $('callDetailSummary');
+  const btn = $('callDetailSummaryBtn');
+  if (!btn) return;
+  btn.classList.add('hidden');
+  btn.onclick = null;
+  const terminal = ['completed', 'failed', 'no_answer', 'busy', 'canceled'].includes(c.status);
+  const hasTranscript = Array.isArray(c.transcript) && c.transcript.some((t) => String(t?.content || t?.text || '').trim());
+  if (summaryText || !terminal || !hasTranscript) return;
+
+  card.classList.remove('hidden');
+  const priorError = c.summary_json?.error;
+  text.textContent = priorError ? `No summary yet (${priorError}).` : 'No summary yet.';
+  btn.classList.remove('hidden');
+
+  const run = async () => {
+    btn.disabled = true;
+    btn.textContent = 'Generating…';
+    text.textContent = 'Generating summary…';
+    try {
+      const resp = await authedFetch('/api/calls?action=summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callId: c.id }),
+      });
+      const out = await resp.json().catch(() => ({}));
+      if (callDetailCurrent?.call?.id !== c.id) return; // dialog moved on
+      if (resp.ok && out.summary && out.status !== 'skipped') {
+        c.outcome_summary = out.summary;
+        c.summary_json = out.summary_json;
+        text.textContent = out.summary;
+        renderCallDetailSections(out.summary_json);
+        btn.classList.add('hidden');
+        return;
+      }
+      text.textContent = `Couldn't generate a summary: ${out.error || out.status || 'server error'}.`;
+    } catch (err) {
+      if (callDetailCurrent?.call?.id === c.id) text.textContent = "Couldn't reach the server to generate a summary.";
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Try again';
+    }
+  };
+  btn.onclick = run;
+  if (!summaryAutoTried.has(c.id)) {
+    summaryAutoTried.add(c.id);
+    run();
+  }
+}
+
 function openCallDetail(c, name, isKnown) {
   callDetailCurrent = { call: c, name, isKnown };
   $('callDetailAvatar').innerHTML = isKnown
@@ -2511,6 +2567,7 @@ function openCallDetail(c, name, isKnown) {
   $('callDetailSummaryCard').classList.toggle('hidden', !summaryText);
   $('callDetailSummary').textContent = summaryText;
   renderCallDetailSections(c.summary_json);
+  setupSummaryRecovery(c, summaryText);
   const transcriptCard = $('callDetailTranscriptCard');
   const transcriptEl = $('callDetailTranscript');
   if (transcriptCard && transcriptEl) {
