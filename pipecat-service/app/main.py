@@ -148,12 +148,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # stops a dropped mobile connection from leaving a session -- and its
         # provider connections -- alive forever.
         reaper = asyncio.create_task(_reaper_loop(state))
+        # Warm in the background so the port opens at once (Render's health
+        # check) while models and libraries load before the first call.
+        from app.prewarm import prewarm
+
+        warm = asyncio.create_task(prewarm(settings.mock_mode))
         try:
             yield
         finally:
             reaper.cancel()
+            warm.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await reaper
+            with contextlib.suppress(asyncio.CancelledError):
+                await warm
             await state.shutdown()
 
     app = FastAPI(

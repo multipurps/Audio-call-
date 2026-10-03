@@ -2984,10 +2984,12 @@ $('voiceBtn').addEventListener('click', () => { openSheet('sheet-voice'); refres
 $('socialCallingBtn').addEventListener('click', () => { openSheet('sheet-social-calling'); loadSocialAccounts(); });
 
 // ---------- Connected accounts (Telegram / WhatsApp) ----------
+let whatsappLinking = false;
 async function loadSocialAccounts() {
   $('telegramLoginForm').classList.add('hidden');
   $('telegramOtpForm').classList.add('hidden');
-  $('whatsappQrWrap').classList.add('hidden');
+  // A refresh of the account list must not close the pairing pane mid-link.
+  if (!whatsappLinking) $('whatsappQrWrap').classList.add('hidden');
   $('telegramLoginError').textContent = '';
   $('whatsappLoginError').textContent = '';
   try {
@@ -3089,6 +3091,7 @@ function watchWhatsappStatus() {
     if (d.pairingCode) showWhatsappPairingCode(d.pairingCode);
     if (d.status === 'connected') {
       clearInterval(whatsappPollTimer);
+      whatsappLinking = false;
       $('whatsappQrWrap').classList.add('hidden');
       loadSocialAccounts();
     }
@@ -3101,7 +3104,8 @@ function showWhatsappPairingCode(code) {
 }
 
 async function startWhatsappLink() {
-  $('whatsappLoginError').textContent = '';
+  whatsappLinking = true;
+  $('whatsappLoginError').textContent = 'Getting your link ready…';
   $('whatsappQrWrap').classList.remove('hidden');
   $('whatsappLinkModeGroup').querySelectorAll('.segmentedBtn').forEach((b) => b.classList.toggle('active', b.dataset.mode === 'qr'));
   $('whatsappQrPane').classList.remove('hidden');
@@ -3111,8 +3115,9 @@ async function startWhatsappLink() {
     const resp = await authedFetch('/api/social-calling?action=whatsapp-start', { method: 'POST' });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || 'Could not start WhatsApp link');
+    $('whatsappLoginError').textContent = '';
     if (data.qr) $('whatsappQrImg').src = data.qr;
-    if (data.status === 'connected') { $('whatsappQrWrap').classList.add('hidden'); loadSocialAccounts(); return; }
+    if (data.status === 'connected') { whatsappLinking = false; $('whatsappQrWrap').classList.add('hidden'); loadSocialAccounts(); return; }
     watchWhatsappStatus();
   } catch (err) {
     $('whatsappLoginError').textContent = err.message;

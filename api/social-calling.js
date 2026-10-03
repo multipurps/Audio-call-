@@ -1,4 +1,5 @@
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
+import { resolveWhatsappStatus } from '../lib/whatsappStatus.js';
 import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsPlaceAICall, wacallsHangup } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
 import {
@@ -332,8 +333,16 @@ async function relayCallStatus(req, res, supabase) {
 async function status(req, res, supabase, userId) {
   const [{ data: tg }, { data: wa }] = await Promise.all([
     supabase.from('telegram_accounts').select('status, display_name, phone_last4, last_error').eq('user_id', userId).maybeSingle(),
-    supabase.from('whatsapp_accounts').select('status, display_name, last_error').eq('user_id', userId).maybeSingle(),
+    supabase.from('whatsapp_accounts').select('status, display_name, last_error, wacalls_session_id').eq('user_id', userId).maybeSingle(),
   ]);
+  // Ask the relay what WhatsApp's real state is (short timeout: the relay can
+  // be asleep). The saved flag alone showed "Not connected" while the relay
+  // was paired and placing calls.
+  let waLive = { status: wa?.status || 'disconnected', displayName: wa?.display_name || null, update: null, unreachable: false };
+  try {
+    waLive = await resolveWhatsappStatus(wa, () => wacallsDetail(userId, wa.wacalls_session_id, { timeoutMs: 4000 }));
+    if (waLive.update) await supabase.from('whatsapp_accounts').update(waLive.update).eq('user_id', userId);
+  } catch { /* keep the saved state */ }
   return res.status(200).json({
     telegram: {
       status: tg?.status || 'disconnected',
@@ -342,9 +351,9 @@ async function status(req, res, supabase, userId) {
       error: tg?.last_error || null,
     },
     whatsapp: {
-      status: wa?.status || 'disconnected',
-      displayName: wa?.display_name || null,
-      error: wa?.last_error || null,
+      status: waLive.status,
+      displayName: waLive.displayName,
+      error: waLive.unreachable ? 'Checking connection…' : (wa?.last_error || null),
     },
   });
 }
@@ -450,23 +459,12 @@ async function whatsappStartWithPhone(req, res, supabase, userId) {
 }
 
 async function whatsappStatus(req, res, supabase, userId) {
-  const { data: row } = await supabase.from('whatsapp_accounts').select('wacalls_session_id, display_name').eq('user_id', userId).maybeSingle();
+  const { data: row } = await supabase.from('whatsapp_accounts').select('status, wacalls_session_id, display_name').eq('user_id', userId).maybeSingle();
   if (!row?.wacalls_session_id) return res.status(200).json({ status: 'disconnected' });
-  let detail;
-  try {
-    detail = await wacallsDetail(userId, row.wacalls_session_id);
-  } catch (err) {
-    if (err.statusCode !== 404) throw err;
-    // Dead id (e.g. relay storage was reset) - clear it so the next
-    // "Connect" click mints a fresh session instead of repeating this.
-    await supabase.from('whatsapp_accounts').update({ wacalls_session_id: null, status: 'disconnected', display_name: null }).eq('user_id', userId);
-    return res.status(200).json({ status: 'disconnected' });
-  }
-  const status = detail.paired ? 'connected' : detail.state === 'code' ? 'pending_code' : detail.state === 'qr' ? 'pending_qr' : 'disconnected';
-  if (detail.paired && detail.jid && detail.jid !== row.display_name) {
-    await supabase.from('whatsapp_accounts').update({ status: 'connected', display_name: detail.jid }).eq('user_id', userId);
-  }
-  return res.status(200).json({ status, qr: detail.qr || null, pairingCode: detail.code || null, displayName: detail.jid || row.display_name || null });
+  let detail = null;
+  const live = await resolveWhatsappStatus(row, async () => { detail = await wacallsDetail(userId, row.wacalls_session_id); return detail; });
+  if (live.update) await supabase.from('whatsapp_accounts').update(live.update).eq('user_id', userId);
+  return res.status(200).json({ status: live.status, qr: detail?.qr || null, pairingCode: detail?.code || null, displayName: live.displayName });
 }
 
 async function whatsappDisconnect(req, res, supabase, userId) {
