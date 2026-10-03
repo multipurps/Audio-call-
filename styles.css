@@ -911,3 +911,29 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 
 .callDetailSummaryBtn { margin-top: 10px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--accent, #22d3ee); background: transparent; color: var(--accent, #22d3ee); font: inherit; font-weight: 600; cursor: pointer; }
 .callDetailSummaryBtn:disabled { opacity: .6; cursor: default; }
+/* ---------- calling line setup ---------- */
+#lineSetupScreen{position:absolute; inset:0; z-index:300; background:var(--coffee); overflow-y:auto; -webkit-overflow-scrolling:touch;}
+.lineSetupInner{max-width:480px; margin:0 auto; padding:calc(var(--safe-top) + 56px) 20px 40px; position:relative;}
+.lineSetupClose{position:absolute; top:calc(var(--safe-top) + 16px); right:16px; background:none; border:0; color:var(--dim); font-size:14px; font-weight:600; padding:8px;}
+.lineSub{color:var(--dim); font-size:14px; margin:6px 0 20px;}
+.lineOption{display:block; width:100%; text-align:left; background:var(--glass-bg); border:1px solid var(--glass-border); color:#fff; border-radius:16px; padding:16px; margin-bottom:12px; backdrop-filter:blur(18px) saturate(160%); -webkit-backdrop-filter:blur(18px) saturate(160%);}
+.lineOption.active{border-color:var(--accent);}
+.lineOptTop{display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;}
+.lineOptTitle{font-weight:700; font-size:16px;}
+.recoBadge{font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; background:var(--accent); color:#fff; letter-spacing:0.02em;}
+.lineOptDesc{font-size:13.5px; color:var(--dim); margin-top:6px; line-height:1.4;}
+.lineOptPrice{font-size:14px; font-weight:700; margin-top:8px; color:#fff;}
+.linePanel{background:var(--glass-bg); border:1px solid var(--glass-border); border-radius:16px; padding:16px; margin:4px 0 12px;}
+.lineLabel{display:block; font-size:13px; color:var(--dim); margin-bottom:8px; line-height:1.4;}
+.lineCodeWrap{margin-top:16px; text-align:center;}
+.lineRentRow{display:flex; gap:8px;}
+.lineRentRow .plainInput{flex:1; min-width:0;}
+.rentResults{margin-top:12px; display:flex; flex-direction:column; gap:8px;}
+.rentItem{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px; border-radius:12px; background:rgba(255,255,255,0.06); border:1px solid var(--glass-border);}
+.rentItem .rentNum{font-weight:700;}
+.rentItem .rentWhere{font-size:12.5px; color:var(--dim);}
+.rentItem button{flex:none; width:auto; padding:8px 14px;}
+.lineCurrent{display:flex; align-items:center; justify-content:space-between; gap:12px; background:var(--glass-bg); border:1px solid var(--accent); border-radius:16px; padding:14px 16px; margin-bottom:16px;}
+.lineCurrentLabel{font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:0.04em; font-weight:700;}
+.lineCurrentNumber{font-weight:700; font-size:16px; margin-top:2px;}
+.lineRemoveBtn{width:auto; flex:none; padding:8px 14px;}

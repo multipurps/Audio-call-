@@ -4,6 +4,10 @@ import { endCallRow } from '../lib/callHangup.js';
 import { createHmac } from 'node:crypto';
 import { callSessionId } from '../lib/callNote.js';
 import { maybeGenerateCallSummary, waitForCallSummary } from '../lib/callSession.js';
+import {
+  availableChannels, checkVerification, getPhoneLine, isApproved, publicLine,
+  removeLine, rentNumber, rentSettings, searchNumbers, startVerification,
+} from '../lib/phoneLines.js';
 
 export default async function handler(req, res) {
   const supabase = getServiceClient();
@@ -22,6 +26,10 @@ export default async function handler(req, res) {
     case 'get': return getCall(req, res, supabase, userId);
     case 'monitor-token': return monitorToken(req, res, supabase, userId);
     case 'summarize': return summarizeCall(req, res, supabase, userId);
+    // Phone line (Twilio): bring your own number, or rent one.
+    case 'line-get': case 'line-verify-start': case 'line-verify-status':
+    case 'line-rent-search': case 'line-rent-buy': case 'line-remove':
+      return lineAction(action, req, res, supabase, userId);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
   }
 }
@@ -181,4 +189,35 @@ async function listCalls(req, res, supabase, userId) {
   }));
 
   return res.status(200).json({ calls });
+}
+
+// Phone line actions. Approval is enforced HERE, server-side: the app only
+// hides screens from unapproved users, which is not access control, and these
+// actions can start real Twilio charges.
+async function lineAction(action, req, res, supabase, userId) {
+  if (!(await isApproved(supabase, userId))) return res.status(403).json({ error: 'Your account is not approved yet.' });
+  const send = (result) => (result.error
+    ? res.status(result.status || 400).json({ error: result.error })
+    : res.status(200).json(result));
+  const needPost = () => (req.method !== 'POST' ? res.status(405).json({ error: 'POST only' }) : null);
+
+  switch (action) {
+    case 'line-get': {
+      const [line, channels] = await Promise.all([getPhoneLine(supabase, userId), availableChannels(supabase, userId)]);
+      const rent = rentSettings();
+      return res.status(200).json({ line: publicLine(line), channels, rent });
+    }
+    case 'line-verify-start':
+      return needPost() || send(await startVerification(supabase, userId, req.body?.phone));
+    case 'line-verify-status':
+      return send(await checkVerification(supabase, userId));
+    case 'line-rent-search':
+      return send(await searchNumbers({ country: req.query?.country || 'US', areaCode: req.query?.areaCode }));
+    case 'line-rent-buy':
+      return needPost() || send(await rentNumber(supabase, userId, req.body?.phoneNumber));
+    case 'line-remove':
+      return needPost() || send(await removeLine(supabase, userId));
+    default:
+      return res.status(400).json({ error: 'Unknown action' });
+  }
 }

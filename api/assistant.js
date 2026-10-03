@@ -12,6 +12,7 @@ import { mpRelayRequest } from '../lib/mpRelayClient.js';
 import { resolvePersonSession } from '../lib/personSession.js';
 import { endCallRow, isEndCallRequest, LIVE_CALL_STATUSES } from '../lib/callHangup.js';
 import { sendCallNote } from '../lib/callNote.js';
+import { availableChannels } from '../lib/phoneLines.js';
 import { createCallRecord, markCallPlaced, markCallFailed, findDuplicateActiveCall } from '../lib/callSession.js';
 import { transcribeAudioBuffer, resolveSttApiKey } from '../lib/sttClient.js';
 
@@ -540,17 +541,37 @@ async function sendMessage(req, res, supabase, userId) {
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
     intent = { action: 'call', contactName: contact.name, phoneNumber: null, objective: text.trim(), channel: uiChannel };
   }
-  const callChannel = (['phone', 'whatsapp', 'telegram'].includes(intent.channel) ? intent.channel : null) || uiChannel;
+  let callChannel = (['phone', 'whatsapp', 'telegram'].includes(intent.channel) ? intent.channel : null) || uiChannel;
 
   if (intent.action === 'call' || intent.action === 'retry') {
     let contact = null;
     let retryToNumber = null;
     let retryObjective = null;
 
+    // Which lines does THIS user actually have? Twilio exists only for users
+    // who verified or rented a number; WhatsApp only once it is linked.
+    const lines = await availableChannels(supabase, userId);
     if (!callChannel) {
-      // Never guess a line. Twilio placing a real phone call when the user
-      // meant WhatsApp/Telegram is worse than asking.
-      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', 'Which line should I call on — Phone, WhatsApp or Telegram? Pick one from the call button and tell me again.', null, msgSource));
+      // Not named in the message and no line picked in the app. If the user
+      // has exactly one line there is nothing to ask; with two, ask; with
+      // none, say how to set one up. Never guess between two real lines, and
+      // never fall back to a line the user does not have.
+      if (lines.whatsapp !== lines.phone) {
+        callChannel = lines.whatsapp ? 'whatsapp' : 'phone';
+      } else {
+        const ask = lines.whatsapp && lines.phone
+          ? 'Should I call on WhatsApp or your phone line?'
+          : "You haven't set up a calling line yet. Open Profile, then Calling lines, to link WhatsApp or add a phone number.";
+        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', ask, null, msgSource));
+        return respond();
+      }
+    }
+    if (callChannel === 'phone' && !lines.phone) {
+      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant',
+        lines.whatsapp
+          ? "Phone calling isn't set up on your account, so I'll only use WhatsApp. You can add a phone line in Profile, then Calling lines."
+          : "Phone calling isn't set up on your account yet. Open Profile, then Calling lines, to add a number or link WhatsApp.",
+        null, msgSource));
       return respond();
     }
 

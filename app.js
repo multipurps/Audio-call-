@@ -261,6 +261,7 @@ async function enterApp(session) {
   // Quiet preload so beginPreCall() can find an existing per-contact thread
   // to continue even if the person hasn't opened Recent yet this session.
   loadRecentChats();
+  maybeShowLineSetup();
 
   redeemPendingReferral();
 }
@@ -1189,13 +1190,16 @@ async function startAssistantListening() {
 
 // ---------- Call channel: Emysa (voice) / WhatsApp / Telegram / Phone ----------
 const CALL_CHANNEL_KEY = 'emysa.callChannel';
-let selectedCallChannel = null; // null = Phone (Twilio); otherwise 'whatsapp' | 'telegram'
+let selectedCallChannel = null; // null = not chosen: the server uses the only line the user has, or asks
+// Telegram never worked reliably, so it is hidden. Flip to true to bring it back.
+const TELEGRAM_ENABLED = false;
 try {
   const saved = localStorage.getItem(CALL_CHANNEL_KEY);
-  if (saved === 'whatsapp' || saved === 'telegram') selectedCallChannel = saved;
+  if (saved === 'phone' || saved === 'whatsapp' || (saved === 'telegram' && TELEGRAM_ENABLED)) selectedCallChannel = saved;
 } catch {}
-// Always an explicit value — the server refuses to guess a line.
-function currentCallChannel() { return selectedCallChannel || 'phone'; }
+// null when the user has not picked a line. The server never guesses between
+// two real lines and never uses one the user does not have.
+function currentCallChannel() { return selectedCallChannel; }
 
 const CHANNEL_META = {
   whatsapp: { label: 'WhatsApp', placeholder: 'Paste a number to call on WhatsApp…' },
@@ -1204,8 +1208,8 @@ const CHANNEL_META = {
 };
 
 function setCallChannel(channel, { focus = true } = {}) {
-  selectedCallChannel = channel === 'phone' ? null : channel;
-  try { localStorage.setItem(CALL_CHANNEL_KEY, currentCallChannel()); } catch {}
+  selectedCallChannel = channel || null;
+  try { localStorage.setItem(CALL_CHANNEL_KEY, selectedCallChannel || ''); } catch {}
   const meta = CHANNEL_META[channel] || CHANNEL_META.phone;
   $('briefInput').placeholder = meta.placeholder;
   $('channelBadge').classList.toggle('visible', !!meta.label);
@@ -1244,6 +1248,7 @@ document.querySelectorAll('.callChannelItem').forEach((btn) => {
       openAssistantCallScreen();
       return;
     }
+    if (channel === 'setup') { openLineSetup(); return; }
     setCallChannel(channel);
   });
 });
@@ -3427,6 +3432,235 @@ $('whatsappPhoneSubmitBtn').addEventListener('click', async () => {
     $('whatsappPhoneSubmitBtn').disabled = false;
     $('whatsappPhoneSubmitBtn').textContent = 'Get code';
   }
+});
+
+// ---------- Calling lines: rent / bring your own number / WhatsApp ----------
+// Twilio (phone) exists only for a user who verified or rented a number; the
+// server enforces that. This screen just walks them through getting one.
+let lineState = { line: null, channels: { phone: false, whatsapp: false }, rent: { enabled: false, monthlyUsd: null, countries: [] } };
+let lineVerifyTimer = null;
+let lineWaTimer = null;
+
+function lineMsg(text) { $('lineMsg').textContent = text || ''; }
+function stopLinePolls() { clearInterval(lineVerifyTimer); clearInterval(lineWaTimer); lineVerifyTimer = lineWaTimer = null; }
+
+async function loadLineState() {
+  try {
+    const resp = await authedFetch('/api/calls?action=line-get');
+    if (resp.ok) lineState = await resp.json();
+  } catch { /* keep the last known state */ }
+  applyChannelAvailability();
+  return lineState;
+}
+
+// Only offer lines the user actually has. Anything else is hidden here and
+// refused on the server.
+function applyChannelAvailability() {
+  const { phone, whatsapp } = lineState.channels;
+  const show = (sel, on) => document.querySelector(sel)?.classList.toggle('hidden', !on);
+  show('.callChannelItem[data-channel="phone"]', phone);
+  show('.callChannelItem[data-channel="whatsapp"]', whatsapp);
+  show('.callChannelItem[data-channel="telegram"]', TELEGRAM_ENABLED);
+  show('#channelSetupItem', !(phone && whatsapp));
+  show('#telegramAccountCard', TELEGRAM_ENABLED);
+  const stale = (selectedCallChannel === 'phone' && !phone) || (selectedCallChannel === 'whatsapp' && !whatsapp)
+    || (selectedCallChannel === 'telegram' && !TELEGRAM_ENABLED);
+  if (stale) {
+    selectedCallChannel = null;
+    try { localStorage.setItem(CALL_CHANNEL_KEY, ''); } catch {}
+    $('channelBadge').classList.remove('visible');
+    $('briefInput').placeholder = CHANNEL_META.phone.placeholder;
+  }
+  const parts = [];
+  if (phone) parts.push(lineState.line?.mode === 'rent' ? 'Rented number' : 'Your number');
+  if (whatsapp) parts.push('WhatsApp');
+  $('callingLinesSub').textContent = parts.length ? parts.join(' and ') : 'Not set up yet';
+}
+
+function renderLineCurrent() {
+  const line = lineState.line;
+  const usable = line && (line.status === 'verified' || line.status === 'rented');
+  $('lineCurrent').classList.toggle('hidden', !usable);
+  if (!usable) return;
+  $('lineCurrentLabel').textContent = line.mode === 'rent' ? 'Your rented number' : 'Your verified number';
+  $('lineCurrentNumber').textContent = line.phoneNumber;
+}
+
+function showLinePanel(name) {
+  ['own', 'rent', 'wa'].forEach((k) => $({ own: 'panelOwn', rent: 'panelRent', wa: 'panelWa' }[k]).classList.toggle('hidden', k !== name));
+  $('optOwn').classList.toggle('active', name === 'own');
+  $('optRent').classList.toggle('active', name === 'rent');
+  $('optWa').classList.toggle('active', name === 'wa');
+  lineMsg('');
+}
+
+async function openLineSetup() {
+  $('lineSetupScreen').classList.remove('hidden');
+  stopLinePolls();
+  showLinePanel(null);
+  $('ownCodeWrap').classList.add('hidden');
+  $('waLineCodeWrap').classList.add('hidden');
+  $('rentResults').textContent = '';
+  await loadLineState();
+  renderLineCurrent();
+  const rent = lineState.rent || {};
+  $('rentPriceLabel').textContent = rent.enabled ? `$${Number(rent.monthlyUsd).toFixed(2)} / month` : 'Coming soon';
+  $('optRent').disabled = !rent.enabled;
+  $('optRent').style.opacity = rent.enabled ? '' : '0.6';
+  const sel = $('rentCountry');
+  sel.textContent = '';
+  (rent.countries || []).forEach((c) => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+}
+
+function closeLineSetup() {
+  stopLinePolls();
+  $('lineSetupScreen').classList.add('hidden');
+  try { sessionStorage.setItem('emysa.lineSetupSkipped', '1'); } catch {}
+  applyChannelAvailability();
+}
+
+async function maybeShowLineSetup() {
+  await loadLineState();
+  let skipped = false;
+  try { skipped = sessionStorage.getItem('emysa.lineSetupSkipped') === '1'; } catch {}
+  if (!lineState.channels.phone && !lineState.channels.whatsapp && !skipped) openLineSetup();
+}
+
+$('lineSetupClose').addEventListener('click', closeLineSetup);
+$('callingLinesBtn').addEventListener('click', openLineSetup);
+$('optOwn').addEventListener('click', () => showLinePanel('own'));
+$('optRent').addEventListener('click', () => { if (lineState.rent?.enabled) showLinePanel('rent'); });
+$('optWa').addEventListener('click', () => showLinePanel('wa'));
+
+async function lineApi(action, { method = 'GET', body, query = '' } = {}) {
+  const resp = await authedFetch(`/api/calls?action=${action}${query}`, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.error || 'Something went wrong. Please try again.');
+  return data;
+}
+
+// -- bring your own number: Twilio calls them, they type the code on the keypad
+$('ownStartBtn').addEventListener('click', async () => {
+  const phone = $('ownPhoneInput').value.trim();
+  if (!phone) { lineMsg('Enter your number with country code first.'); return; }
+  $('ownStartBtn').disabled = true;
+  lineMsg('');
+  try {
+    const { line } = await lineApi('line-verify-start', { method: 'POST', body: { phone } });
+    $('ownCodeValue').textContent = (line.validationCode || '').split('').join(' ') || '------';
+    $('ownCodeHint').textContent = 'Waiting for you to enter the code…';
+    $('ownCodeWrap').classList.remove('hidden');
+    clearInterval(lineVerifyTimer);
+    let tries = 0;
+    lineVerifyTimer = setInterval(async () => {
+      tries += 1;
+      try {
+        const r = await lineApi('line-verify-status');
+        if (r.line?.status === 'verified') {
+          clearInterval(lineVerifyTimer);
+          $('ownCodeWrap').classList.add('hidden');
+          lineMsg(`Verified. Emysa can now call from ${r.line.phoneNumber}.`);
+          await loadLineState(); renderLineCurrent();
+        } else if (tries >= 45) {
+          clearInterval(lineVerifyTimer);
+          $('ownCodeHint').textContent = 'Did not hear back. Tap "Send verification call" to try again.';
+        }
+      } catch (err) { clearInterval(lineVerifyTimer); lineMsg(err.message); }
+    }, 4000);
+  } catch (err) {
+    lineMsg(err.message);
+  } finally {
+    $('ownStartBtn').disabled = false;
+  }
+});
+
+// -- rent: search, then confirm the price before buying
+$('rentSearchBtn').addEventListener('click', async () => {
+  $('rentSearchBtn').disabled = true;
+  lineMsg('');
+  $('rentResults').textContent = '';
+  try {
+    const q = `&country=${encodeURIComponent($('rentCountry').value || 'US')}&areaCode=${encodeURIComponent($('rentAreaCode').value.trim())}`;
+    const { numbers } = await lineApi('line-rent-search', { query: q });
+    if (!numbers.length) { lineMsg('No numbers found. Try another area code.'); return; }
+    const price = Number(lineState.rent.monthlyUsd).toFixed(2);
+    numbers.forEach((n) => {
+      const row = document.createElement('div');
+      row.className = 'rentItem';
+      const info = document.createElement('div');
+      const num = document.createElement('div'); num.className = 'rentNum'; num.textContent = n.phoneNumber;
+      const where = document.createElement('div'); where.className = 'rentWhere'; where.textContent = [n.locality, n.region].filter(Boolean).join(', ');
+      info.append(num, where);
+      const btn = document.createElement('button');
+      btn.className = 'secondaryBtn'; btn.type = 'button'; btn.textContent = 'Rent';
+      btn.addEventListener('click', async () => {
+        if (!confirm(`Rent ${n.phoneNumber} for $${price} / month?`)) return;
+        btn.disabled = true;
+        try {
+          await lineApi('line-rent-buy', { method: 'POST', body: { phoneNumber: n.phoneNumber } });
+          $('rentResults').textContent = '';
+          lineMsg(`Done. ${n.phoneNumber} is now your Emysa number.`);
+          await loadLineState(); renderLineCurrent();
+        } catch (err) { lineMsg(err.message); btn.disabled = false; }
+      });
+      row.append(info, btn);
+      $('rentResults').appendChild(row);
+    });
+  } catch (err) {
+    lineMsg(err.message);
+  } finally {
+    $('rentSearchBtn').disabled = false;
+  }
+});
+
+// -- WhatsApp: number in, pairing code out, link on the phone
+$('waLineStartBtn').addEventListener('click', async () => {
+  const phone = $('waLinePhoneInput').value.trim();
+  if (!phone) { lineMsg('Enter your WhatsApp number first.'); return; }
+  $('waLineStartBtn').disabled = true;
+  lineMsg('');
+  try {
+    const resp = await authedFetch('/api/social-calling?action=whatsapp-start-phone', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Could not get a pairing code');
+    if (data.status === 'connected') { await loadLineState(); lineMsg('WhatsApp is linked.'); return; }
+    const showCode = (code) => { $('waLineCodeValue').textContent = code.split('').join(' '); $('waLineCodeWrap').classList.remove('hidden'); };
+    if (data.pairingCode) showCode(data.pairingCode);
+    clearInterval(lineWaTimer);
+    lineWaTimer = setInterval(async () => {
+      try {
+        const r = await authedFetch('/api/social-calling?action=whatsapp-status');
+        const d = await r.json();
+        if (d.pairingCode) showCode(d.pairingCode);
+        if (d.status === 'connected') {
+          clearInterval(lineWaTimer);
+          $('waLineCodeWrap').classList.add('hidden');
+          lineMsg('WhatsApp is linked. Emysa can now call people there.');
+          await loadLineState();
+        }
+      } catch { /* keep polling */ }
+    }, 3000);
+  } catch (err) {
+    lineMsg(err.message);
+  } finally {
+    $('waLineStartBtn').disabled = false;
+  }
+});
+
+$('lineRemoveBtn').addEventListener('click', async () => {
+  const rented = lineState.line?.mode === 'rent';
+  if (!confirm(rented ? 'Release your rented number? You will lose it.' : 'Remove your verified number?')) return;
+  try {
+    await lineApi('line-remove', { method: 'POST', body: {} });
+    await loadLineState(); renderLineCurrent();
+    lineMsg('Removed.');
+  } catch (err) { lineMsg(err.message); }
 });
 
 // ---------- language ----------

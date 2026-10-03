@@ -242,6 +242,10 @@
               <span class="callChannelIcon phone"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24 11.36 11.36 0 003.57.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1 11.36 11.36 0 00.57 3.57 1 1 0 01-.25 1.01z"/></svg></span>
               <span class="callChannelLabel">Call Phone</span>
             </button>
+            <button class="callChannelItem hidden" data-channel="setup" id="channelSetupItem">
+              <span class="callChannelIcon phone"><svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+              <span class="callChannelLabel">Set up calling</span>
+            </button>
           </div>
         </div>
       </div>
@@ -460,6 +464,72 @@
       </span>
     <span>Profile</span></button>
   </nav>
+
+  <!-- ---------- calling line setup (after approval) ---------- -->
+  <div id="lineSetupScreen" class="hidden" role="dialog" aria-modal="true" aria-labelledby="lineSetupTitle">
+    <div class="lineSetupInner">
+      <button class="lineSetupClose" id="lineSetupClose" type="button">Not now</button>
+      <h1 class="pageTitle" id="lineSetupTitle">How should Emysa call?</h1>
+      <p class="lineSub">Choose how your calls go out. You can change this any time in Profile.</p>
+
+      <div id="lineCurrent" class="lineCurrent hidden">
+        <div>
+          <div class="lineCurrentLabel" id="lineCurrentLabel"></div>
+          <div class="lineCurrentNumber" id="lineCurrentNumber"></div>
+        </div>
+        <button class="secondaryBtn lineRemoveBtn" id="lineRemoveBtn" type="button">Remove</button>
+      </div>
+
+      <div id="lineChoices">
+        <button class="lineOption" id="optRent" type="button">
+          <div class="lineOptTop"><span class="lineOptTitle">Rent a number</span><span class="recoBadge">Highly recommended</span></div>
+          <div class="lineOptDesc">A dedicated number for Emysa's calls: the best connection, and people can call it back.</div>
+          <div class="lineOptPrice" id="rentPriceLabel"></div>
+        </button>
+        <button class="lineOption" id="optOwn" type="button">
+          <div class="lineOptTop"><span class="lineOptTitle">Bring your own number</span></div>
+          <div class="lineOptDesc">Use the number you already have as caller ID. We verify it with a quick call. Your carrier keeps the number; calls go out over the internet, not your minutes.</div>
+        </button>
+        <button class="lineOption" id="optWa" type="button">
+          <div class="lineOptTop"><span class="lineOptTitle">Continue with WhatsApp</span></div>
+          <div class="lineOptDesc">Link your WhatsApp with a pairing code and Emysa calls people there.</div>
+        </button>
+      </div>
+
+      <div id="panelOwn" class="linePanel hidden">
+        <label class="lineLabel" for="ownPhoneInput">Your phone number, with country code</label>
+        <input class="plainInput" id="ownPhoneInput" type="tel" autocomplete="tel" placeholder="+2348012345678">
+        <button class="primaryBtn" id="ownStartBtn" type="button" style="margin-top:12px;">Send verification call</button>
+        <div id="ownCodeWrap" class="hidden lineCodeWrap">
+          <div class="lineLabel">You'll get a call from Twilio. Answer it and enter this code on your keypad:</div>
+          <div class="codeCardValue" id="ownCodeValue">------</div>
+          <div class="lineLabel" id="ownCodeHint">Waiting for you to enter the code…</div>
+        </div>
+      </div>
+
+      <div id="panelRent" class="linePanel hidden">
+        <div class="lineRentRow">
+          <select class="plainInput" id="rentCountry" aria-label="Country"></select>
+          <input class="plainInput" id="rentAreaCode" type="text" inputmode="numeric" maxlength="4" placeholder="Area code (optional)">
+        </div>
+        <button class="primaryBtn" id="rentSearchBtn" type="button" style="margin-top:12px;">Find numbers</button>
+        <div id="rentResults" class="rentResults"></div>
+      </div>
+
+      <div id="panelWa" class="linePanel hidden">
+        <label class="lineLabel" for="waLinePhoneInput">Your WhatsApp number, with country code</label>
+        <input class="plainInput" id="waLinePhoneInput" type="tel" autocomplete="tel" placeholder="2348012345678">
+        <button class="primaryBtn" id="waLineStartBtn" type="button" style="margin-top:12px;">Get pairing code</button>
+        <div id="waLineCodeWrap" class="hidden lineCodeWrap">
+          <div class="lineLabel">On your phone open WhatsApp, Settings, Linked devices, Link a device, then "Link with phone number instead" and enter:</div>
+          <div class="codeCardValue" id="waLineCodeValue">— — — — — — — —</div>
+          <div class="lineLabel" id="waLineHint">Waiting for you to link…</div>
+        </div>
+      </div>
+
+      <div class="authHint" id="lineMsg" role="status"></div>
+    </div>
+  </div>
 
   <!-- ---------- active call screen ---------- -->
   <div id="callScreen" class="hidden">
@@ -795,6 +865,11 @@
     <p>Link your own Telegram or WhatsApp account to place calls through them. Nobody else sees your login — it's stored against your account only.</p>
 
     <div class="sectionLabel" style="margin-top:18px;">Telegram</div>
+    <div class="profileCard linkCard" id="callingLinesBtn">
+      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M6.6 10.8c1.2 2.4 3.2 4.4 5.6 5.6l1.9-1.9c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.5.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.5.1.4 0 .8-.2 1l-1.9 1.9z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+      <div class="cBody"><div class="cValue">Calling lines</div><div class="hint" id="callingLinesSub">Phone number and WhatsApp</div></div>
+      <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    </div>
     <div class="profileCard" id="telegramAccountCard">
       <div class="cIcon"><svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="16" cy="16" r="14" fill="url(#tgGrad)"></circle><path d="M22.9866 10.2088C23.1112 9.40332 22.3454 8.76755 21.6292 9.082L7.36482 15.3448C6.85123 15.5703 6.8888 16.3483 7.42147 16.5179L10.3631 17.4547C10.9246 17.6335 11.5325 17.541 12.0228 17.2023L18.655 12.6203C18.855 12.4821 19.073 12.7665 18.9021 12.9426L14.1281 17.8646C13.665 18.3421 13.7569 19.1512 14.314 19.5005L19.659 22.8523C20.2585 23.2282 21.0297 22.8506 21.1418 22.1261L22.9866 10.2088Z" fill="white"></path><defs><linearGradient id="tgGrad" x1="16" y1="2" x2="16" y2="30" gradientUnits="userSpaceOnUse"><stop stop-color="#37BBFE"></stop><stop offset="1" stop-color="#007DBB"></stop></linearGradient></defs></svg></div>
       <div class="cBody">

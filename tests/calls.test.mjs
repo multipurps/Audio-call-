@@ -4,7 +4,8 @@ import { normalizePhone } from '../lib/phoneNumbers.js';
 import { database, loadApi, request } from './helpers.mjs';
 
 function fixture() {
-  const db = database({ contacts: [{ id: 'contact-1', user_id: 'user-1', name: 'Alex', phone_number: '+1 (415) 555-2671' }],
+  const db = database({ phone_lines: [{ user_id: 'user-1', mode: 'own', phone_number: '+14155550000', status: 'verified' }],
+    contacts: [{ id: 'contact-1', user_id: 'user-1', name: 'Alex', phone_number: '+1 (415) 555-2671' }],
     chat_sessions: [{ id: 'foreign-chat', user_id: 'user-2', title: 'Private', archived: false }],
   });
   const network = [];
