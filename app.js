@@ -1906,6 +1906,26 @@ async function toggleCallMonitor() {
   }
   const callId = activeCallScreenId;
   if (!callId) return;
+  // iOS Safari / the installed PWA only allow audio to start from inside the
+  // tap gesture. Creating the AudioContext AFTER the token fetch below (an
+  // await) is too late - it stays suspended and the monitor is silent even
+  // though the socket is connected. So create and resume it right here,
+  // synchronously, and hand it to startCallMonitor.
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) {
+    setCallStatePill('connecting', 'Audio not supported on this device');
+    return;
+  }
+  let ctx = null;
+  try {
+    ctx = new AudioCtx();
+    const resume = ctx.resume?.();
+    if (resume?.catch) resume.catch(() => {});
+  } catch {
+    setCallStatePill('connecting', 'Monitoring unavailable');
+    return;
+  }
+  const abandonCtx = () => { try { ctx?.close(); } catch {} };
   let payload = null;
   try {
     const resp = await authedFetch('/api/calls?action=monitor-token', {
@@ -1915,32 +1935,36 @@ async function toggleCallMonitor() {
     });
     payload = await resp.json().catch(() => ({}));
     if (!resp.ok) {
+      abandonCtx();
       setCallStatePill('connecting', payload?.error || 'Monitoring unavailable');
       return;
     }
   } catch {
+    abandonCtx();
     setCallStatePill('connecting', 'Monitoring unavailable');
     return;
   }
-  if (activeCallScreenId !== callId) return; // screen changed while fetching
+  if (activeCallScreenId !== callId) { abandonCtx(); return; } // screen changed while fetching
 
   try {
-    startCallMonitor(payload.url, callId);
+    startCallMonitor(payload.url, callId, ctx);
   } catch (err) {
+    abandonCtx();
     setCallStatePill('connecting', 'Monitoring unavailable');
   }
 }
 
-function startCallMonitor(url, callId) {
+function startCallMonitor(url, callId, unlockedCtx) {
   stopCallMonitor(); // never two monitors / two AudioContexts for one screen
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  if (!AudioCtx) {
+  if (!AudioCtx && !unlockedCtx) {
     setCallStatePill('connecting', 'Audio not supported on this device');
     return;
   }
-  // Created inside the button's tap handler — the user gesture iOS Safari
-  // and the installed iOS PWA require before any audio may play.
-  const ctx = new AudioCtx();
+  // The context normally arrives already created+resumed inside the button's
+  // tap handler (see toggleCallMonitor) - the user gesture iOS Safari and the
+  // installed iOS PWA require before any audio may play.
+  const ctx = unlockedCtx || new AudioCtx();
   const resume = ctx.resume?.();
   if (resume?.catch) resume.catch(() => {});
   const gain = ctx.createGain();
@@ -1973,6 +1997,7 @@ function startCallMonitor(url, callId) {
       } catch {}
       return;
     }
+    if (ctx.state === 'suspended') ctx.resume?.().catch?.(() => {});
     const frame = decodeMonitorFrame(event.data);
     if (!frame) return;
     const lane = lanes[frame.direction];

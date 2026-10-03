@@ -274,8 +274,14 @@ class TestPacedSender:
         async def send_control(t):
             pass
 
+        # Pin the lead: these tests assert the pacing arithmetic, which must
+        # not shift when the production default cushion is tuned.
         return PacedAudioSender(
-            session_id="s1", serializer=ser, send_audio=send_audio, send_control=send_control
+            session_id="s1",
+            serializer=ser,
+            send_audio=send_audio,
+            send_control=send_control,
+            lead_secs=0.06,
         )
 
     async def test_audio_is_released_at_real_time_speed(self):
@@ -290,6 +296,17 @@ class TestPacedSender:
             assert len(out) == 25
         finally:
             await sender.stop()
+
+    async def test_default_lead_is_a_real_jitter_cushion(self):
+        # 60 ms (3 frames) caused audible skipping on the callee side; the
+        # default must give the relay a real cushion, and be tunable by env.
+        from app.conversation import SEND_LEAD_SECS, UNDERRUN_RESET_SECS
+
+        assert SEND_LEAD_SECS >= 0.15
+        assert UNDERRUN_RESET_SECS > SEND_LEAD_SECS
+        base = {"ASSISTANT_MOCK_MODE": "true"}
+        assert load_settings(base).send_lead_secs == SEND_LEAD_SECS
+        assert load_settings({**base, "ASSISTANT_SEND_LEAD_SECS": "0.3"}).send_lead_secs == 0.3
 
     async def test_interrupt_drops_queued_audio(self):
         out: list[bytes] = []

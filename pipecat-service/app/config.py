@@ -141,6 +141,9 @@ class Settings:
     #: Real-time audio has no value once it is late, so the bound drops rather
     #: than grows -- growing it converts a latency problem into a memory leak.
     outbound_queue_max_frames: int = 100
+    #: How far ahead of real time outbound audio is released (seconds). A
+    #: larger cushion rides out CPU/network jitter without audible skipping.
+    send_lead_secs: float = 0.2
     #: Largest inbound audio frame accepted, in bytes.
     max_frame_bytes: int = 64 * 1024
 
@@ -394,6 +397,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         outbound_queue_max_frames=_env_int(
             env, "ASSISTANT_OUTBOUND_QUEUE_MAX_FRAMES", 100, minimum=1
         ),
+        send_lead_secs=_env_float(env, "ASSISTANT_SEND_LEAD_SECS", 0.2, minimum=0.02),
         max_frame_bytes=_env_int(env, "ASSISTANT_MAX_FRAME_BYTES", 64 * 1024, minimum=64),
         stt_provider=_env(env, "ASSISTANT_STT_PROVIDER", DEFAULT_STT_PROVIDER)
         or DEFAULT_STT_PROVIDER,

@@ -64,7 +64,16 @@ FRAME_MS = 20
 
 #: How far ahead of real time frames may be released. Keeps the relay's
 #: jitter buffer fed without letting a whole sentence burst out at once.
-SEND_LEAD_SECS = 0.06
+#: 60 ms (three frames) left no cushion: one slow event-loop tick on a shared
+#: CPU, or a network hiccup to the relay, drained it and the callee heard the
+#: audio skip. 200 ms absorbs that while staying imperceptible in a call.
+#: Tunable per deployment with ASSISTANT_SEND_LEAD_SECS.
+SEND_LEAD_SECS = 0.2
+
+#: How late a frame may be before the pacing clock is restarted (an
+#: underrun). Must exceed the lead, otherwise a normal jitter episode is
+#: treated as a new utterance and the stream restarts with no cushion.
+UNDERRUN_RESET_SECS = 0.3
 
 #: Log inbound audio stats this often (seconds) rather than per frame.
 INBOUND_LOG_INTERVAL_SECS = 5.0
@@ -214,7 +223,7 @@ class PacedAudioSender:
                 chunk, sample_rate, channels = item
 
                 now = time.monotonic()
-                if deadline is None or deadline < now - 0.1:
+                if deadline is None or deadline < now - UNDERRUN_RESET_SECS:
                     # Start of an utterance, or an underrun: restart the clock.
                     deadline = now
                 await self._set_speaking(True)
@@ -739,6 +748,7 @@ class CallConversation(_BaseConversation):
                 self._session_id, DIRECTION_EMYSA, rate, pcm
             ),
             is_muted=lambda: self._ai_muted,
+            lead_secs=self._settings.send_lead_secs,
         )
         self._output = BridgeOutput(
             sender=self.sender,

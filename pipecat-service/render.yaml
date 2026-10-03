@@ -67,6 +67,10 @@ services:
         value: "30"
       - key: ASSISTANT_HEARTBEAT_INTERVAL_SECS
         value: "10"
+      # Outbound audio cushion (seconds). Raise (e.g. 0.3) if the callee still
+      # reports skipping; lower only if you see the AI answering too late.
+      - key: ASSISTANT_SEND_LEAD_SECS
+        value: "0.2"
       - key: ASSISTANT_MAX_CALL_SECONDS
         value: "1800"
       # The provider's answer event (ACAF `call_active`) is the source of

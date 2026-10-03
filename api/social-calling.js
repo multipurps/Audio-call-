@@ -10,6 +10,7 @@ import {
   findDuplicateActiveCall,
   appendTranscriptEntry,
   maybeGenerateCallSummary,
+  waitForCallSummary,
 } from '../lib/callSession.js';
 
 // Telegram + WhatsApp account linking and calling, combined into one file
@@ -296,6 +297,18 @@ async function relayCallStatus(req, res, supabase) {
   let summaryResult = { status: 'noop' };
   if (call && isTerminal) {
     summaryResult = await maybeGenerateCallSummary(supabase, call.id);
+    // Another trigger (the End button, the carrier callback) may already own
+    // the generation. Wait for its result instead of posting the generic
+    // "Finished the call" line - that is why the chat showed no summary.
+    if (summaryResult?.status === 'claimed-elsewhere') {
+      summaryResult = await waitForCallSummary(supabase, call.id);
+    }
+    // A failed generation (LLM hiccup) is worth one more attempt before
+    // giving up on the summary.
+    if (summaryResult?.status === 'failed' || summaryResult?.status === 'error') {
+      const retry = await maybeGenerateCallSummary(supabase, call.id);
+      if (retry?.status === 'completed') summaryResult = retry;
+    }
   }
 
   if (effectiveSessionId && transitionedToTerminal && userId) {
