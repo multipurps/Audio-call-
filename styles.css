@@ -937,3 +937,8 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .lineCurrentLabel{font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:0.04em; font-weight:700;}
 .lineCurrentNumber{font-weight:700; font-size:16px; margin-top:2px;}
 .lineRemoveBtn{width:auto; flex:none; padding:8px 14px;}
+
+/* The animated bars were a fake wave that did not follow the audio. Removed. */
+.waveRow{display:none !important;}
+.transcriptBubble{min-width:0; overflow-wrap:anywhere; word-break:normal;}
+.transcriptLine{min-width:0;}

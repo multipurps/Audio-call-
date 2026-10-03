@@ -1,5 +1,6 @@
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { resolveWhatsappStatus } from '../lib/whatsappStatus.js';
+import { describeSocialCallEnd } from '../lib/socialCallEnd.js';
 import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsPlaceAICall, wacallsHangup } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
 import { resolvePersonSession } from '../lib/personSession.js';
@@ -115,6 +116,7 @@ async function relayCallStatus(req, res, supabase) {
     transcript,
     transcriptEntry,
     platform = 'telegram',
+    reason: rawReason,
   } = req.body || {};
   if ((!bodyUserId && !incomingCallId && !platformCallId) || (!peerIdentifier && !incomingCallId && !platformCallId) || !rawCallStatus) {
     return res.status(400).json({ error: 'userId (or callId), peerIdentifier (or callId) and status required' });
@@ -168,7 +170,7 @@ async function relayCallStatus(req, res, supabase) {
   if (incomingCallId) {
     let q = supabase
       .from('calls')
-      .select('id, user_id, status, transcript, session_id, answered_at, created_at')
+      .select('id, user_id, contact_id, status, transcript, session_id, answered_at, created_at')
       .eq('id', incomingCallId);
     if (bodyUserId) q = q.eq('user_id', bodyUserId);
     const { data } = await q.maybeSingle();
@@ -178,7 +180,7 @@ async function relayCallStatus(req, res, supabase) {
     if (call) break;
     let q = supabase
       .from('calls')
-      .select('id, user_id, status, transcript, session_id, answered_at, created_at')
+      .select('id, user_id, contact_id, status, transcript, session_id, answered_at, created_at')
       .eq('platform', platform)
       .eq('platform_call_id', candidate);
     if (bodyUserId) q = q.eq('user_id', bodyUserId);
@@ -196,7 +198,7 @@ async function relayCallStatus(req, res, supabase) {
   if (!call && bodySessionId && userId) {
     let q = supabase
       .from('calls')
-      .select('id, user_id, status, transcript, session_id, answered_at, created_at')
+      .select('id, user_id, contact_id, status, transcript, session_id, answered_at, created_at')
       .eq('user_id', userId)
       .eq('platform', platform)
       .eq('session_id', bodySessionId)
@@ -211,7 +213,7 @@ async function relayCallStatus(req, res, supabase) {
     if (!call && peerIdentifier) {
       const { data: looseRows } = await supabase
         .from('calls')
-        .select('id, user_id, status, transcript, session_id, answered_at, created_at')
+        .select('id, user_id, contact_id, status, transcript, session_id, answered_at, created_at')
         .eq('user_id', userId)
         .eq('platform', platform)
         .eq('session_id', bodySessionId)
@@ -225,7 +227,7 @@ async function relayCallStatus(req, res, supabase) {
   if (!call && peerIdentifier && userId) {
     const { data } = await supabase
       .from('calls')
-      .select('id, user_id, status, transcript, session_id, answered_at, created_at')
+      .select('id, user_id, contact_id, status, transcript, session_id, answered_at, created_at')
       .eq('user_id', userId)
       .eq('platform', platform)
       .eq('to_number', peerIdentifier)
@@ -243,6 +245,19 @@ async function relayCallStatus(req, res, supabase) {
     // the recorded talk duration both run from the actual answer.
     if (isAnswer && !call.answered_at) {
       callUpdate.answered_at = new Date().toISOString();
+    }
+    if (isTerminal && !call.answered_at && !(Number(durationSeconds) > 0) && !(Array.isArray(call.transcript) && call.transcript.length)) {
+      // Never connected: record the real reason now. summary_status 'skipped'
+      // lets a later real transcript still be summarised.
+      const { data: contactRow } = call.contact_id
+        ? await supabase.from('contacts').select('name').eq('id', call.contact_id).maybeSingle()
+        : { data: null };
+      const neverConnected = describeSocialCallEnd({
+        rawStatus: rawCallStatus, reason: rawReason,
+        who: contactName || contactRow?.name || peerIdentifier || 'them',
+        channel: platform === 'whatsapp' ? 'WhatsApp' : 'Telegram',
+      });
+      if (neverConnected) { callUpdate.outcome_summary = neverConnected; callUpdate.summary_status = 'skipped'; }
     }
     if (isTerminal) {
       callUpdate.ended_at = new Date().toISOString();
@@ -295,6 +310,7 @@ async function relayCallStatus(req, res, supabase) {
   // duplicate callback costs nothing. Generated BEFORE the chat message so
   // the message can carry the real summary instead of a generic "finished".
   let summaryResult = { status: 'noop' };
+  let storedReason = null;
   if (call && isTerminal) {
     summaryResult = await maybeGenerateCallSummary(supabase, call.id);
     // Another trigger (the End button, the carrier callback) may already own
@@ -302,6 +318,12 @@ async function relayCallStatus(req, res, supabase) {
     // "Finished the call" line - that is why the chat showed no summary.
     if (summaryResult?.status === 'claimed-elsewhere') {
       summaryResult = await waitForCallSummary(supabase, call.id);
+    }
+    // The real never-connected reason (declined, rang out, ...) beats the
+    // generic line.
+    if (summaryResult?.status !== 'completed') {
+      const { data: after } = await supabase.from('calls').select('outcome_summary').eq('id', call.id).maybeSingle();
+      if (after?.outcome_summary && !/^No summary/i.test(after.outcome_summary)) storedReason = after.outcome_summary;
     }
     // A failed generation (LLM hiccup) is worth one more attempt before
     // giving up on the summary.
@@ -319,6 +341,8 @@ async function relayCallStatus(req, res, supabase) {
     if (summaryResult?.status === 'completed' && summaryResult.summary) {
       // The real summary IS the report — never a generic "Call finished".
       text = summaryResult.summary;
+    } else if (storedReason) {
+      text = storedReason;
     } else if (summaryResult?.status === 'skipped') {
       text = callStatus === 'completed'
         ? `Finished the call with ${who} on ${channelName}, but the conversation was not captured, so there is no summary.`

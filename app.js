@@ -1685,7 +1685,7 @@ function playToneBurst(freqs, durMs, gain = 0.06) {
 }
 
 function startRingback() {
-  if (ringbackActive) return;
+  if (ringbackActive || callAnsweredAtMs) return;
   ringbackActive = true;
   const ring = () => {
     if (!ringbackActive) return;
@@ -1724,6 +1724,13 @@ function applyCallStatusUpdate(callRow) {
     ensureCallTimer();
   }
   const st = callRow.status;
+  // Updates can arrive out of order (poll vs realtime). Once the call is
+  // answered or finished, an older "queued"/"ringing" row must not restart the
+  // ring.
+  if ((st === 'queued' || st === 'ringing') && (callAnsweredAtMs || callRow.answered_at || callEndShownFor === callRow.id)) {
+    stopRingback();
+    return;
+  }
   if (st === 'queued') {
     // The row stays 'queued' for the whole dial-and-ring period (it only
     // becomes 'in_progress' on the provider's answer event), so this is the
@@ -1889,6 +1896,7 @@ function stopCallMonitor() {
   callMonitor = null;
   if (!mon) return;
   try { mon.ws?.close(); } catch {}
+  for (const lane of Object.values(mon.lanes || {})) clearTimeout(lane.flushTimer);
   try { mon.ctx?.close(); } catch {}
   resetCallAudioBtn();
 }
@@ -1983,10 +1991,42 @@ function startCallMonitor(url, callId, unlockedCtx) {
   // top of buffers that were still playing - the "voice on voice" overlay.
   // Mixed by the browser instead, each side plays at its own real-time pace.
   const lanes = {
-    1: { nextTime: 0, sources: new Set(), gain: ctx.createGain() }, // caller (what the other person says)
-    2: { nextTime: 0, sources: new Set(), gain: ctx.createGain() }, // Emysa (what she says to them)
+    1: { nextTime: 0, sources: new Set(), gain: ctx.createGain(), pending: [], pendingSamples: 0, pendingRate: 16000, flushTimer: null }, // caller
+    2: { nextTime: 0, sources: new Set(), gain: ctx.createGain(), pending: [], pendingSamples: 0, pendingRate: 16000, flushTimer: null }, // Emysa
   };
   for (const lane of Object.values(lanes)) { lane.gain.gain.value = 1; lane.gain.connect(gain); }
+
+  // Jitter buffer. Phone networks deliver audio in uneven bursts. Playing from
+  // a ~0.3 s cushion absorbs that; the old 0.12 s cushion with a "restart if
+  // 50 ms late" rule cut queued audio every time a packet was late, which is
+  // the skipping. A late packet now just continues the timeline; only a lag of
+  // more than ~1.5 s is trimmed, by dropping the oldest-queued audio's worth
+  // of new input rather than stopping what is already playing.
+  const JITTER = 0.3;
+  const MAX_LAG = 1.5;
+  function flushLane(lane) {
+    clearTimeout(lane.flushTimer);
+    if (!lane.pendingSamples) return;
+    const rate = lane.pendingRate;
+    const merged = new Int16Array(lane.pendingSamples);
+    let offset = 0;
+    for (const chunk of lane.pending) { merged.set(chunk, offset); offset += chunk.length; }
+    lane.pending = [];
+    lane.pendingSamples = 0;
+    const audio = ctx.createBuffer(1, merged.length, rate);
+    const channel = audio.getChannelData(0);
+    for (let i = 0; i < merged.length; i++) channel[i] = merged[i] / 32768;
+    const source = ctx.createBufferSource();
+    source.buffer = audio;
+    source.connect(lane.gain);
+    const now = ctx.currentTime;
+    if (!lane.nextTime || lane.nextTime < now) lane.nextTime = now + (lane.nextTime ? 0.05 : JITTER);
+    if (lane.nextTime > now + MAX_LAG) return; // far behind: skip this slice to catch up
+    source.start(lane.nextTime);
+    lane.nextTime += audio.duration;
+    lane.sources.add(source);
+    source.onended = () => lane.sources.delete(source);
+  }
   let lastEmysaAudioAt = 0;
 
   const ws = new WebSocket(url);
@@ -2008,32 +2048,22 @@ function startCallMonitor(url, callId, unlockedCtx) {
     const lane = lanes[frame.direction];
     if (!lane) return;
     const { rate, samples } = frame;
-    const audio = ctx.createBuffer(1, samples.length, rate);
-    const channel = audio.getChannelData(0);
-    for (let i = 0; i < samples.length; i++) channel[i] = samples[i] / 32768;
-    const source = ctx.createBufferSource();
-    source.buffer = audio;
-    source.connect(lane.gain);
-    const now = ctx.currentTime;
-    // Small jitter buffer. If this lane fell behind (tab backgrounded, network
-    // stall) drop what it still had queued and restart from now, so old audio
-    // can never play underneath new audio.
-    if (!lane.nextTime || lane.nextTime < now - 0.05 || lane.nextTime > now + 0.6) {
-      for (const old of lane.sources) { try { old.stop(); } catch {} }
-      lane.sources.clear();
-      lane.nextTime = now + 0.12;
-    }
-    source.start(lane.nextTime);
-    lane.nextTime += audio.duration;
-    lane.sources.add(source);
-    source.onended = () => lane.sources.delete(source);
+    // Collect ~80 ms before scheduling: 50 tiny nodes a second per side was
+    // choppy on a phone connection. A short timer flushes the tail of a
+    // sentence so it is never held back waiting for the next frame.
+    lane.pending.push(samples);
+    lane.pendingRate = rate;
+    lane.pendingSamples += samples.length;
+    clearTimeout(lane.flushTimer);
+    if (lane.pendingSamples >= rate * 0.08) flushLane(lane);
+    else lane.flushTimer = setTimeout(() => flushLane(lane), 70);
 
     // The far end often hears Emysa through a speaker, so their mic sends a
     // delayed copy of her voice back. Duck the caller lane while she is
     // talking so that echo does not sound like a second Emysa.
     if (frame.direction === 2) lastEmysaAudioAt = performance.now();
     const emysaTalking = performance.now() - lastEmysaAudioAt < 450;
-    lanes[1].gain.gain.setTargetAtTime(emysaTalking ? 0.3 : 1, now, 0.05);
+    lanes[1].gain.gain.setTargetAtTime(emysaTalking ? 0.3 : 1, ctx.currentTime, 0.05);
   };
   ws.onclose = () => {
     if (callMonitor === mon) stopCallMonitor();
