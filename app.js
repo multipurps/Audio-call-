@@ -253,6 +253,9 @@ async function enterApp(session) {
     return;
   }
   stopPendingPoll();
+  // First-run setup: a calling line (required), then name/language/country.
+  const step = await onboardingStep();
+  if (step) { showOnboardingStep(step); return; }
   $('pendingBox').style.display = 'none';
   authScreen.classList.add('hidden');
   ensureNotificationsEnabled();
@@ -261,7 +264,6 @@ async function enterApp(session) {
   // Quiet preload so beginPreCall() can find an existing per-contact thread
   // to continue even if the person hasn't opened Recent yet this session.
   loadRecentChats();
-  maybeShowLineSetup();
 
   redeemPendingReferral();
 }
@@ -3212,27 +3214,32 @@ async function refreshVoiceStatus() {
   $('voiceRecordStatus').textContent = status === 'pending' ? 'Cloning your voice…' : status === 'failed' ? 'Cloning failed.' : '';
 }
 
-async function uploadVoiceClip(blob, mimeType) {
-  $('voiceRecordStatus').textContent = 'Uploading…';
+async function uploadVoiceClip(blob, mimeType, statusEl = $('voiceRecordStatus')) {
+  statusEl.textContent = 'Uploading…';
   const audioBase64 = await blobToBase64(blob);
   const resp = await authedFetch('/api/voice-clone', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ audioBase64, mimeType }),
   });
-  const data = await resp.json();
-  $('voiceRecordStatus').textContent = resp.ok ? 'Voice cloned.' : (data.error || 'Could not clone voice — try a longer, quieter sample.');
+  const data = await resp.json().catch(() => ({}));
+  statusEl.textContent = resp.ok ? 'Voice cloned.' : (data.error || 'Could not clone voice — try a longer, quieter sample.');
   if (resp.ok) refreshVoiceStatus();
 }
 
 let mediaRecorder, recordedChunks = [];
-$('recordVoiceBtn').addEventListener('click', async () => {
-  const btn = $('recordVoiceBtn');
+async function toggleVoiceRecording(btn, statusEl) {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
     return;
   }
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    statusEl.textContent = 'Microphone access is needed to record.';
+    return;
+  }
   recordedChunks = [];
   const recorderMime = ['audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg']
     .find((t) => window.MediaRecorder?.isTypeSupported?.(t)) || '';
@@ -3244,19 +3251,23 @@ $('recordVoiceBtn').addEventListener('click', async () => {
     const actualMime = mediaRecorder.mimeType || recorderMime || 'audio/webm';
     const blob = new Blob(recordedChunks, { type: actualMime });
     stream.getTracks().forEach((t) => t.stop());
-    await uploadVoiceClip(blob, actualMime);
+    await uploadVoiceClip(blob, actualMime, statusEl);
   };
   mediaRecorder.start();
   btn.classList.add('recording');
   btn.textContent = 'Stop';
-});
+}
+$('recordVoiceBtn').addEventListener('click', () => toggleVoiceRecording($('recordVoiceBtn'), $('voiceRecordStatus')));
 
 $('uploadVoiceBtn').addEventListener('click', () => $('voiceFileInput').click());
+let voiceUploadStatusEl = null; // where the next file upload reports (onboarding vs profile sheet)
 $('voiceFileInput').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   e.target.value = '';
   if (!file) return;
-  await uploadVoiceClip(file, file.type || 'audio/mpeg');
+  const statusEl = voiceUploadStatusEl || $('voiceRecordStatus');
+  voiceUploadStatusEl = null;
+  await uploadVoiceClip(file, file.type || 'audio/mpeg', statusEl);
 });
 
 $('voicePreviewBtn').addEventListener('click', async () => {
@@ -3464,28 +3475,40 @@ $('whatsappPhoneSubmitBtn').addEventListener('click', async () => {
   }
 });
 
-// ---------- Calling lines: rent / bring your own number / WhatsApp ----------
-// Twilio (phone) exists only for a user who verified or rented a number; the
-// server enforces that. This screen just walks them through getting one.
-let lineState = { line: null, channels: { phone: false, whatsapp: false }, rent: { enabled: false, monthlyUsd: null, countries: [] } };
+// ---------- First-run setup + calling lines ----------
+// Shown inside the login screen, same panels as sign-in. Twilio (phone) exists
+// only for a user who verified or rented a number; the server enforces that.
+// This just walks them through getting a line, then a short profile.
+let lineState = { loaded: false, line: null, channels: { phone: false, whatsapp: false }, rent: { enabled: false, monthlyUsd: null, countries: [] } };
 let lineVerifyTimer = null;
 let lineWaTimer = null;
+let lineSetupVoluntary = false; // opened from Profile/menu (can go back) vs required first run
 
-function lineMsg(text) { $('lineMsg').textContent = text || ''; }
+const hint = (id, text) => { $(id).textContent = text || ''; };
 function stopLinePolls() { clearInterval(lineVerifyTimer); clearInterval(lineWaTimer); lineVerifyTimer = lineWaTimer = null; }
+
+function showAuthPanel(id) {
+  $('authBoot').style.display = 'none';
+  $('pendingBox').style.display = 'none';
+  document.querySelectorAll('.authPanel').forEach((p) => p.classList.toggle('active', p.id === id));
+  authScreen.classList.remove('hidden');
+}
 
 async function loadLineState() {
   try {
     const resp = await authedFetch('/api/calls?action=line-get');
-    if (resp.ok) lineState = await resp.json();
-  } catch { /* keep the last known state */ }
+    if (resp.ok) lineState = { ...(await resp.json()), loaded: true };
+    else lineState.loaded = false;
+  } catch { lineState.loaded = false; }
   applyChannelAvailability();
   return lineState;
 }
 
 // Only offer lines the user actually has. Anything else is hidden here and
-// refused on the server.
+// refused on the server. If the state could not be loaded, leave the menu
+// alone rather than hiding everything.
 function applyChannelAvailability() {
+  if (!lineState.loaded) return;
   const { phone, whatsapp } = lineState.channels;
   const show = (sel, on) => document.querySelector(sel)?.classList.toggle('hidden', !on);
   show('.callChannelItem[data-channel="phone"]', phone);
@@ -3507,61 +3530,6 @@ function applyChannelAvailability() {
   $('callingLinesSub').textContent = parts.length ? parts.join(' and ') : 'Not set up yet';
 }
 
-function renderLineCurrent() {
-  const line = lineState.line;
-  const usable = line && (line.status === 'verified' || line.status === 'rented');
-  $('lineCurrent').classList.toggle('hidden', !usable);
-  if (!usable) return;
-  $('lineCurrentLabel').textContent = line.mode === 'rent' ? 'Your rented number' : 'Your verified number';
-  $('lineCurrentNumber').textContent = line.phoneNumber;
-}
-
-function showLinePanel(name) {
-  ['own', 'rent', 'wa'].forEach((k) => $({ own: 'panelOwn', rent: 'panelRent', wa: 'panelWa' }[k]).classList.toggle('hidden', k !== name));
-  $('optOwn').classList.toggle('active', name === 'own');
-  $('optRent').classList.toggle('active', name === 'rent');
-  $('optWa').classList.toggle('active', name === 'wa');
-  lineMsg('');
-}
-
-async function openLineSetup() {
-  $('lineSetupScreen').classList.remove('hidden');
-  stopLinePolls();
-  showLinePanel(null);
-  $('ownCodeWrap').classList.add('hidden');
-  $('waLineCodeWrap').classList.add('hidden');
-  $('rentResults').textContent = '';
-  await loadLineState();
-  renderLineCurrent();
-  const rent = lineState.rent || {};
-  $('rentPriceLabel').textContent = rent.enabled ? `$${Number(rent.monthlyUsd).toFixed(2)} / month` : 'Coming soon';
-  $('optRent').disabled = !rent.enabled;
-  $('optRent').style.opacity = rent.enabled ? '' : '0.6';
-  const sel = $('rentCountry');
-  sel.textContent = '';
-  (rent.countries || []).forEach((c) => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
-}
-
-function closeLineSetup() {
-  stopLinePolls();
-  $('lineSetupScreen').classList.add('hidden');
-  try { sessionStorage.setItem('emysa.lineSetupSkipped', '1'); } catch {}
-  applyChannelAvailability();
-}
-
-async function maybeShowLineSetup() {
-  await loadLineState();
-  let skipped = false;
-  try { skipped = sessionStorage.getItem('emysa.lineSetupSkipped') === '1'; } catch {}
-  if (!lineState.channels.phone && !lineState.channels.whatsapp && !skipped) openLineSetup();
-}
-
-$('lineSetupClose').addEventListener('click', closeLineSetup);
-$('callingLinesBtn').addEventListener('click', openLineSetup);
-$('optOwn').addEventListener('click', () => showLinePanel('own'));
-$('optRent').addEventListener('click', () => { if (lineState.rent?.enabled) showLinePanel('rent'); });
-$('optWa').addEventListener('click', () => showLinePanel('wa'));
-
 async function lineApi(action, { method = 'GET', body, query = '' } = {}) {
   const resp = await authedFetch(`/api/calls?action=${action}${query}`, {
     method,
@@ -3573,50 +3541,115 @@ async function lineApi(action, { method = 'GET', body, query = '' } = {}) {
   return data;
 }
 
-// -- bring your own number: Twilio calls them, they type the code on the keypad
-$('ownStartBtn').addEventListener('click', async () => {
-  const phone = $('ownPhoneInput').value.trim();
-  if (!phone) { lineMsg('Enter your number with country code first.'); return; }
-  $('ownStartBtn').disabled = true;
-  lineMsg('');
+// Which setup page is needed, if any. A failed load never traps the user:
+// unknown state means no gate (the server still refuses Twilio without a line).
+async function onboardingStep() {
+  await loadLineState();
+  if (lineState.loaded && !lineState.channels.phone && !lineState.channels.whatsapp) return 'line';
   try {
-    const { line } = await lineApi('line-verify-start', { method: 'POST', body: { phone } });
-    $('ownCodeValue').textContent = (line.validationCode || '').split('').join(' ') || '------';
-    $('ownCodeHint').textContent = 'Waiting for you to enter the code…';
-    $('ownCodeWrap').classList.remove('hidden');
-    clearInterval(lineVerifyTimer);
-    let tries = 0;
-    lineVerifyTimer = setInterval(async () => {
-      tries += 1;
-      try {
-        const r = await lineApi('line-verify-status');
-        if (r.line?.status === 'verified') {
-          clearInterval(lineVerifyTimer);
-          $('ownCodeWrap').classList.add('hidden');
-          lineMsg(`Verified. Emysa can now call from ${r.line.phoneNumber}.`);
-          await loadLineState(); renderLineCurrent();
-        } else if (tries >= 45) {
-          clearInterval(lineVerifyTimer);
-          $('ownCodeHint').textContent = 'Did not hear back. Tap "Send verification call" to try again.';
-        }
-      } catch (err) { clearInterval(lineVerifyTimer); lineMsg(err.message); }
-    }, 4000);
-  } catch (err) {
-    lineMsg(err.message);
-  } finally {
-    $('ownStartBtn').disabled = false;
-  }
+    const { data, error } = await supabase.from('profiles').select('setup_completed').eq('user_id', currentUser.id).maybeSingle();
+    if (!error && data && data.setup_completed === false) return 'profile';
+  } catch { /* column missing until sql/022 is applied: do not block */ }
+  return null;
+}
+
+function showOnboardingStep(step) {
+  lineSetupVoluntary = false;
+  if (step === 'profile') return showProfileSetup();
+  return showLineSetup();
+}
+
+function showLineSetup() {
+  stopLinePolls();
+  $('lineSetupBack').classList.toggle('hidden', !lineSetupVoluntary);
+  hint('lineNumHint', '');
+  const rent = lineState.rent || {};
+  $('lineRentBtn').disabled = !rent.enabled;
+  $('lineRentTag').textContent = rent.enabled ? 'Highly recommended' : 'Coming soon';
+  const usable = lineState.line && ['verified', 'rented'].includes(lineState.line.status);
+  $('lineCurrentRow').classList.toggle('hidden', !(lineSetupVoluntary && usable));
+  if (usable) $('lineCurrentNum').textContent = lineState.line.phoneNumber;
+  showAuthPanel('panelLineSetup');
+  // A verification call may still be waiting from before a reload.
+  if (!lineSetupVoluntary && lineState.line?.status === 'pending' && lineState.line.mode === 'own') showLineCode(lineState.line);
+}
+
+// Required step finished: re-evaluate (may lead on to the profile step).
+async function lineStepDone() {
+  stopLinePolls();
+  await loadLineState();
+  if (lineSetupVoluntary) { authScreen.classList.add('hidden'); return; }
+  enterApp(currentSession);
+}
+
+function openLineSetup() { lineSetupVoluntary = true; loadLineState().then(showLineSetup); }
+$('callingLinesBtn').addEventListener('click', openLineSetup);
+$('lineSetupBack').addEventListener('click', () => { stopLinePolls(); authScreen.classList.add('hidden'); });
+$('lineRemoveLink').addEventListener('click', async () => {
+  const rented = lineState.line?.mode === 'rent';
+  if (!confirm(rented ? 'Release your rented number? You will lose it.' : 'Remove your verified number?')) return;
+  try { await lineApi('line-remove', { method: 'POST', body: {} }); await loadLineState(); showLineSetup(); }
+  catch (err) { hint('lineNumHint', err.message); }
 });
 
-// -- rent: search, then confirm the price before buying
+// -- own number: submit, then a separate page shows the code
+function showLineCode(line) {
+  $('lineCodeSub').textContent = `You will get a call on ${line.phoneNumber}. Answer it and enter this code on your keypad.`;
+  $('lineCodeValue').textContent = (line.validationCode || '').split('').join(' ') || '------';
+  hint('lineCodeHint', 'Waiting for you to enter the code…');
+  showAuthPanel('panelLineCode');
+  clearInterval(lineVerifyTimer);
+  let tries = 0;
+  lineVerifyTimer = setInterval(async () => {
+    tries += 1;
+    try {
+      const r = await lineApi('line-verify-status');
+      if (r.line?.status === 'verified') { clearInterval(lineVerifyTimer); lineStepDone(); }
+      else if (tries >= 45) { clearInterval(lineVerifyTimer); hint('lineCodeHint', 'No code received. Tap "Call me again".'); }
+    } catch (err) { clearInterval(lineVerifyTimer); hint('lineCodeHint', err.message); }
+  }, 4000);
+}
+async function startOwnVerification(phone) {
+  const { line } = await lineApi('line-verify-start', { method: 'POST', body: { phone } });
+  showLineCode(line);
+}
+$('lineNumSubmit').addEventListener('click', async () => {
+  const phone = $('lineNumInput').value.trim();
+  if (!phone) { hint('lineNumHint', 'Enter your number with country code, e.g. +2348012345678.'); return; }
+  $('lineNumSubmit').disabled = true;
+  hint('lineNumHint', '');
+  try { await startOwnVerification(phone); } catch (err) { hint('lineNumHint', err.message); }
+  finally { $('lineNumSubmit').disabled = false; }
+});
+$('lineCodeResend').addEventListener('click', async () => {
+  const phone = lineState.line?.phoneNumber || $('lineNumInput').value.trim();
+  $('lineCodeResend').disabled = true;
+  try { await startOwnVerification(phone); } catch (err) { hint('lineCodeHint', err.message); }
+  finally { $('lineCodeResend').disabled = false; }
+});
+$('lineCodeBack').addEventListener('click', () => { stopLinePolls(); showLineSetup(); });
+
+// -- rent
+$('lineRentBtn').addEventListener('click', () => {
+  const rent = lineState.rent || {};
+  if (!rent.enabled) return;
+  $('rentSub').textContent = `$${Number(rent.monthlyUsd).toFixed(2)} / month`;
+  const sel = $('rentCountry');
+  sel.textContent = '';
+  (rent.countries || []).forEach((c) => { const o = document.createElement('option'); o.value = c; o.textContent = countryName(c); sel.appendChild(o); });
+  $('rentResults').textContent = '';
+  hint('rentHint', '');
+  showAuthPanel('panelRent');
+});
+$('rentBack').addEventListener('click', showLineSetup);
 $('rentSearchBtn').addEventListener('click', async () => {
   $('rentSearchBtn').disabled = true;
-  lineMsg('');
+  hint('rentHint', '');
   $('rentResults').textContent = '';
   try {
     const q = `&country=${encodeURIComponent($('rentCountry').value || 'US')}&areaCode=${encodeURIComponent($('rentAreaCode').value.trim())}`;
     const { numbers } = await lineApi('line-rent-search', { query: q });
-    if (!numbers.length) { lineMsg('No numbers found. Try another area code.'); return; }
+    if (!numbers.length) { hint('rentHint', 'No numbers found. Try another area code.'); return; }
     const price = Number(lineState.rent.monthlyUsd).toFixed(2);
     numbers.forEach((n) => {
       const row = document.createElement('div');
@@ -3630,37 +3663,36 @@ $('rentSearchBtn').addEventListener('click', async () => {
       btn.addEventListener('click', async () => {
         if (!confirm(`Rent ${n.phoneNumber} for $${price} / month?`)) return;
         btn.disabled = true;
-        try {
-          await lineApi('line-rent-buy', { method: 'POST', body: { phoneNumber: n.phoneNumber } });
-          $('rentResults').textContent = '';
-          lineMsg(`Done. ${n.phoneNumber} is now your Emysa number.`);
-          await loadLineState(); renderLineCurrent();
-        } catch (err) { lineMsg(err.message); btn.disabled = false; }
+        try { await lineApi('line-rent-buy', { method: 'POST', body: { phoneNumber: n.phoneNumber } }); lineStepDone(); }
+        catch (err) { hint('rentHint', err.message); btn.disabled = false; }
       });
       row.append(info, btn);
       $('rentResults').appendChild(row);
     });
-  } catch (err) {
-    lineMsg(err.message);
-  } finally {
-    $('rentSearchBtn').disabled = false;
-  }
+  } catch (err) { hint('rentHint', err.message); }
+  finally { $('rentSearchBtn').disabled = false; }
 });
 
-// -- WhatsApp: number in, pairing code out, link on the phone
-$('waLineStartBtn').addEventListener('click', async () => {
-  const phone = $('waLinePhoneInput').value.trim();
-  if (!phone) { lineMsg('Enter your WhatsApp number first.'); return; }
-  $('waLineStartBtn').disabled = true;
-  lineMsg('');
+// -- WhatsApp: number page, then a separate page with the pairing code
+$('lineWaBtn').addEventListener('click', () => { hint('waNumHint', ''); showAuthPanel('panelWaNumber'); });
+$('waNumBack').addEventListener('click', showLineSetup);
+$('waCodeBack').addEventListener('click', () => { stopLinePolls(); showAuthPanel('panelWaNumber'); });
+$('waNumSubmit').addEventListener('click', async () => {
+  const phone = $('waNumInput').value.trim();
+  if (!phone) { hint('waNumHint', 'Enter your WhatsApp number first.'); return; }
+  $('waNumSubmit').disabled = true;
+  hint('waNumHint', '');
   try {
     const resp = await authedFetch('/api/social-calling?action=whatsapp-start-phone', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone }),
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.error || 'Could not get a pairing code');
-    if (data.status === 'connected') { await loadLineState(); lineMsg('WhatsApp is linked.'); return; }
-    const showCode = (code) => { $('waLineCodeValue').textContent = code.split('').join(' '); $('waLineCodeWrap').classList.remove('hidden'); };
+    if (data.status === 'connected') { lineStepDone(); return; }
+    const showCode = (code) => { $('waCodeValue').textContent = code.split('').join(' '); };
+    $('waCodeValue').textContent = '— — — — — — — —';
+    hint('waCodeHint', 'Waiting for you to link…');
+    showAuthPanel('panelWaCode');
     if (data.pairingCode) showCode(data.pairingCode);
     clearInterval(lineWaTimer);
     lineWaTimer = setInterval(async () => {
@@ -3668,29 +3700,49 @@ $('waLineStartBtn').addEventListener('click', async () => {
         const r = await authedFetch('/api/social-calling?action=whatsapp-status');
         const d = await r.json();
         if (d.pairingCode) showCode(d.pairingCode);
-        if (d.status === 'connected') {
-          clearInterval(lineWaTimer);
-          $('waLineCodeWrap').classList.add('hidden');
-          lineMsg('WhatsApp is linked. Emysa can now call people there.');
-          await loadLineState();
-        }
+        if (d.status === 'connected') { clearInterval(lineWaTimer); lineStepDone(); }
       } catch { /* keep polling */ }
     }, 3000);
-  } catch (err) {
-    lineMsg(err.message);
-  } finally {
-    $('waLineStartBtn').disabled = false;
-  }
+  } catch (err) { hint('waNumHint', err.message); }
+  finally { $('waNumSubmit').disabled = false; }
 });
 
-$('lineRemoveBtn').addEventListener('click', async () => {
-  const rented = lineState.line?.mode === 'rent';
-  if (!confirm(rented ? 'Release your rented number? You will lose it.' : 'Remove your verified number?')) return;
-  try {
-    await lineApi('line-remove', { method: 'POST', body: {} });
-    await loadLineState(); renderLineCurrent();
-    lineMsg('Removed.');
-  } catch (err) { lineMsg(err.message); }
+// -- profile step: name, language, country (voice optional)
+const COUNTRY_CODES = 'AD AE AF AG AI AL AM AO AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GT GU GW GY HK HN HR HT HU ID IE IL IM IN IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'.split(' ');
+let regionNames = null;
+try { regionNames = new Intl.DisplayNames(['en'], { type: 'region' }); } catch { /* old browser: show codes */ }
+function countryName(code) { try { return regionNames?.of(code) || code; } catch { return code; } }
+
+function showProfileSetup() {
+  const lang = $('psLanguage');
+  if (!lang.options.length) lang.innerHTML = $('profileLanguage').innerHTML;
+  const country = $('psCountry');
+  if (!country.options.length) {
+    const ph = document.createElement('option'); ph.value = ''; ph.textContent = 'Select country'; country.appendChild(ph);
+    COUNTRY_CODES.map((c) => ({ c, n: countryName(c) })).sort((a, b) => a.n.localeCompare(b.n))
+      .forEach(({ c, n }) => { const o = document.createElement('option'); o.value = c; o.textContent = n; country.appendChild(o); });
+    const guess = (navigator.language || '').split('-')[1]?.toUpperCase();
+    if (guess && COUNTRY_CODES.includes(guess)) country.value = guess;
+  }
+  if (!$('psName').value) $('psName').value = currentUser?.user_metadata?.full_name || currentUser?.user_metadata?.name || '';
+  hint('psHint', '');
+  showAuthPanel('panelProfileSetup');
+}
+$('psRecordBtn').addEventListener('click', () => toggleVoiceRecording($('psRecordBtn'), $('psHint')));
+$('psUploadBtn').addEventListener('click', () => { voiceUploadStatusEl = $('psHint'); $('voiceFileInput').click(); });
+$('psSubmit').addEventListener('click', async () => {
+  const name = $('psName').value.trim();
+  const country = $('psCountry').value;
+  if (!name) { hint('psHint', 'Enter your name.'); return; }
+  if (!country) { hint('psHint', 'Select your country.'); return; }
+  $('psSubmit').disabled = true;
+  const { error } = await supabase.from('profiles').upsert(
+    { user_id: currentUser.id, name, language: $('psLanguage').value, country, setup_completed: true },
+    { onConflict: 'user_id' },
+  );
+  $('psSubmit').disabled = false;
+  if (error) { hint('psHint', 'Could not save. Please try again.'); return; }
+  enterApp(currentSession);
 });
 
 // ---------- language ----------

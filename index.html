@@ -9,7 +9,7 @@
 <title>Emysa</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-10-03.3">
+<link rel="stylesheet" href="styles.css?v=2026-10-03.4">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -89,7 +89,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-10-03.3').catch(function (err) {
+        import('./app.js?v=2026-10-03.4').catch(function (err) {
           showBootError('Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -198,6 +198,86 @@
       </div>
       <div class="authToggle">Have an account? <b id="signupToLogin">Log in</b></div>
       <div class="authHint" id="signupHint"></div>
+    </div>
+
+    <!-- first-run setup: same panels/look as login. Step 1 calling line (required), step 2 profile -->
+    <div id="panelLineSetup" class="authPanel">
+      <button class="authBack hidden" id="lineSetupBack" aria-label="Back"><svg viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
+      <div class="authTitle authTitleLg">Set Up Calling</div>
+      <div class="authSub">Choose one to continue.</div>
+      <div class="field">
+        <label>Phone Number</label>
+        <div class="inputWrap"><svg class="inputIconSvg" viewBox="0 0 24 24" fill="none"><path d="M6.6 10.8c1.2 2.4 3.2 4.4 5.6 5.6l1.9-1.9c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.5.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.5.1.4 0 .8-.2 1l-1.9 1.9z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg><input type="tel" id="lineNumInput" placeholder="Enter Your Number" autocomplete="tel"></div>
+      </div>
+      <button class="primaryBtn" id="lineNumSubmit" style="margin-top:6px;">Continue</button>
+      <button class="secondaryBtn lineChoiceBtn" id="lineRentBtn" style="margin-top:12px;"><span>Rent a number</span><span class="recoPill" id="lineRentTag">Highly recommended</span></button>
+      <div class="authDivider">Or</div>
+      <button class="secondaryBtn lineChoiceBtn" id="lineWaBtn" style="justify-content:center;"><svg class="waIcon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="20" height="20"><path d="M2 22L3.41152 16.8691C2.54422 15.3639 2.08876 13.6568 2.09099 11.9196C2.08095 6.44549 6.52644 2 11.99 2C14.6417 2 17.1315 3.02806 19.0062 4.9034C19.9303 5.82266 20.6627 6.91616 21.1611 8.12054C21.6595 9.32492 21.9139 10.6162 21.9096 11.9196C21.9096 17.3832 17.4641 21.8287 12 21.8287C10.3368 21.8287 8.71374 21.4151 7.26204 20.6192L2 22ZM7.49424 18.8349L7.79675 19.0162C9.06649 19.7676 10.5146 20.1644 11.99 20.1654C16.5264 20.1654 20.2263 16.4662 20.2263 11.9291C20.2263 9.73176 19.3696 7.65554 17.8168 6.1034C17.0533 5.33553 16.1453 4.72636 15.1453 4.31101C14.1452 3.89565 13.0728 3.68232 11.99 3.68331C7.44343 3.6839 3.74476 7.38316 3.74476 11.9202C3.74476 13.4724 4.17843 14.995 5.00502 16.3055L5.19645 16.618L4.35982 19.662L7.49483 18.8354L7.49424 18.8349Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M9.52024 7.76662C9.33885 7.35303 9.13737 7.34298 8.96603 7.34298C8.81477 7.33294 8.65288 7.33294 8.48154 7.33294C8.32083 7.33294 8.04845 7.39321 7.81684 7.64549C7.58464 7.89719 6.95007 8.49217 6.95007 9.71167C6.95007 10.9318 7.83693 12.1111 7.95805 12.2724C8.07858 12.4337 9.67149 15.0139 12.192 16.0124C14.2883 16.839 14.712 16.6777 15.1657 16.6269C15.6189 16.5767 16.6275 16.0325 16.839 15.4476C17.0405 14.8733 17.0405 14.3693 16.9802 14.2682C16.9199 14.1678 16.748 14.1069 16.5064 13.9758C16.2541 13.8552 15.0446 13.2502 14.813 13.1693C14.5808 13.0889 14.4195 13.0487 14.2582 13.2904C14.0969 13.5427 13.623 14.0969 13.4724 14.2582C13.3306 14.4195 13.1799 14.4396 12.9377 14.3185C12.686 14.1979 11.8895 13.9356 10.9418 13.0889C10.2056 12.4331 9.71167 11.6171 9.56041 11.3755C9.41979 11.1232 9.54032 10.992 9.67149 10.8709C9.78257 10.7604 9.92378 10.579 10.0449 10.4378C10.1654 10.296 10.2056 10.1855 10.2966 10.0242C10.377 9.86292 10.3368 9.71167 10.2765 9.59114C10.2157 9.48006 9.74239 8.25997 9.52024 7.76603V7.76662Z" fill="currentColor"/></svg><span>WhatsApp</span></button>
+      <div class="authHint" id="lineNumHint"></div>
+      <div class="authToggle hidden" id="lineCurrentRow">Current: <b id="lineCurrentNum"></b> &middot; <b id="lineRemoveLink" style="cursor:pointer;">Remove</b></div>
+    </div>
+
+    <div id="panelLineCode" class="authPanel">
+      <button class="authBack" id="lineCodeBack" aria-label="Back"><svg viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
+      <div class="authTitle authTitleLg">Verify Your Number</div>
+      <div class="authSub" id="lineCodeSub">You will get a call. Answer it and enter this code on your keypad.</div>
+      <div class="codeCardValue authCode" id="lineCodeValue">------</div>
+      <div class="authHint" id="lineCodeHint"></div>
+      <button class="secondaryBtn" id="lineCodeResend" style="margin-top:14px;">Call me again</button>
+    </div>
+
+    <div id="panelRent" class="authPanel">
+      <button class="authBack" id="rentBack" aria-label="Back"><svg viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
+      <div class="authTitle authTitleLg">Rent a Number</div>
+      <div class="authSub" id="rentSub"></div>
+      <div class="field"><label>Country</label><select id="rentCountry"></select></div>
+      <div class="field"><label>Area Code (optional)</label><div class="inputWrap"><svg class="inputIconSvg" viewBox="0 0 24 24" fill="none"><path d="M6.6 10.8c1.2 2.4 3.2 4.4 5.6 5.6l1.9-1.9c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.5.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.5.1.4 0 .8-.2 1l-1.9 1.9z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg><input type="text" id="rentAreaCode" inputmode="numeric" maxlength="4" placeholder="e.g. 415"></div></div>
+      <button class="primaryBtn" id="rentSearchBtn">Find Numbers</button>
+      <div class="rentResults" id="rentResults"></div>
+      <div class="authHint" id="rentHint"></div>
+    </div>
+
+    <div id="panelWaNumber" class="authPanel">
+      <button class="authBack" id="waNumBack" aria-label="Back"><svg viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
+      <div class="authTitle authTitleLg">WhatsApp</div>
+      <div class="authSub">Enter the number on your WhatsApp.</div>
+      <div class="field">
+        <label>WhatsApp Number</label>
+        <div class="inputWrap"><svg class="inputIconSvg" viewBox="0 0 24 24" fill="none"><path d="M6.6 10.8c1.2 2.4 3.2 4.4 5.6 5.6l1.9-1.9c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.5.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.5.1.4 0 .8-.2 1l-1.9 1.9z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg><input type="tel" id="waNumInput" placeholder="Enter Your Number" autocomplete="tel"></div>
+      </div>
+      <button class="primaryBtn" id="waNumSubmit" style="margin-top:6px;">Get Code</button>
+      <div class="authHint" id="waNumHint"></div>
+    </div>
+
+    <div id="panelWaCode" class="authPanel">
+      <button class="authBack" id="waCodeBack" aria-label="Back"><svg viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
+      <div class="authTitle authTitleLg">Link WhatsApp</div>
+      <div class="authSub">In WhatsApp go to Settings, Linked devices, Link a device, then choose "Link with phone number" and enter this code.</div>
+      <div class="codeCardValue authCode" id="waCodeValue">— — — — — — — —</div>
+      <div class="authHint" id="waCodeHint"></div>
+    </div>
+
+    <div id="panelProfileSetup" class="authPanel">
+      <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
+      <div class="authTitle authTitleLg">Almost There</div>
+      <div class="authSub">Tell Emysa about you.</div>
+      <div class="field"><label>Full Name</label><div class="inputWrap"><svg class="inputIconSvg" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="1.6"/><path d="M5 20c0-3.87 3.13-7 7-7s7 3.13 7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><input type="text" id="psName" placeholder="Enter Full Name" autocomplete="name"></div></div>
+      <div class="field"><label>Language</label><select id="psLanguage"></select></div>
+      <div class="field"><label>Country</label><select id="psCountry"></select></div>
+      <div class="field">
+        <label>Your Voice (optional)</label>
+        <div class="socialRow">
+          <button class="secondaryBtn" id="psRecordBtn" type="button">Record</button>
+          <button class="secondaryBtn" id="psUploadBtn" type="button">Upload</button>
+        </div>
+      </div>
+      <button class="primaryBtn" id="psSubmit" style="margin-top:6px;">Finish</button>
+      <div class="authHint" id="psHint"></div>
     </div>
 
     <div id="pendingBox" style="display:none;">
@@ -464,72 +544,6 @@
       </span>
     <span>Profile</span></button>
   </nav>
-
-  <!-- ---------- calling line setup (after approval) ---------- -->
-  <div id="lineSetupScreen" class="hidden" role="dialog" aria-modal="true" aria-labelledby="lineSetupTitle">
-    <div class="lineSetupInner">
-      <button class="lineSetupClose" id="lineSetupClose" type="button">Not now</button>
-      <h1 class="pageTitle" id="lineSetupTitle">How should Emysa call?</h1>
-      <p class="lineSub">Choose how your calls go out. You can change this any time in Profile.</p>
-
-      <div id="lineCurrent" class="lineCurrent hidden">
-        <div>
-          <div class="lineCurrentLabel" id="lineCurrentLabel"></div>
-          <div class="lineCurrentNumber" id="lineCurrentNumber"></div>
-        </div>
-        <button class="secondaryBtn lineRemoveBtn" id="lineRemoveBtn" type="button">Remove</button>
-      </div>
-
-      <div id="lineChoices">
-        <button class="lineOption" id="optRent" type="button">
-          <div class="lineOptTop"><span class="lineOptTitle">Rent a number</span><span class="recoBadge">Highly recommended</span></div>
-          <div class="lineOptDesc">A dedicated number for Emysa's calls: the best connection, and people can call it back.</div>
-          <div class="lineOptPrice" id="rentPriceLabel"></div>
-        </button>
-        <button class="lineOption" id="optOwn" type="button">
-          <div class="lineOptTop"><span class="lineOptTitle">Bring your own number</span></div>
-          <div class="lineOptDesc">Use the number you already have as caller ID. We verify it with a quick call. Your carrier keeps the number; calls go out over the internet, not your minutes.</div>
-        </button>
-        <button class="lineOption" id="optWa" type="button">
-          <div class="lineOptTop"><span class="lineOptTitle">Continue with WhatsApp</span></div>
-          <div class="lineOptDesc">Link your WhatsApp with a pairing code and Emysa calls people there.</div>
-        </button>
-      </div>
-
-      <div id="panelOwn" class="linePanel hidden">
-        <label class="lineLabel" for="ownPhoneInput">Your phone number, with country code</label>
-        <input class="plainInput" id="ownPhoneInput" type="tel" autocomplete="tel" placeholder="+2348012345678">
-        <button class="primaryBtn" id="ownStartBtn" type="button" style="margin-top:12px;">Send verification call</button>
-        <div id="ownCodeWrap" class="hidden lineCodeWrap">
-          <div class="lineLabel">You'll get a call from Twilio. Answer it and enter this code on your keypad:</div>
-          <div class="codeCardValue" id="ownCodeValue">------</div>
-          <div class="lineLabel" id="ownCodeHint">Waiting for you to enter the code…</div>
-        </div>
-      </div>
-
-      <div id="panelRent" class="linePanel hidden">
-        <div class="lineRentRow">
-          <select class="plainInput" id="rentCountry" aria-label="Country"></select>
-          <input class="plainInput" id="rentAreaCode" type="text" inputmode="numeric" maxlength="4" placeholder="Area code (optional)">
-        </div>
-        <button class="primaryBtn" id="rentSearchBtn" type="button" style="margin-top:12px;">Find numbers</button>
-        <div id="rentResults" class="rentResults"></div>
-      </div>
-
-      <div id="panelWa" class="linePanel hidden">
-        <label class="lineLabel" for="waLinePhoneInput">Your WhatsApp number, with country code</label>
-        <input class="plainInput" id="waLinePhoneInput" type="tel" autocomplete="tel" placeholder="2348012345678">
-        <button class="primaryBtn" id="waLineStartBtn" type="button" style="margin-top:12px;">Get pairing code</button>
-        <div id="waLineCodeWrap" class="hidden lineCodeWrap">
-          <div class="lineLabel">On your phone open WhatsApp, Settings, Linked devices, Link a device, then "Link with phone number instead" and enter:</div>
-          <div class="codeCardValue" id="waLineCodeValue">— — — — — — — —</div>
-          <div class="lineLabel" id="waLineHint">Waiting for you to link…</div>
-        </div>
-      </div>
-
-      <div class="authHint" id="lineMsg" role="status"></div>
-    </div>
-  </div>
 
   <!-- ---------- active call screen ---------- -->
   <div id="callScreen" class="hidden">
