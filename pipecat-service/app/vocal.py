@@ -288,3 +288,67 @@ class VocalisationPolicy:
             r"\[\[\s*(?:END_CALL|MOOD|FEEL)\s*[^\]]*\]\]", "", transcript_text, flags=re.I
         )
         return tts_text, transcript_text
+
+
+# ---------------------------------------------------------------------------
+# Emotion -> delivery cue
+# ---------------------------------------------------------------------------
+#: Tone cues Fish S2 documents as built-ins ("[excited]", "[sad]", "[surprised]",
+#: "[low voice]"). S2 reads bracket tags as natural-language instructions and
+#: puts the cue at the start of the sentence it should colour. They shape HOW
+#: a sentence is said and add no sound, so they are never written to the
+#: transcript (to_transcript_text strips them).
+#:
+#: Only emotions that call for a change from the voice's natural default are
+#: mapped. warm / calm / curious / focused / encouraging get no cue: untagged S2
+#: speech is already conversational, and tagging every sentence is the
+#: "theatrical" failure Fish's own guide warns about.
+_EMOTION_CUES: dict[str, tuple[str, float]] = {
+    # emotion: (S2 cue, minimum intensity before it is worth using)
+    "joyful": ("[excited]", 0.55),
+    "amused": ("[excited]", 0.62),
+    "concerned": ("[low voice]", 0.5),
+    "empathetic": ("[low voice]", 0.5),
+}
+
+
+@dataclass
+class DeliveryCuePolicy:
+    """Chooses at most one tone cue per response, from the live emotion state.
+
+    No LLM call: it reads the emotion engine's state that already exists.
+    Variation rule: the response straight after a cued one gets none, so the
+    delivery breathes instead of being tinted every single turn.
+    """
+
+    _last_cued_response: int = field(default=-10)
+    _response_index: int = field(default=0)
+
+    def begin_response(self) -> None:
+        self._response_index += 1
+
+    def cue_for(self, emotion: str | None, intensity: float | None, *, syntax: str) -> str | None:
+        if syntax == "s1":
+            return None  # S1's fixed tag set has no equivalent verified cue
+        entry = _EMOTION_CUES.get(_canon(emotion or ""))
+        if not entry:
+            return None
+        cue, floor = entry
+        if (intensity if intensity is not None else 0.0) < floor:
+            return None
+        if self._response_index - self._last_cued_response <= 1:
+            return None
+        self._last_cued_response = self._response_index
+        return cue
+
+
+_SENTENCE_END_RE = re.compile(r"[.!?\u2026][\"')\]]*\s*$")
+
+
+def at_sentence_boundary(emitted: str) -> bool:
+    """True when ``emitted`` ends a sentence (so the next word starts one)."""
+    return bool(_SENTENCE_END_RE.search(emitted or ""))
+
+
+def starts_with_tag(text: str) -> bool:
+    return bool(re.match(r"\s*(\[|\()", text or ""))

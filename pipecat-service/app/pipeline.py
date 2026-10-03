@@ -58,7 +58,14 @@ from app.emotion import (
     should_end_call,
 )
 from app.providers import build_llm, build_stt, build_tts, build_vad
-from app.vocal import VocalisationPolicy, split_complete, to_transcript_text
+from app.vocal import (
+    DeliveryCuePolicy,
+    VocalisationPolicy,
+    at_sentence_boundary,
+    split_complete,
+    starts_with_tag,
+    to_transcript_text,
+)
 from app.expressive_context import build_personality_context
 
 #: System prompt for a natural phone conversation.
@@ -222,6 +229,7 @@ def build_pipeline(
     # depends on the model (s1 = "(paren)" fixed set, s2+ = "[bracket]").
     tts_syntax = "s1" if (settings.tts_model or "").lower().startswith("s1") else "s2"
     vocal_policy = VocalisationPolicy()
+    cue_policy = DeliveryCuePolicy()
 
     # A system message leads the context so every turn is grounded in the
     # behavioural rules; the aggregator maintains the rest as the call runs.
@@ -331,6 +339,8 @@ def build_pipeline(
         def __init__(self) -> None:
             super().__init__(name="ResponseTagFilter")
             self._hold = ""
+            self._sentence_start = True
+            self._cue_considered = False
 
         def _transform(self, raw: str) -> str | None:
             """Clean one streamed chunk while keeping its edge whitespace.
@@ -370,7 +380,21 @@ def build_pipeline(
                 emotion=state.primary_emotion,
                 pleasure=state.dimensions.get("pleasure"),
             )
-            return tts_text or None
+            if not tts_text:
+                return None
+            # Real emotional delivery: until now only sounds (laugh, sigh...) and
+            # whisper/soft/emphasis ever reached Fish, so every ordinary
+            # sentence was synthesised in the voice's neutral default regardless
+            # of the emotion engine's state. One cue, at the start of the
+            # response's first sentence, from the live emotion state.
+            if self._sentence_start and not self._cue_considered and tts_text.strip():
+                self._cue_considered = True
+                if not starts_with_tag(tts_text):
+                    cue = cue_policy.cue_for(state.primary_emotion, state.intensity, syntax=tts_syntax)
+                    if cue:
+                        tts_text = f"{cue} {tts_text.lstrip()}"
+            self._sentence_start = at_sentence_boundary(tts_text)
+            return tts_text
 
         async def process_frame(self, frame: Any, direction: FrameDirection) -> None:
             await super().process_frame(frame, direction)
@@ -382,6 +406,9 @@ def build_pipeline(
                 return
             if isinstance(frame, LLMFullResponseStartFrame):
                 self._hold = ""
+                self._sentence_start = True
+                self._cue_considered = False
+                cue_policy.begin_response()
             elif isinstance(frame, LLMFullResponseEndFrame):
                 # Flush whatever the last chunk was holding BEFORE the end
                 # marker, so downstream (transcript note, TTS) still sees it.
@@ -431,6 +458,21 @@ def build_pipeline(
             aggregators.assistant(),
         ]
     )
+    # Verifiable in the Render logs: what the live TTS is really configured
+    # with, including which tag syntax the vocalisation layer targets.
+    try:
+        tts_settings = getattr(tts, "_settings", None)
+        logger.info(
+            "tts config model={} syntax={} latency={} speed={} volume={} voiceTail={}",
+            getattr(tts_settings, "model", None) or settings.tts_model or "default",
+            tts_syntax,
+            getattr(tts_settings, "latency", None),
+            settings.tts_speed,
+            settings.tts_volume,
+            str(getattr(tts_settings, "voice", "") or "")[-4:],
+        )
+    except Exception:  # noqa: BLE001 - diagnostics must never break a call
+        pass
     logger.info(
         "pipeline assembled",
         extra={

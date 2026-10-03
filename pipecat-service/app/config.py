@@ -410,7 +410,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         tts_voice_id=_env(env, "ASSISTANT_TTS_VOICE_ID"),
         tts_speed=_clamp_float(_env(env, "ASSISTANT_TTS_SPEED"), 1.0, 0.5, 2.0),
         tts_volume=int(_clamp_float(_env(env, "ASSISTANT_TTS_VOLUME"), 0, -20, 20)),
-        tts_latency=(_env(env, "ASSISTANT_TTS_LATENCY") or "").lower() if (_env(env, "ASSISTANT_TTS_LATENCY") or "").lower() in ("normal", "balanced") else None,
+        # Pipecat's Fish service defaults to "balanced" (lower quality, a few
+        # hundred ms faster). Natural prosody matters more on a call than that
+        # saving, so default to "normal"; ASSISTANT_TTS_LATENCY=balanced opts out.
+        tts_latency=(_env(env, "ASSISTANT_TTS_LATENCY") or "").lower() if (_env(env, "ASSISTANT_TTS_LATENCY") or "").lower() in ("normal", "balanced") else "normal",
         tts_temperature=_clamp_float(_env(env, "ASSISTANT_TTS_TEMPERATURE"), -1, 0.0, 1.0) if _env(env, "ASSISTANT_TTS_TEMPERATURE") else None,
         tts_top_p=_clamp_float(_env(env, "ASSISTANT_TTS_TOP_P"), -1, 0.0, 1.0) if _env(env, "ASSISTANT_TTS_TOP_P") else None,
         tts_model=_env(env, "ASSISTANT_TTS_MODEL"),

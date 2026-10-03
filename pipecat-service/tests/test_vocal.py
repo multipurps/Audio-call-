@@ -150,3 +150,53 @@ class TestVocalisationPolicy:
             tts, _ = policy.process("[sighing] Hmm.", now=5_000.0 + i)
             kept += "[sighing]" in tts
         assert kept == 3
+
+
+class TestDeliveryCuePolicy:
+    def test_non_neutral_emotion_gets_one_cue_on_the_first_response(self):
+        from app.vocal import DeliveryCuePolicy
+        p = DeliveryCuePolicy()
+        p.begin_response()
+        assert p.cue_for("joyful", 0.8, syntax="s2") == "[excited]"
+
+    def test_the_next_response_is_left_uncued_so_delivery_varies(self):
+        from app.vocal import DeliveryCuePolicy
+        p = DeliveryCuePolicy()
+        p.begin_response()
+        assert p.cue_for("joyful", 0.8, syntax="s2")
+        p.begin_response()
+        assert p.cue_for("joyful", 0.8, syntax="s2") is None
+        p.begin_response()
+        assert p.cue_for("joyful", 0.8, syntax="s2") == "[excited]"
+
+    def test_neutral_and_mild_emotions_get_no_cue(self):
+        from app.vocal import DeliveryCuePolicy
+        for emotion, intensity in [("warm", 0.9), ("calm", 0.9), ("curious", 0.9), ("joyful", 0.3), ("amused", 0.4)]:
+            p = DeliveryCuePolicy()
+            p.begin_response()
+            assert p.cue_for(emotion, intensity, syntax="s2") is None, (emotion, intensity)
+
+    def test_serious_emotions_get_a_lower_quieter_voice_never_laughter(self):
+        from app.vocal import DeliveryCuePolicy
+        p = DeliveryCuePolicy()
+        p.begin_response()
+        assert p.cue_for("concerned", 0.7, syntax="s2") == "[low voice]"
+
+    def test_s1_has_no_verified_cue_so_none_is_sent(self):
+        from app.vocal import DeliveryCuePolicy
+        p = DeliveryCuePolicy()
+        p.begin_response()
+        assert p.cue_for("joyful", 0.9, syntax="s1") is None
+
+    def test_cue_never_reaches_the_transcript(self):
+        from app.vocal import to_transcript_text
+        assert to_transcript_text("[excited] That's great news!") == "That's great news!"
+        assert to_transcript_text("[low voice] I'm sorry to hear that.") == "I'm sorry to hear that."
+
+    def test_sentence_boundary_detection(self):
+        from app.vocal import at_sentence_boundary, starts_with_tag
+        assert at_sentence_boundary("Sounds good. ")
+        assert at_sentence_boundary("Really?")
+        assert not at_sentence_boundary("Sounds good, and")
+        assert starts_with_tag("[laughing] Ha")
+        assert not starts_with_tag("Ha, nice")

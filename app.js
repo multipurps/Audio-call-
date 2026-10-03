@@ -1702,7 +1702,11 @@ function applyCallStatusUpdate(callRow) {
   }
   const st = callRow.status;
   if (st === 'queued') {
-    setCallStatePill('connecting', 'Starting call…');
+    // The row stays 'queued' for the whole dial-and-ring period (it only
+    // becomes 'in_progress' on the provider's answer event), so this is the
+    // state a caller actually sits in while the phone rings.
+    setCallStatePill('connecting', 'Calling…');
+    startRingback();
   } else if (st === 'ringing') {
     setCallStatePill('connecting', 'Ringing…');
     startRingback();

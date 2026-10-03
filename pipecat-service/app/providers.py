@@ -308,7 +308,19 @@ def build_vad(sample_rate: int) -> Any:
     try:
         from pipecat.audio.vad.silero import SileroVADAnalyzer
 
-        return SileroVADAnalyzer(sample_rate=sample_rate)
+        from pipecat.audio.vad.vad_analyzer import VADParams
+
+        # Recent calls dropped 30-70% of Emysa's queued speech to barge-in
+        # (framesFlushed vs framesEnqueued), mostly her own voice echoing back
+        # from the callee's speaker and line noise registering as "speaking".
+        # Slightly stricter start (0.3s of confident speech instead of 0.2s,
+        # confidence 0.75 instead of 0.7) stops a cough or echo cutting her
+        # off, while a real "wait, hold on" still interrupts. stop_secs stays
+        # at Pipecat's 0.2s because Smart Turn decides when the turn ends.
+        return SileroVADAnalyzer(
+            sample_rate=sample_rate,
+            params=VADParams(confidence=0.75, start_secs=0.3, stop_secs=0.2),
+        )
     except Exception as exc:  # noqa: BLE001 - optional native dependency
         logger.warning(
             "Silero VAD unavailable; falling back to timeout-based turn "
