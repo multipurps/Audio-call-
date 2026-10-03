@@ -616,7 +616,12 @@ async function sendChatMessage(text, onReply, source = 'text', channel = null) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, sessionId: currentChatSessionId, source, channel: target?.channel || channel || currentCallChannel(), target }),
   });
-  const data = await resp.json();
+  // A crashed or timed-out function returns plain text/HTML, and Safari's
+  // resp.json() then throws "The string did not match the expected pattern".
+  // Say what actually happened instead.
+  const data = await resp.json().catch(() => ({
+    error: resp.status >= 500 ? `The server had a problem (error ${resp.status}). Please try again.` : 'Unexpected response from the server.',
+  }));
   if (revision !== chatRevision) return;
   if (!resp.ok) {
     const errText = data.error || 'Something went wrong.';
