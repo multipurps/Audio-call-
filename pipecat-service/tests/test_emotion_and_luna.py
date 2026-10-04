@@ -99,10 +99,10 @@ class TestLunaConfig:
         assert "[[END_CALL]]" in prompt
         assert "User prefers window seats" in prompt
         # The expressive-personality layer is part of the default prompt.
-        assert "Who you are, underneath the technique" in prompt
+        assert "How you come across, underneath the technique" in prompt
         # An operator-supplied system prompt owns the persona outright.
         custom = build_system_prompt(
             dataclasses.replace(s, system_prompt="You are a terse PA.")
         )
         assert "You are a terse PA." in custom
-        assert "Who you are, underneath the technique" not in custom
+        assert "How you come across, underneath the technique" not in custom

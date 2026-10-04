@@ -162,6 +162,28 @@ LANGUAGE_NAMES = {
 }
 
 
+async def _fetch_profile(rest, *, user_id) -> dict[str, str]:
+    """Language, name and country of the person the call speaks as.
+
+    Best-effort and tolerant of an un-migrated schema: ``country`` only exists
+    after sql/022, and PostgREST rejects a select naming a missing column, so
+    fall back to fewer columns rather than losing the name or the language.
+    """
+    for columns in ("language,name,country", "language,name", "language"):
+        try:
+            rows = await rest.select("profiles", select=columns, filters={"user_id": f"eq.{user_id}"}, limit=1)
+        except Exception:  # noqa: BLE001 - try with fewer columns
+            continue
+        row = rows[0] if rows else {}
+        code = str(row.get("language") or "en").lower()
+        return {
+            "language": code if code in LANGUAGE_NAMES else "en",
+            "name": str(row.get("name") or "").strip(),
+            "country": str(row.get("country") or "").strip(),
+        }
+    return {"language": "en", "name": "", "country": ""}
+
+
 async def _fetch_language(rest, *, user_id):
     try:
         rows = await rest.select("profiles", select="language", filters={"user_id": f"eq.{user_id}"}, limit=1)
@@ -191,6 +213,11 @@ class CallContext:
     #: The user's chosen language from Settings (ISO code). Drives STT and the
     #: reply language so a mis-heard word can never switch the call language.
     language: str = "en"
+    #: Who the model speaks AS: the person who set the call up (profiles.name).
+    #: Empty when not on file; the prompt then never invents one.
+    user_name: str = ""
+    #: The person's country from their profile. NOT their current location.
+    user_country: str = ""
     #: ISO timestamp of the actual answer (set by ``set_in_progress``), so
     #: talk duration can be measured from the answer rather than from dial.
     answered_at: str | None = None
@@ -624,12 +651,30 @@ def build_extra_context(context: CallContext) -> str:
 
     Rules live in the system prompt (app/pipeline.py); this block is only
     facts, so nothing here can talk the model out of its behavioural
-    constraints.
+    constraints. It establishes the identity model: the model speaks AS the
+    person who set the call up, and the objective is that person's private
+    intention, not a request addressed to an assistant.
     """
-    lines = [
-        "This is a live phone call — everything you write is spoken aloud.",
-        f"You are speaking with: {context.contact_name}.",
-    ]
+    lines = ["This is a live phone call — everything you write is spoken aloud."]
+    if context.user_name:
+        lines.append(
+            f"You are speaking as {context.user_name}. This is your own call, in your "
+            f"own voice. If they ask who this is, say your name plainly."
+        )
+    else:
+        lines.append(
+            "You are speaking as the person who set this call up. Their name is not on "
+            "file, so do not invent one; if asked who this is, answer naturally without a name."
+        )
+    lines.append(f"You are calling: {context.contact_name}.")
+    if context.user_country:
+        lines.append(
+            f"Your country: {context.user_country}. That is where you are based, not "
+            f"where you are right now. You do not know your current location unless your "
+            f"brief says it."
+        )
+    else:
+        lines.append("You do not know where you are right now unless your brief says it.")
     lang_name = LANGUAGE_NAMES.get(context.language)
     if lang_name:
         lines.append(
@@ -639,14 +684,17 @@ def build_extra_context(context: CallContext) -> str:
             f"so answer in {lang_name} or ask them to repeat."
         )
     if context.objective:
-        lines.append(f"Objective for this call: {context.objective}")
+        lines.append(
+            "Your private brief for this call (what you want out of it; it is for you "
+            f"only, not a message to relay or a script to read): {context.objective}"
+        )
     if context.instructions and context.instructions != context.objective:
-        lines.append(f"Extra instructions from the user: {context.instructions}")
+        lines.append(f"More private detail for your brief: {context.instructions}")
     if context.prior_summaries:
-        lines.append("What you discussed with this person before:")
+        lines.append("What you and this person talked about before:")
         lines.extend(f"- {summary}" for summary in context.prior_summaries)
     if context.memories:
-        lines.append("Facts you remember about them:")
+        lines.append("Things you know about them:")
         lines.extend(f"- {memory}" for memory in context.memories)
     return "\n".join(lines)
 
@@ -712,7 +760,7 @@ async def resolve_call_context(
         contact_id = str(contact_id) if contact_id else None
         to_number = str(row.get("to_number") or "")
 
-        contact_name, memories, summaries, language = await asyncio.gather(
+        contact_name, memories, summaries, profile = await asyncio.gather(
             _fetch_contact_name(rest, contact_id=contact_id, to_number=to_number, session_id=session_id),
             _fetch_memories(rest, user_id=db_user_id, contact_id=contact_id, session_id=session_id)
             if settings.enable_persistent_memory and db_user_id
@@ -720,8 +768,9 @@ async def resolve_call_context(
             _fetch_prior_summaries(rest, user_id=db_user_id, contact_id=contact_id, session_id=session_id)
             if db_user_id
             else _empty(),
-            _fetch_language(rest, user_id=db_user_id) if db_user_id else _default_language(),
+            _fetch_profile(rest, user_id=db_user_id) if db_user_id else _default_profile(),
         )
+        language = profile["language"]
 
         context = CallContext(
             call_id=call_id,
@@ -738,6 +787,8 @@ async def resolve_call_context(
             memories=memories,
             prior_summaries=summaries,
             language=language if isinstance(language, str) else "en",
+            user_name=profile["name"],
+            user_country=profile["country"],
             _rest=rest,
         )
         context.extra_context = build_extra_context(context)
@@ -765,6 +816,10 @@ async def resolve_call_context(
         # so it is only closed when we return None.
         if row is None:
             await rest.aclose()
+
+
+async def _default_profile() -> dict[str, str]:
+    return {"language": "en", "name": "", "country": ""}
 
 
 async def _default_language() -> str:

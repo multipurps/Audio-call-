@@ -44,19 +44,20 @@ from app.monitor import DIRECTION_CALLER, DIRECTION_EMYSA, get_hub
 
 #: Last-resort opener, spoken verbatim only when the model cannot open the call
 #: itself (no LLM context available) or ASSISTANT_GREETING is set. Normally the
-#: model writes the opening line from the user's own instructions - see
-#: OPENING_CUE - so nothing about the intro is hardcoded.
-DEFAULT_GREETING = "Hey, it's Emysa. Can you hear me okay?"
+#: model writes the opening line from the person's private brief - see
+#: OPENING_CUE - so nothing about the intro is hardcoded. It deliberately names
+#: nobody and nothing: the speaker is the person who set the call up, and the
+#: system placing the call never introduces itself.
+DEFAULT_GREETING = "Hey, can you hear me okay?"
 
 #: Added to the LLM context the moment the callee answers, then the model is run.
 #: It is a stage direction for the model, not something the person said.
 OPENING_CUE = (
-    "[The person has just picked up the call. Open the conversation now, "
-    "following the user's instructions for this call. Unless those instructions "
-    "say otherwise, say hi, tell them you're Emysa and why you're calling, and "
-    "make sure they can hear you. If the instructions say not to introduce "
-    "yourself, or to open a particular way, do exactly that. One or two short "
-    "sentences.]"
+    "[The person has just picked up the call. Open it now, the way the person you "
+    "are speaking as would if they had just rung someone: a short, natural hello, "
+    "one or two short sentences. Do not introduce yourself unless your private "
+    "brief says to, and do not mention any assistant, system or product. If the "
+    "brief says to open a particular way, do exactly that.]"
 )
 
 #: Outbound audio is released in frames of this many milliseconds.
@@ -650,13 +651,15 @@ def get_live_conversation(session_id: str) -> Any | None:
     return _LIVE_CONVERSATIONS.get(session_id)
 
 
-#: Wrapper for a note from the person Emysa is calling on behalf of. The
-#: recipient cannot see or hear it; the model is told how to use it.
+#: Wrapper for a note the person adds to their own brief during the call. The
+#: recipient cannot see or hear it; the model is told how to use it. Must keep
+#: starting with "[Private note" - the system prompt recognises it by that.
 OPERATOR_NOTE_PREFIX = (
-    "[Private note from the person you are calling on behalf of. The person on "
-    "the phone cannot see or hear this. Do not read it out, do not announce it, "
-    "and do not stop or restart what you are saying. Work it into the "
-    "conversation at the next natural moment, in your own words.] "
+    "[Private note: new information or a change of plan for your own brief, from the "
+    "person you are speaking as. The person on the phone cannot see or hear this. Do "
+    "not read it out, do not announce it, and do not stop or restart what you are "
+    "saying. Work it into the conversation at the next natural moment, in your own "
+    "words.] "
 )
 MAX_NOTE_CHARS = 1000
 
@@ -900,10 +903,10 @@ class CallConversation(_BaseConversation):
     async def _speak_greeting(self) -> None:
         if self._task is None:
             return
-        # Default: the model opens the call itself, guided by the user's
-        # instructions already in its system prompt (intro on by default, off
-        # or reshaped if the user says so). An explicit ASSISTANT_GREETING
-        # override is spoken verbatim instead.
+        # Default: the model opens the call itself, as the person it speaks
+        # as, guided by that person's private brief already in its system
+        # prompt (no introduction unless the brief asks for one). An explicit
+        # ASSISTANT_GREETING override is spoken verbatim instead.
         if not (self._settings.greeting or "").strip() and self._context is not None:
             try:
                 self._context.add_message({"role": "user", "content": OPENING_CUE})

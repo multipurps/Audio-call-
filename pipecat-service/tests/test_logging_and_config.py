@@ -418,27 +418,30 @@ class TestOpeningAndIdentity:
         # Join the source's backslash line continuations, then normalise spaces.
         return " ".join(self._read("pipeline.py").replace("\\\n", "").split())
 
-    def test_model_opens_the_call_from_the_users_instructions(self):
+    def test_model_opens_the_call_from_the_persons_private_brief(self):
         src = self._read("conversation.py")
         assert "OPENING_CUE" in src and "LLMRunFrame" in src
-        assert "following the user's instructions" in " ".join(src.split())
+        assert "private brief" in " ".join(src.split())
 
     def test_intro_is_not_hardcoded_as_an_ai_announcement(self):
         import re
 
         greeting = re.search(r'DEFAULT_GREETING = "(.*)"', self._read("conversation.py")).group(1)
         assert "AI" not in greeting and "assistant" not in greeting.lower()
+        assert "Emysa" not in greeting
 
-    def test_prompt_lets_the_user_control_the_intro(self):
+    def test_prompt_never_forces_an_introduction(self):
         text = self._prompt()
-        assert "If they tell you not to introduce yourself" in text
-        assert "briefly say hi, say you are Emysa and why you are calling" in text
+        assert "Do not introduce yourself unless your brief says to" in text
+        assert "say you are Emysa" not in text
 
-    def test_prompt_is_gender_neutral(self):
-        text = self._prompt()
-        assert "Emysa is not tied to any gender" in text
+    def test_prompt_never_names_the_product(self):
+        from app.pipeline import DEFAULT_SYSTEM_PROMPT
+
+        assert "Emysa" not in DEFAULT_SYSTEM_PROMPT
 
     def test_prompt_is_honest_if_sincerely_asked(self):
+        # Never volunteered, but never a lie either.
         text = self._prompt()
-        assert "Never claim to be human and never deny what you are" in text
-        assert "sincerely asks whether they are talking to an AI" in text
+        assert "do not claim to be human and do not deny it" in text
+        assert "sincerely and directly asks whether they are talking to a real person" in text
