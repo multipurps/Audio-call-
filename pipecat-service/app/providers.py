@@ -276,14 +276,19 @@ def build_tts(settings: Settings) -> Any:
             "output_format": "pcm",
             "sample_rate": settings.bridge_sample_rate,
         }
-        if settings.tts_voice_id:
-            kwargs["reference_id"] = settings.tts_voice_id
-        if settings.tts_model:
-            kwargs["model_id"] = settings.tts_model
+        # Voice and model go through Pipecat's `Settings` (the constructor's
+        # `reference_id=` / `model_id=` are deprecated). The voice id is the
+        # per-call voice (the caller's own cloned voice from the relay's
+        # hello, else ASSISTANT_TTS_VOICE_ID); each call builds its own
+        # service, so nothing here is shared between calls.
         tts_kwargs: dict[str, Any] = {
             "prosody_speed": settings.tts_speed,
             "prosody_volume": settings.tts_volume,
         }
+        if settings.tts_voice_id:
+            tts_kwargs["voice"] = settings.tts_voice_id
+        if settings.tts_model:
+            tts_kwargs["model"] = settings.tts_model
         # Only passed when explicitly configured; otherwise Fish's defaults apply.
         if settings.tts_latency:
             tts_kwargs["latency"] = settings.tts_latency

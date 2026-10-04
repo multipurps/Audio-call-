@@ -111,7 +111,7 @@ Runtime (`pipecat-service/requirements.txt`), all pinned:
 
 | Package | Version | Why |
 | --- | --- | --- |
-| `pipecat-ai[fish,openai,silero,websocket]` | `1.11.0` | The pipeline. Pinned exactly — Pipecat is pre-2.0 and its APIs have moved between releases. The `groq` extra was dropped when Groq support was removed. |
+| `pipecat-ai[fish,openai,silero,websocket]` | `1.12.0` | The pipeline. Pinned exactly — Pipecat is pre-2.0 and its APIs have moved between releases. The `groq` extra was dropped when Groq support was removed. |
 | `fastapi` | `0.141.1` | ACAF WebSocket + health endpoints. |
 | `uvicorn[standard]` | `0.53.0` | ASGI server. |
 | `loguru` | `0.7.3` | Logging (Pipecat uses it too). |

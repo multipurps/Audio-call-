@@ -1,7 +1,7 @@
 """ACAF <-> Pipecat frame serializer.
 
 Implements Pipecat's `FrameSerializer` interface (verified against
-pipecat-ai 1.11.0's `pipecat/serializers/base_serializer.py`) so the ACAF
+pipecat-ai 1.11.0 and 1.12.0 (identical in this file)'s `pipecat/serializers/base_serializer.py`) so the ACAF
 bridge plugs into a standard `FastAPIWebsocketTransport` with no bespoke
 transport plumbing.
 
@@ -54,7 +54,7 @@ from app.audio import PCM16Resampler, mulaw_to_pcm16
 # Note on why Pipecat's own audio helpers are not used on this path.
 #
 # `pipecat.audio.utils.create_stream_resampler()` returns a soxr streaming
-# resampler. Verified against pipecat-ai 1.11.0 in this environment: fed
+# resampler. Verified against pipecat-ai 1.11.0 and 1.12.0 (identical in this file) in this environment: fed
 # 20 ms telephony frames it returns **0 bytes** for the first ~6 frames
 # (measured: 5 frames of 320 B in, still 0 B out; the 6th frame's call
 # returned 3032 B at once). Two consequences make it unusable for a carrier
