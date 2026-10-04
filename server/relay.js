@@ -1,4 +1,5 @@
 import { assistantCallIdentity } from './callIdentity.js';
+import { briefLines, loadSpeakerProfile, representativeRules, speakerSituation, whereYouAreLine } from './representative.js';
 import {
   createInitialEmotionState,
   appraiseTurn,
@@ -123,8 +124,9 @@ async function loadCallContext(state) {
   const { data: voice } = await supabase.from('voice_profiles').select('*').eq('user_id', call.user_id).maybeSingle();
   if (voice?.status === 'ready') state.voiceId = voice.provider_voice_id;
 
-  const { data: profile } = await supabase.from('profiles').select('name').eq('user_id', call.user_id).maybeSingle();
-  state.userName = profile?.name || '';
+  const profile = await loadSpeakerProfile(supabase, call.user_id);
+  state.userName = profile.name;
+  state.userCountry = profile.country;
 
   const memBundle = await retrieveRelevantMemories({
     supabase,
@@ -223,19 +225,18 @@ async function think(state, latestCallerText = '') {
 }
 
 export function buildSystemPrompt(state) {
-  const who = state.userName ? `You're speaking as ${state.userName}` : "You're speaking as the person who asked for this call";
+  // A callback TO the app user is the one case where the assistant really is the
+  // speaker; every other call is the person who set it up, speaking as themselves.
   const identity = assistantCallIdentity(state.callKind);
-  const situation =
-    identity?.situation ||
-    (state.direction === 'inbound'
-      ? `${who}, answering a call that just came in — not as an assistant, not as a "representative." Whoever's calling already knows this voice. Just talk to them the way that person naturally would.`
-      : `${who} — not as an assistant, not as a "representative calling on behalf of" anyone. Whoever picks up already knows this voice. Just talk to them the way that person naturally would, continuing an ordinary conversation.`);
+  const situation = identity?.situation || speakerSituation({ userName: state.userName, direction: state.direction });
   const emotionXml = formatEmotionStateBlock(state.emotionState);
   return [
     situation,
     ``,
-    `What this call is for: ${state.objective}`,
-    state.instructions ? `How to go about it: ${state.instructions}` : '',
+    identity ? `What this call is for: ${state.objective}` : whereYouAreLine(state.userCountry),
+    ...(identity
+      ? [state.instructions ? `How to go about it: ${state.instructions}` : '']
+      : briefLines({ objective: state.objective, instructions: state.instructions })),
     state.personality ? `General manner: ${state.personality}` : '',
     state.memoryBlock
       ? state.memoryBlock
@@ -249,9 +250,7 @@ export function buildSystemPrompt(state) {
     `- Write the way people actually talk, not the way people write: natural contractions, the occasional "um," "uh," "you know," or a brief pause.`,
     `- Every so often — sparingly, only where a real person genuinely would — let a small human sound come through using these exact bracket tags so the voice engine renders them: [pause], [short pause], [sigh], [clear throat], [chuckle], [laughing]. One per turn at most, and plenty of turns should have none at all.`,
     `- Never repeat the same phrase twice in a call, and avoid stock lines like "I understand," "Great question," "I appreciate that."`,
-    `- Stay in character for the whole call no matter what the other person says, asks, or how they react.`,
-    identity?.guidance ||
-      `- Exception: if someone directly and seriously asks whether they're actually talking to a real person, or to a bot/AI, don't confirm it and don't deny it — just acknowledge it lightly and keep the conversation moving.`,
+    ...(identity ? [`- ${identity.guidance}`] : representativeRules()),
     ``,
     `Track whether the objective's actually been accomplished as the conversation goes. Once it has, wrap up naturally and let the call end the way a normal phone call ends.`,
     `When your closing line is the actual end of the call — a real goodbye, not just a pause in conversation — append the exact text [[END_CALL]] to the very end of that line, after your spoken words, with nothing after it. Never append [[END_CALL]] if the other person just asked a question.`,

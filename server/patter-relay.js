@@ -1,4 +1,5 @@
 import { assistantCallIdentity } from './callIdentity.js';
+import { briefLines, loadSpeakerProfile, representativeRules, speakerSituation, whereYouAreLine } from './representative.js';
 import {
   createInitialEmotionState,
   appraiseTurn,
@@ -171,7 +172,7 @@ export class FishAudioTelephonyTTS {
 const SYSTEM_PROMPT_TEMPLATE = [
   `{situation}`,
   ``,
-  `What this call is for: {objective}`,
+  `{objective}`,
   `{instructions_line}`,
   `{personality_line}`,
   `{memories_line}`,
@@ -182,7 +183,6 @@ const SYSTEM_PROMPT_TEMPLATE = [
   `- Write the way people actually talk, not the way people write: natural contractions, the occasional "um," "uh," "you know," a thought you start and then correct or trail off, a beat before answering something you're not 100% sure about.`,
   `- Every so often — sparingly — let a small human sound come through using these exact bracket tags: [pause], [short pause], [sigh], [clear throat], [chuckle], [laughing]. One per turn at most, and plenty of turns should have none at all.`,
   `- Never repeat the same phrase twice in a call, and avoid stock lines like "I understand," "Great question."`,
-  `- Stay in character for the whole call no matter what the other person says or asks.`,
   `{identity_line}`,
   ``,
   `Track whether the objective's been accomplished. Once it has, wrap up naturally.`,
@@ -216,6 +216,7 @@ async function loadCallContext(callId) {
     twilioCallSid: call.twilio_call_sid,
     voiceId: null,
     userName: '',
+    userCountry: '',
     memories: [],
     memoryBlock: '',
     emotionState: createInitialEmotionState(),
@@ -234,8 +235,9 @@ async function loadCallContext(callId) {
   const { data: voice } = await supabase.from('voice_profiles').select('*').eq('user_id', call.user_id).maybeSingle();
   if (voice?.status === 'ready') ctx.voiceId = voice.provider_voice_id;
 
-  const { data: profile } = await supabase.from('profiles').select('name').eq('user_id', call.user_id).maybeSingle();
-  ctx.userName = profile?.name || '';
+  const profile = await loadSpeakerProfile(supabase, call.user_id);
+  ctx.userName = profile.name;
+  ctx.userCountry = profile.country;
 
   const memBundle = await retrieveRelevantMemories({
     supabase,
@@ -259,20 +261,18 @@ async function loadCallContext(callId) {
 }
 
 export function contextToVariables(ctx) {
-  const who = ctx.userName ? `You're speaking as ${ctx.userName}` : "You're speaking as the person who asked for this call";
+  // Callback TO the app user: the assistant really is the speaker. Every other
+  // call is the person who set it up, speaking as themselves.
   const identity = assistantCallIdentity(ctx.callKind);
-  const situation =
-    identity?.situation ||
-    (ctx.direction === 'inbound'
-      ? `${who}, answering a call that just came in — not as an assistant. Whoever's calling already knows this voice. Just talk to them the way that person naturally would.`
-      : `${who} — not as an assistant or someone "calling on behalf of" anyone. Whoever picks up already knows this voice. Just talk to them the way that person naturally would.`);
+  const situation = identity?.situation || `${speakerSituation({ userName: ctx.userName, direction: ctx.direction })}\n${whereYouAreLine(ctx.userCountry)}`;
+  const brief = identity ? [] : briefLines({ instructions: ctx.instructions });
   return {
     situation,
-    identity_line:
-      identity?.guidance ||
-      "If someone directly and seriously asks whether they're talking to a real person or a bot, don't confirm or deny — acknowledge lightly and keep moving.",
-    objective: ctx.objective,
-    instructions_line: ctx.instructions ? `How to go about it: ${ctx.instructions}` : '',
+    identity_line: identity?.guidance || representativeRules().join('\n'),
+    // The label differs by identity: a callback TO the app user has a purpose; every
+    // other call has the speaker's own private brief.
+    objective: identity ? `What this call is for: ${ctx.objective}` : briefLines({ objective: ctx.objective }).join('\n'),
+    instructions_line: identity ? (ctx.instructions ? `How to go about it: ${ctx.instructions}` : '') : brief.join('\n'),
     personality_line: ctx.personality ? `General manner: ${ctx.personality}` : '',
     memories_line: ctx.memoryBlock
       ? ctx.memoryBlock
