@@ -1,0 +1,58 @@
+diff --git a/lib/src/main/java/org/asamk/signal/manager/helper/CallManager.java b/lib/src/main/java/org/asamk/signal/manager/helper/CallManager.java
+index 3d8efb72..de97899e 100644
+--- a/lib/src/main/java/org/asamk/signal/manager/helper/CallManager.java
++++ b/lib/src/main/java/org/asamk/signal/manager/helper/CallManager.java
+@@ -458,10 +458,14 @@ public class CallManager implements AutoCloseable {
+     }
+ 
+     private String buildConfig(CallState state) {
++        return buildConfig(state, account.getDeviceId());
++    }
++
++    static String buildConfig(CallState state, int localDeviceId) {
+         var config = mapper.createObjectNode();
+         config.put("call_id", Utils.callIdUnsigned(state.callId));
+         config.put("is_outgoing", state.isOutgoing);
+-        config.put("local_device_id", 1);
++        config.put("local_device_id", localDeviceId);
+         return writeJson(config);
+     }
+ 
+diff --git a/lib/src/test/java/org/asamk/signal/manager/helper/CallManagerTest.java b/lib/src/test/java/org/asamk/signal/manager/helper/CallManagerTest.java
+index d7731411..43a8736a 100644
+--- a/lib/src/test/java/org/asamk/signal/manager/helper/CallManagerTest.java
++++ b/lib/src/test/java/org/asamk/signal/manager/helper/CallManagerTest.java
+@@ -1,5 +1,6 @@
+ package org.asamk.signal.manager.helper;
+ 
++import com.fasterxml.jackson.databind.ObjectMapper;
+ import org.asamk.signal.manager.api.CallInfo;
+ import org.asamk.signal.manager.storage.recipients.TestRecipientId;
+ import org.asamk.signal.manager.util.Utils;
+@@ -23,6 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
+  */
+ class CallManagerTest {
+ 
++    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
++
+     // --- Reflection helpers for private static methods ---
+ 
+     private static final MethodHandle GET_RAW_IDENTITY_KEY_BYTES;
+@@ -177,6 +180,17 @@ class CallManagerTest {
+         assertTrue(foundDifferent, "generateCallId returned same value 21 times in a row");
+     }
+ 
++    @Test
++    void buildConfig_usesProvidedLinkedDeviceId() throws Exception {
++        var state = makeCallState(123L, CallInfo.State.RINGING_OUTGOING);
++
++        var config = OBJECT_MAPPER.readTree(CallManager.buildConfig(state, 7));
++
++        assertEquals(7, config.get("local_device_id").intValue());
++        assertEquals(123L, config.get("call_id").longValue());
++        assertTrue(config.get("is_outgoing").booleanValue());
++    }
++
+     // ========================================================================
+     // handleStateChange state machine tests
+     //

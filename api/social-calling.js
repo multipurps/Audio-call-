@@ -3,6 +3,7 @@ import { resolveWhatsappStatus } from '../lib/whatsappStatus.js';
 import { describeSocialCallEnd } from '../lib/socialCallEnd.js';
 import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsPlaceAICall, wacallsHangup } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
+import { signalStartLink, signalLinkStatus, signalRemoveAccount } from '../lib/signalClient.js';
 import { resolvePersonSession } from '../lib/personSession.js';
 import {
   createCallRecord,
@@ -61,6 +62,9 @@ export default async function handler(req, res) {
       case 'whatsapp-start-phone': return await whatsappStartWithPhone(req, res, supabase, userId);
       case 'whatsapp-status': return await whatsappStatus(req, res, supabase, userId);
       case 'whatsapp-disconnect': return await whatsappDisconnect(req, res, supabase, userId);
+      case 'signal-start': return await signalStart(req, res, supabase, userId);
+      case 'signal-status': return await signalStatus(req, res, supabase, userId);
+      case 'signal-disconnect': return await signalDisconnect(req, res, supabase, userId);
       case 'call':
       case 'place-call': return await placeCall(req, res, supabase, userId);
       case 'hangup': return await hangupSocialCall(req, res, supabase, userId);
@@ -369,9 +373,11 @@ async function relayCallStatus(req, res, supabase) {
 // relay is the source of truth for *connecting*, but once connected, the
 // row it wrote is enough to render "Connected as X".
 async function status(req, res, supabase, userId) {
-  const [{ data: tg }, { data: wa }] = await Promise.all([
+  const [{ data: tg }, { data: wa }, { data: sg }] = await Promise.all([
     supabase.from('telegram_accounts').select('status, display_name, phone_last4, last_error').eq('user_id', userId).maybeSingle(),
     supabase.from('whatsapp_accounts').select('status, display_name, last_error, wacalls_session_id').eq('user_id', userId).maybeSingle(),
+    // Table is created by sql/023; until it is run, treat Signal as not connected.
+    supabase.from('signal_accounts').select('status, signal_number, last_error').eq('user_id', userId).maybeSingle(),
   ]);
   // Ask the relay what WhatsApp's real state is (short timeout: the relay can
   // be asleep). The saved flag alone showed "Not connected" while the relay
@@ -387,6 +393,11 @@ async function status(req, res, supabase, userId) {
       displayName: tg?.display_name || null,
       phoneLast4: tg?.phone_last4 || null,
       error: tg?.last_error || null,
+    },
+    signal: {
+      status: sg?.status === 'pending_qr' ? 'disconnected' : (sg?.status || 'disconnected'),
+      phoneLast4: sg?.signal_number ? sg.signal_number.slice(-4) : null,
+      error: sg?.last_error || null,
     },
     whatsapp: {
       status: waLive.status,
@@ -512,6 +523,65 @@ async function whatsappDisconnect(req, res, supabase, userId) {
     await wacallsDelete(userId, row.wacalls_session_id).catch(() => {}); // already gone on the relay side is fine, still clear our row
   }
   await supabase.from('whatsapp_accounts').update({ wacalls_session_id: null, status: 'disconnected', display_name: null }).eq('user_id', userId);
+  return res.status(200).json({ status: 'disconnected' });
+}
+
+// Signal: QR linking through the signal-bridge service (a linked device, the
+// same idea as WhatsApp's QR). The QR is shown once and expires in ~2 minutes;
+// the bridge reports when it was scanned. Placing Signal calls is NOT wired
+// here yet - it waits until a real linked-device call has been proven.
+async function signalStart(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { data: row } = await supabase.from('signal_accounts').select('status').eq('user_id', userId).maybeSingle();
+  if (row?.status === 'connected') return res.status(200).json({ status: 'connected' });
+  const link = await signalStartLink();
+  await supabase.from('signal_accounts').upsert(
+    { user_id: userId, link_id: link.id, status: 'pending_qr', last_error: null, updated_at: new Date().toISOString() },
+    { onConflict: 'user_id' },
+  );
+  return res.status(200).json({ qr: link.qr, status: 'pending_qr' });
+}
+
+async function signalStatus(req, res, supabase, userId) {
+  const { data: row } = await supabase.from('signal_accounts').select('status, signal_number, link_id').eq('user_id', userId).maybeSingle();
+  if (!row || row.status === 'disconnected') return res.status(200).json({ status: 'disconnected' });
+  if (row.status === 'connected') return res.status(200).json({ status: 'connected', phoneLast4: row.signal_number?.slice(-4) || null });
+  if (row.status !== 'pending_qr' || !row.link_id) return res.status(200).json({ status: row.status });
+
+  let link;
+  try {
+    link = await signalLinkStatus(row.link_id, { timeoutMs: 8000 });
+  } catch (err) {
+    if (err.statusCode === 404) {
+      // The bridge restarted and forgot this attempt - the QR is dead.
+      await supabase.from('signal_accounts').update({ status: 'disconnected', link_id: null, last_error: 'Link expired - tap Connect to get a new code' }).eq('user_id', userId);
+      return res.status(200).json({ status: 'expired' });
+    }
+    return res.status(200).json({ status: 'pending_qr', unreachable: true }); // a blip says nothing about the link
+  }
+  if (link.status === 'linked') {
+    if (!link.number) {
+      await supabase.from('signal_accounts').update({ status: 'error', link_id: null, last_error: 'Linked, but the account number could not be read - disconnect and try again' }).eq('user_id', userId);
+      return res.status(200).json({ status: 'error' });
+    }
+    await supabase.from('signal_accounts').update({ status: 'connected', signal_number: link.number, link_id: null, last_error: null, updated_at: new Date().toISOString() }).eq('user_id', userId);
+    return res.status(200).json({ status: 'connected', phoneLast4: link.number.slice(-4) });
+  }
+  if (link.status === 'failed' || link.status === 'expired') {
+    const msg = link.status === 'expired' ? 'Link expired - tap Connect to get a new code' : 'Linking failed - tap Connect to try again';
+    await supabase.from('signal_accounts').update({ status: 'disconnected', link_id: null, last_error: msg }).eq('user_id', userId);
+    return res.status(200).json({ status: link.status });
+  }
+  return res.status(200).json({ status: 'pending_qr' });
+}
+
+async function signalDisconnect(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { data: row } = await supabase.from('signal_accounts').select('signal_number').eq('user_id', userId).maybeSingle();
+  if (row?.signal_number) {
+    await signalRemoveAccount(row.signal_number).catch(() => {}); // already gone on the bridge is fine, still clear our row
+  }
+  await supabase.from('signal_accounts').update({ signal_number: null, link_id: null, status: 'disconnected', last_error: null }).eq('user_id', userId);
   return res.status(200).json({ status: 'disconnected' });
 }
 
