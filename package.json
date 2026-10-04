@@ -11,6 +11,8 @@
     "test:mobile": "node --experimental-vm-modules tests/mobile.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0"
+    "@playwright/test": "^1.63.0",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
   }
 }

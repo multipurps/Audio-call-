@@ -4,10 +4,13 @@ primary_region = "iad"
 [build]
   dockerfile = "Dockerfile"
 
+# Secrets (fly secrets set ...): BRIDGE_SECRET, ASSISTANT_BRIDGE_URL, ASSISTANT_BRIDGE_SECRET,
+# APP_API_URL, RELAY_CALLBACK_SECRET.  ASSISTANT_MODE=echo plays the caller's own voice back
+# (audio-path test, no assistant).
 [env]
   PORT = "8080"
   SIGNAL_DATA_DIR = "/data"
-  ASSISTANT_MODE = "echo"
+  ASSISTANT_MODE = "acaf"
 
 [mounts]
   source = "signal_data"

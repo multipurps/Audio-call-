@@ -3,7 +3,7 @@ import { resolveWhatsappStatus } from '../lib/whatsappStatus.js';
 import { describeSocialCallEnd } from '../lib/socialCallEnd.js';
 import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsPlaceAICall, wacallsHangup } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
-import { signalStartLink, signalLinkStatus, signalRemoveAccount } from '../lib/signalClient.js';
+import { signalStartLink, signalLinkStatus, signalRemoveAccount, signalPlaceCall, signalHangup } from '../lib/signalClient.js';
 import { resolvePersonSession } from '../lib/personSession.js';
 import {
   createCallRecord,
@@ -83,6 +83,8 @@ export default async function handler(req, res) {
 // Telegram call to that same number. Set RELAY_CALLBACK_SECRET the same on
 // both mp-relay and here for this to be checked, and APP_API_URL on mp-relay
 // to this app's real deployed domain.
+const PLATFORM_LABELS = { whatsapp: 'WhatsApp', telegram: 'Telegram', signal: 'Signal' };
+
 async function relayCallStatus(req, res, supabase) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const incomingSecret = req.headers?.['x-relay-secret'] || req.headers?.['x-internal-secret'];
@@ -125,7 +127,7 @@ async function relayCallStatus(req, res, supabase) {
   if ((!bodyUserId && !incomingCallId && !platformCallId) || (!peerIdentifier && !incomingCallId && !platformCallId) || !rawCallStatus) {
     return res.status(400).json({ error: 'userId (or callId), peerIdentifier (or callId) and status required' });
   }
-  if (!['whatsapp', 'telegram'].includes(platform)) return res.status(400).json({ error: 'platform must be whatsapp or telegram' });
+  if (!['whatsapp', 'telegram', 'signal'].includes(platform)) return res.status(400).json({ error: 'platform must be whatsapp, telegram or signal' });
 
   // A real chat-session uuid. WaCalls sends the app's own chat session id
   // here; the pipecat end-report and mp-relay send carrier bridge ids
@@ -259,7 +261,7 @@ async function relayCallStatus(req, res, supabase) {
       const neverConnected = describeSocialCallEnd({
         rawStatus: rawCallStatus, reason: rawReason,
         who: contactName || contactRow?.name || peerIdentifier || 'them',
-        channel: platform === 'whatsapp' ? 'WhatsApp' : 'Telegram',
+        channel: PLATFORM_LABELS[platform] || 'Telegram',
       });
       if (neverConnected) { callUpdate.outcome_summary = neverConnected; callUpdate.summary_status = 'skipped'; }
     }
@@ -339,7 +341,7 @@ async function relayCallStatus(req, res, supabase) {
 
   if (effectiveSessionId && transitionedToTerminal && userId) {
     const who = contactName || peerIdentifier || 'your contact';
-    const channelName = platform === 'whatsapp' ? 'WhatsApp' : 'Telegram';
+    const channelName = PLATFORM_LABELS[platform] || 'Telegram';
     const mins = durationSeconds ? Math.max(1, Math.round(durationSeconds / 60)) : null;
     let text;
     if (summaryResult?.status === 'completed' && summaryResult.summary) {
@@ -589,7 +591,7 @@ async function placeCall(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { platform, objective, instructions, contactId, contactName, sessionId } = req.body || {};
   const to = String(req.body?.to || req.body?.toNumber || '').trim();
-  if (platform !== 'telegram' && platform !== 'whatsapp') return res.status(400).json({ error: "platform must be 'telegram' or 'whatsapp'" });
+  if (platform !== 'telegram' && platform !== 'whatsapp' && platform !== 'signal') return res.status(400).json({ error: "platform must be 'telegram', 'whatsapp' or 'signal'" });
   if (!to) return res.status(400).json({ error: 'to required' });
 
   // Repeated button presses / retried requests must not dial twice.
@@ -650,6 +652,47 @@ async function placeCall(req, res, supabase, userId) {
         // relay's internal "no such session" wording.
         await supabase.from('whatsapp_accounts').update({ wacalls_session_id: null, status: 'disconnected', display_name: null }).eq('user_id', userId);
         const staleErr = new Error('WhatsApp session expired - please reconnect WhatsApp and try again');
+        staleErr.statusCode = 409;
+        throw staleErr;
+      }
+      throw err;
+    }
+  }
+
+  if (platform === 'signal') {
+    const { data: sgRow } = await supabase.from('signal_accounts').select('status, signal_number').eq('user_id', userId).maybeSingle();
+    if (sgRow?.status !== 'connected' || !sgRow.signal_number) {
+      const err = new Error('Signal not connected for this user');
+      err.statusCode = 400;
+      throw err;
+    }
+    // Same shape as WhatsApp: the `calls` row exists before dialing so the
+    // assistant can resolve "call-<signal call id>" back to it.
+    const person = await resolvePersonSession(supabase, userId, {
+      sessionId: sessionId || null, toNumber: to, contactId: contactId || null, label: contactName || null,
+    });
+    const effectiveSession = person.sessionId || sessionId || null;
+    const dbCall = await createCallRecord(supabase, userId, {
+      platform: 'signal',
+      toNumber: to,
+      objective: objective || '',
+      instructions: instructions || null,
+      contactId: contactId || null,
+      sessionId: effectiveSession,
+    });
+    try {
+      const started = await signalPlaceCall(sgRow.signal_number, to, { userId });
+      const platformCallId = started?.callId != null ? String(started.callId) : null;
+      await markCallPlaced(supabase, dbCall.id, { platformCallId });
+      return res.status(200).json({
+        callId: dbCall.id, dbCallId: dbCall.id, platformCallId, status: 'ringing',
+      });
+    } catch (err) {
+      await markCallFailed(supabase, dbCall.id);
+      if (err.statusCode === 404 || err.statusCode === 409) {
+        // The bridge no longer knows this account (e.g. its disk was reset): the link is dead.
+        await supabase.from('signal_accounts').update({ status: 'disconnected', signal_number: null, last_error: 'Signal session expired - reconnect Signal and try again' }).eq('user_id', userId);
+        const staleErr = new Error('Signal session expired - please reconnect Signal and try again');
         staleErr.statusCode = 409;
         throw staleErr;
       }
@@ -747,6 +790,8 @@ async function hangupSocialCall(req, res, supabase, userId) {
     }
   } else if (effectivePlatform === 'telegram' && effectivePlatformCallId) {
     await mpRelayRequest(`/calls/${effectivePlatformCallId}`, { method: 'DELETE' }).catch(() => {});
+  } else if (effectivePlatform === 'signal' && effectivePlatformCallId) {
+    await signalHangup(effectivePlatformCallId).catch(() => {});
   }
 
   if (call?.id) {

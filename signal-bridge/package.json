@@ -1,9 +1,9 @@
 {
   "name": "signal-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "server.mjs",
   "scripts": { "start": "node server.mjs" },
-  "dependencies": { "qrcode": "1.5.4" }
+  "dependencies": { "qrcode": "1.5.4", "ws": "8.18.0" }
 }
