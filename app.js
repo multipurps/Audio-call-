@@ -3302,11 +3302,14 @@ $('socialCallingBtn').addEventListener('click', () => { openSheet('sheet-social-
 
 // ---------- Connected accounts (Telegram / WhatsApp) ----------
 let whatsappLinking = false;
+let signalLinking = false;
 async function loadSocialAccounts() {
   $('telegramLoginForm').classList.add('hidden');
   $('telegramOtpForm').classList.add('hidden');
   // A refresh of the account list must not close the pairing pane mid-link.
   if (!whatsappLinking) $('whatsappQrWrap').classList.add('hidden');
+  if (!signalLinking) $('signalQrWrap').classList.add('hidden');
+  $('signalLoginError').textContent = '';
   $('telegramLoginError').textContent = '';
   $('whatsappLoginError').textContent = '';
   try {
@@ -3314,6 +3317,7 @@ async function loadSocialAccounts() {
     const data = await resp.json();
     renderTelegramStatus(data.telegram);
     renderWhatsappStatus(data.whatsapp);
+    renderSignalStatus(data.signal);
   } catch { /* leave defaults showing */ }
 }
 
@@ -3438,6 +3442,77 @@ async function startWhatsappLink() {
     watchWhatsappStatus();
   } catch (err) {
     $('whatsappLoginError').textContent = err.message;
+  }
+}
+
+// ---------- Signal (QR link through the signal-bridge) ----------
+let signalPollTimer = null;
+
+function renderSignalStatus(sg) {
+  const statusEl = $('signalAccountStatus');
+  const subEl = $('signalAccountSub');
+  const btn = $('signalConnectBtn');
+  if (sg?.status === 'connected') {
+    statusEl.textContent = 'Connected';
+    subEl.textContent = sg.phoneLast4 ? `Ending in ${sg.phoneLast4}` : '';
+    btn.textContent = 'Disconnect';
+    btn.onclick = async () => {
+      await authedFetch('/api/social-calling?action=signal-disconnect', { method: 'POST' });
+      subEl.textContent = '';
+      loadSocialAccounts();
+    };
+  } else {
+    statusEl.textContent = 'Not connected';
+    subEl.textContent = sg?.error || '';
+    btn.textContent = 'Connect';
+    btn.onclick = startSignalLink;
+  }
+}
+
+function stopSignalLinking() {
+  clearInterval(signalPollTimer);
+  signalLinking = false;
+  $('signalQrWrap').classList.add('hidden');
+}
+
+function watchSignalStatus() {
+  clearInterval(signalPollTimer);
+  const startedAt = Date.now();
+  signalPollTimer = setInterval(async () => {
+    try {
+      const r = await authedFetch('/api/social-calling?action=signal-status');
+      const d = await r.json();
+      if (d.status === 'connected') { stopSignalLinking(); loadSocialAccounts(); return; }
+      if (d.status === 'expired' || d.status === 'failed' || d.status === 'error' || d.status === 'disconnected') {
+        stopSignalLinking();
+        $('signalLoginError').textContent = d.status === 'failed' ? 'Linking failed. Tap Connect to try again.' : 'The code expired. Tap Connect to get a new one.';
+        return;
+      }
+    } catch { /* a network blip: keep waiting */ }
+    // Safety stop in case the server never reports the expiry.
+    if (Date.now() - startedAt > 150_000) {
+      stopSignalLinking();
+      $('signalLoginError').textContent = 'The code expired. Tap Connect to get a new one.';
+    }
+  }, 3000);
+}
+
+async function startSignalLink() {
+  signalLinking = true;
+  $('signalLoginError').textContent = 'Getting your code ready…';
+  $('signalQrWrap').classList.remove('hidden');
+  $('signalQrImg').removeAttribute('src');
+  try {
+    const resp = await authedFetch('/api/social-calling?action=signal-start', { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Could not start Signal link');
+    if (data.status === 'connected') { stopSignalLinking(); loadSocialAccounts(); return; }
+    $('signalLoginError').textContent = '';
+    $('signalQrImg').src = data.qr;
+    watchSignalStatus();
+  } catch (err) {
+    stopSignalLinking();
+    $('signalLoginError').textContent = err.message;
   }
 }
 

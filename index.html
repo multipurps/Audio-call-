@@ -948,6 +948,22 @@
       </div>
     </div>
     <div class="authHint" id="whatsappLoginError" style="margin-top:8px;"></div>
+
+    <div class="sectionLabel" style="margin-top:24px;">Signal <span class="hint">(beta)</span></div>
+    <div class="profileCard" id="signalAccountCard">
+      <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3C7 3 3 6.8 3 11.4c0 2.1.8 4 2.2 5.5L4.3 21l4.3-1.4c1 .3 2.2.5 3.4.5 5 0 9-3.8 9-8.4S17 3 12 3z" stroke="#3a76f0" stroke-width="1.8" stroke-linejoin="round"/></svg></div>
+      <div class="cBody">
+        <div class="cValue" id="signalAccountStatus">Not connected</div>
+        <div class="hint" id="signalAccountSub"></div>
+      </div>
+      <button class="secondaryBtn" id="signalConnectBtn" style="width:auto; flex:none; padding:9px 16px;">Connect</button>
+    </div>
+    <div id="signalQrWrap" class="hidden" style="margin-top:10px; text-align:center;">
+      <p class="hint">Signal only links by scanning a code with your phone's camera, so you need a second screen (a laptop, tablet or another phone) showing this page. Then on your phone: Signal → Settings → Linked devices → + and scan:</p>
+      <img id="signalQrImg" alt="Signal QR code" style="width:220px; height:220px; margin:10px auto; display:block; border-radius:12px; background:#fff; padding:8px;">
+      <p class="hint">The code expires in about 2 minutes.</p>
+    </div>
+    <div class="authHint" id="signalLoginError" style="margin-top:8px;"></div>
   </div>
 </div>
 
