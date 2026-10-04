@@ -3487,7 +3487,7 @@ let lineSetupVoluntary = false; // opened from Profile/menu (can go back) vs req
 const hint = (id, text) => { $(id).textContent = text || ''; };
 function stopLinePolls() { clearInterval(lineVerifyTimer); clearInterval(lineWaTimer); lineVerifyTimer = lineWaTimer = null; }
 
-function showAuthPanel(id) {
+function showSetupPanel(id) {
   $('authBoot').style.display = 'none';
   $('pendingBox').style.display = 'none';
   document.querySelectorAll('.authPanel').forEach((p) => p.classList.toggle('active', p.id === id));
@@ -3569,7 +3569,7 @@ function showLineSetup() {
   const usable = lineState.line && ['verified', 'rented'].includes(lineState.line.status);
   $('lineCurrentRow').classList.toggle('hidden', !(lineSetupVoluntary && usable));
   if (usable) $('lineCurrentNum').textContent = lineState.line.phoneNumber;
-  showAuthPanel('panelLineSetup');
+  showSetupPanel('panelLineSetup');
   // A verification call may still be waiting from before a reload.
   if (!lineSetupVoluntary && lineState.line?.status === 'pending' && lineState.line.mode === 'own') showLineCode(lineState.line);
 }
@@ -3597,7 +3597,7 @@ function showLineCode(line) {
   $('lineCodeSub').textContent = `You will get a call on ${line.phoneNumber}. Answer it and enter this code on your keypad.`;
   $('lineCodeValue').textContent = (line.validationCode || '').split('').join(' ') || '------';
   hint('lineCodeHint', 'Waiting for you to enter the code…');
-  showAuthPanel('panelLineCode');
+  showSetupPanel('panelLineCode');
   clearInterval(lineVerifyTimer);
   let tries = 0;
   lineVerifyTimer = setInterval(async () => {
@@ -3639,7 +3639,7 @@ $('lineRentBtn').addEventListener('click', () => {
   (rent.countries || []).forEach((c) => { const o = document.createElement('option'); o.value = c; o.textContent = countryName(c); sel.appendChild(o); });
   $('rentResults').textContent = '';
   hint('rentHint', '');
-  showAuthPanel('panelRent');
+  showSetupPanel('panelRent');
 });
 $('rentBack').addEventListener('click', showLineSetup);
 $('rentSearchBtn').addEventListener('click', async () => {
@@ -3674,9 +3674,9 @@ $('rentSearchBtn').addEventListener('click', async () => {
 });
 
 // -- WhatsApp: number page, then a separate page with the pairing code
-$('lineWaBtn').addEventListener('click', () => { hint('waNumHint', ''); showAuthPanel('panelWaNumber'); });
+$('lineWaBtn').addEventListener('click', () => { hint('waNumHint', ''); showSetupPanel('panelWaNumber'); });
 $('waNumBack').addEventListener('click', showLineSetup);
-$('waCodeBack').addEventListener('click', () => { stopLinePolls(); showAuthPanel('panelWaNumber'); });
+$('waCodeBack').addEventListener('click', () => { stopLinePolls(); showSetupPanel('panelWaNumber'); });
 $('waNumSubmit').addEventListener('click', async () => {
   const phone = $('waNumInput').value.trim();
   if (!phone) { hint('waNumHint', 'Enter your WhatsApp number first.'); return; }
@@ -3692,7 +3692,7 @@ $('waNumSubmit').addEventListener('click', async () => {
     const showCode = (code) => { $('waCodeValue').textContent = code.split('').join(' '); };
     $('waCodeValue').textContent = '— — — — — — — —';
     hint('waCodeHint', 'Waiting for you to link…');
-    showAuthPanel('panelWaCode');
+    showSetupPanel('panelWaCode');
     if (data.pairingCode) showCode(data.pairingCode);
     clearInterval(lineWaTimer);
     lineWaTimer = setInterval(async () => {
@@ -3726,7 +3726,7 @@ function showProfileSetup() {
   }
   if (!$('psName').value) $('psName').value = currentUser?.user_metadata?.full_name || currentUser?.user_metadata?.name || '';
   hint('psHint', '');
-  showAuthPanel('panelProfileSetup');
+  showSetupPanel('panelProfileSetup');
 }
 $('psRecordBtn').addEventListener('click', () => toggleVoiceRecording($('psRecordBtn'), $('psHint')));
 $('psUploadBtn').addEventListener('click', () => { voiceUploadStatusEl = $('psHint'); $('voiceFileInput').click(); });
