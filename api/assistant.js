@@ -701,9 +701,9 @@ async function sendMessage(req, res, supabase, userId) {
           sessionId,
         });
       };
-      const markSocialRowFailed = async (callRow) => {
+      const markSocialRowFailed = async (callRow, reason) => {
         if (!callRow) return;
-        await markCallFailed(supabase, callRow.id);
+        await markCallFailed(supabase, callRow.id, reason);
         await supabase.from('social_calls')
           .update({ status: 'failed' })
           .eq('user_id', userId)
@@ -776,7 +776,7 @@ async function sendMessage(req, res, supabase, userId) {
         newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `Calling ${label} on ${channelName} ${verb}.`, callRow.id, msgSource));
         return respond({ channelUsed: callChannel, callId: callRow.id, toNumber: digitsOnly, contactName: contact?.name || null });
       } catch (err) {
-        await markSocialRowFailed(callRow);
+        await markSocialRowFailed(callRow, err.message);
         newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${label} on ${channelName}: ${err.message}`, callRow?.id || null, msgSource));
         return respond({ channelUsed: callChannel });
       }

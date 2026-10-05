@@ -644,7 +644,7 @@ async function placeCall(req, res, supabase, userId) {
         aiAttached: placed.aiAttached,
       });
     } catch (err) {
-      await markCallFailed(supabase, dbCall.id);
+      await markCallFailed(supabase, dbCall.id, err.message);
       if (err.statusCode === 404) {
         // Stored id is dead (e.g. relay storage was reset since pairing) -
         // clear it so the account shows "disconnected" instead of silently
@@ -688,7 +688,7 @@ async function placeCall(req, res, supabase, userId) {
         callId: dbCall.id, dbCallId: dbCall.id, platformCallId, status: 'ringing',
       });
     } catch (err) {
-      await markCallFailed(supabase, dbCall.id);
+      await markCallFailed(supabase, dbCall.id, err.message);
       if (err.statusCode === 404 || err.statusCode === 409) {
         // The bridge no longer knows this account (e.g. its disk was reset): the link is dead.
         await supabase.from('signal_accounts').update({ status: 'disconnected', signal_number: null, last_error: 'Signal session expired - reconnect Signal and try again' }).eq('user_id', userId);
@@ -744,7 +744,7 @@ async function placeCall(req, res, supabase, userId) {
       status: data?.status || 'ringing',
     });
   } catch (err) {
-    await markCallFailed(supabase, dbCall.id);
+    await markCallFailed(supabase, dbCall.id, err.message);
     if (err.statusCode === 401) {
       await supabase
         .from('telegram_accounts')

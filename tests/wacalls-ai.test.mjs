@@ -173,3 +173,15 @@ test('if the history lookup itself fails, the failure is still reported (after o
   assert.match(res.data.error, /assistant could not join/);
   assert.equal(f.db.tables.whatsapp_accounts[0].wacalls_session_id, 'wa-sess-1');
 });
+
+test('a failed WhatsApp call keeps the real reason on its row so the call screen can show it', async () => {
+  const f = fixture({
+    start: ok({ call: { callId: 'call-11' } }),
+    attach: fail(404, 'no such call'),
+    history: ok({ rows: [{ callId: 'call-11', endedAt: 1, endReason: 'busy' }] }),
+  });
+  await place(f);
+  const row = (f.db.tables.calls || []).find((c) => c.status === 'failed');
+  assert.ok(row, 'call row should be marked failed');
+  assert.match(row.outcome_summary, /busy/);
+});
