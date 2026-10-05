@@ -401,12 +401,16 @@ class CallContext:
                 "contactName": self.contact_name or None,
             }
             try:
-                resp = await httpx.AsyncClient(timeout=6.0).post(
-                    f"{settings.public_app_url.rstrip('/')}/api/social-calling"
-                    "?action=relay-call-status",
-                    json=body,
-                    headers={"X-Relay-Secret": settings.bridge_secret or ""},
-                )
+                # The app generates the call summary (a model call, several seconds, up to ~40s) inside this
+                # request, so the wait must be generous: this runs as a background task and never blocks the
+                # call from stopping. Closing the client also stops leaking a connection per call.
+                async with httpx.AsyncClient(timeout=httpx.Timeout(75.0, connect=8.0)) as client:
+                    resp = await client.post(
+                        f"{settings.public_app_url.rstrip('/')}/api/social-calling"
+                        "?action=relay-call-status",
+                        json=body,
+                        headers={"X-Relay-Secret": settings.bridge_secret or ""},
+                    )
                 _log(
                     "INFO",
                     self.session_id,
@@ -415,7 +419,17 @@ class CallContext:
                     status=status,
                 )
                 return
-            except Exception as exc:  # noqa: BLE001 - fall through to direct write
+            except (httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout) as exc:
+                # The request reached the app, which is still working (summary, chat message). Writing the
+                # status behind its back would mark the call finished WITHOUT a summary, so do not.
+                _log(
+                    "WARNING",
+                    self.session_id,
+                    "app end report is taking long; leaving the call to the app (no direct status write)",
+                    error=type(exc).__name__,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001 - could not reach the app at all: fall through to direct write
                 _log(
                     "WARNING",
                     self.session_id,

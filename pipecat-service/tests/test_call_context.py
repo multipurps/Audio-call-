@@ -287,6 +287,69 @@ class TestEndReport:
         assert rest.patches and rest.patches[0][2]["status"] == "failed"
 
 
+class _FakeHttpxClient:
+    """Stands in for httpx.AsyncClient: records posts and can raise instead of answering."""
+
+    posts: list = []
+    raises: Exception | None = None
+
+    def __init__(self, *a, **kw):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def post(self, url, json=None, headers=None):
+        type(self).posts.append((url, json, headers))
+        if type(self).raises is not None:
+            raise type(self).raises
+
+        class _Resp:
+            status_code = 200
+
+        return _Resp()
+
+
+class TestEndReportToApp:
+    """The app generates the summary while handling the end report, so a slow answer must never be
+    mistaken for a failure that makes the service write the status behind the app's back."""
+
+    def _setup(self, monkeypatch, raises=None):
+        import httpx
+
+        monkeypatch.setattr(cc, "END_REPORT_DELAY_SECS", 0.0)
+        _FakeHttpxClient.posts = []
+        _FakeHttpxClient.raises = raises
+        monkeypatch.setattr(cc.httpx, "AsyncClient", _FakeHttpxClient)
+        rest = FakeRest({"calls": [{"status": "in_progress"}]})
+        ctx = make_context(rest=rest, platform="app")
+        settings = Settings(bridge_secret="x" * 32, public_app_url="https://app.example")
+        return httpx, rest, ctx, settings
+
+    async def test_reports_to_the_app_with_the_call_id_and_does_not_write_status(self, monkeypatch):
+        _, rest, ctx, settings = self._setup(monkeypatch)
+        await ctx.report_end(settings=settings, status="completed", duration_seconds=75, active=True)
+        url, body, headers = _FakeHttpxClient.posts[0]
+        assert url.endswith("/api/social-calling?action=relay-call-status")
+        assert body["status"] == "completed" and body["platform"] == "app" and body["callId"]
+        assert rest.patches == []
+
+    async def test_slow_app_is_not_a_failure_and_status_is_not_written_directly(self, monkeypatch):
+        httpx, rest, ctx, settings = self._setup(monkeypatch)
+        _FakeHttpxClient.raises = httpx.ReadTimeout("slow")
+        await ctx.report_end(settings=settings, status="completed", duration_seconds=75, active=True)
+        assert rest.patches == [], "writing the status here would finish the call without its summary"
+
+    async def test_unreachable_app_still_gets_the_status_written_directly(self, monkeypatch):
+        httpx, rest, ctx, settings = self._setup(monkeypatch)
+        _FakeHttpxClient.raises = httpx.ConnectError("down")
+        await ctx.report_end(settings=settings, status="completed", duration_seconds=75, active=True)
+        assert rest.patches and rest.patches[0][2]["status"] == "completed"
+
+
 def test_session_id_candidates_strip_call_prefix():
     assert cc._session_id_candidates("call-abc-123") == ["call-abc-123", "abc-123"]
     assert cc._session_id_candidates("abc-123") == ["abc-123"]

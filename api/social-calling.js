@@ -15,6 +15,7 @@ import {
   maybeGenerateCallSummary,
   formatSummaryForChat,
   waitForCallSummary,
+  postCallChatMessage,
 } from '../lib/callSession.js';
 
 // Telegram + WhatsApp account linking and calling, combined into one file
@@ -369,8 +370,7 @@ async function relayCallStatus(req, res, supabase) {
     } else {
       text = `Couldn't complete the call with ${who} on ${channelName}.`;
     }
-    await supabase.from('assistant_messages').insert({ user_id: userId, session_id: effectiveSessionId, role: 'assistant', content: text, call_id: call?.id || null, source: 'text' });
-    await supabase.from('chat_sessions').update({ updated_at: new Date().toISOString() }).eq('id', effectiveSessionId);
+    await postCallChatMessage(supabase, { userId, sessionId: effectiveSessionId, callId: call?.id || null, text });
   }
 
   return res.status(200).json({ ok: true, callId: call?.id || null, summary: summaryResult?.status || null });
