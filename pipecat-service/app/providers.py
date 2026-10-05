@@ -175,11 +175,6 @@ DEFAULT_STT_PROMPT = (
 )
 
 
-#: Languages Deepgram nova-3 can be pinned to. Others (Hausa, Yoruba, Igbo, ...)
-#: fall back to its multilingual mode rather than guessing one wrongly.
-_DEEPGRAM_LANGS = {"en", "es", "fr", "pt", "de", "hi", "zh", "ar"}
-
-
 def build_stt(settings: Settings, language: str | None = None) -> Any:
     """Construct the STT service, or a mock when in mock mode."""
     if settings.mock_mode or settings.stt_provider == "mock":
@@ -202,22 +197,6 @@ def build_stt(settings: Settings, language: str | None = None) -> Any:
                 model=settings.resolved_stt_model(),
                 prompt=settings.stt_prompt or DEFAULT_STT_PROMPT,
                 temperature=0.0,
-            ),
-        )
-
-    if settings.stt_provider == "deepgram":
-        from pipecat.services.deepgram.stt import DeepgramSTTService
-
-        # Streaming WebSocket STT: interim results flow while the caller is
-        # still speaking and the final transcript lands right after VAD stop,
-        # unlike OpenAI's batch API which only starts transcribing at turn end.
-        return DeepgramSTTService(
-            api_key=settings.deepgram_api_key,
-            settings=DeepgramSTTService.Settings(
-                model=settings.resolved_stt_model(),
-                punctuate=True,
-                interim_results=True,
-                language=(language if language in _DEEPGRAM_LANGS else "multi") if language else "en",
             ),
         )
 

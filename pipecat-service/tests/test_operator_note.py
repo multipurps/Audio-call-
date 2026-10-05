@@ -73,9 +73,3 @@ def test_call_prompt_pins_the_users_language():
     )
     text = build_extra_context(ctx)
     assert "Speak only Yoruba" in text and "mis-hearing" in text
-
-
-def test_stt_language_follows_setting_and_falls_back_to_multi():
-    from app.providers import _DEEPGRAM_LANGS
-
-    assert "de" in _DEEPGRAM_LANGS and "yo" not in _DEEPGRAM_LANGS

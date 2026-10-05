@@ -667,6 +667,14 @@ MAX_NOTE_CHARS = 1000
 class CallConversation(_BaseConversation):
     """Runs the real Pipecat pipeline for one bridged call."""
 
+    # Class-level defaults so a bare instance (tests build one with __new__)
+    # behaves as a classic call.
+    engine: str = "classic"
+    _live_state: Any = None
+    _llm: Any = None
+    _switching: bool = False
+    _watchdog: Any = None
+
     def __init__(
         self,
         *,
@@ -679,6 +687,7 @@ class CallConversation(_BaseConversation):
         services: tuple[Any, Any, Any, Any] | None = None,
         platform: str | None = None,
         user_id: str | None = None,
+        live_llm: Any = None,
     ) -> None:
         super().__init__(
             settings=settings,
@@ -691,6 +700,16 @@ class CallConversation(_BaseConversation):
         self._send_control = send_control
         self._on_ended = on_ended
         self._services = services
+        #: "live" (GPT-Live) or "classic" (STT -> LLM -> Fish); decided per call.
+        self.engine = settings.engine_for_call() if services is None else "classic"
+        self._live_llm_override = live_llm
+        self._live_state: Any = None
+        self._llm: Any = None
+        self._extra_context: str | None = None
+        self._rate: int = settings.bridge_sample_rate
+        self._pending_notes: list[str] = []
+        self._switching = False
+        self._watchdog: asyncio.Task[None] | None = None
 
         self._task: Any = None
         self._runner: Any = None
@@ -705,11 +724,6 @@ class CallConversation(_BaseConversation):
         self._mute_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
-        from pipecat.pipeline.runner import PipelineRunner
-        from pipecat.pipeline.task import PipelineParams, PipelineTask
-
-        from app.pipeline import build_llm_context, build_pipeline
-
         # Resolve the app's `calls` row before the pipeline exists: it is
         # the source of the per-call objective/person context for the system
         # prompt AND the id every live transcript write lands on. The row is
@@ -761,18 +775,71 @@ class CallConversation(_BaseConversation):
         )
         holder["out"] = self._output
 
-        self._context = build_llm_context()
         _LIVE_CONVERSATIONS[self._session_id] = self
-        pipeline, _llm = build_pipeline(
-            settings=self._settings,
-            transport=_TransportShim(BridgeInput(), self._output),
-            context=self._context,
-            extra_context=extra_context,
-            services=self._services,
-            on_end_call=self._schedule_assistant_hangup,
-            transcript=self.transcript,
-            language=self.call_context.language if self.call_context else None,
+        self._extra_context = extra_context
+        self._rate = rate
+        self._started_at = time.monotonic()
+        if self.engine == "classic":
+            await self._launch_pipeline()
+        # engine == "live": the GPT-Live socket and session are opened when the
+        # callee ANSWERS (see _speak_greeting), so nothing is connected - or billed -
+        # while the phone is still ringing.
+        if self.call_context is not None:
+            self._mute_task = asyncio.create_task(
+                self._poll_ai_muted(), name=f"mute-poll-{self._session_id}"
+            )
+        clog(
+            "INFO",
+            self._session_id,
+            "pipeline started" if self.engine == "classic" else "call ready; live session opens on answer",
+            bridgeSampleRate=rate,
+            engine=self.engine,
+            contextResolved=bool(self.call_context),
         )
+
+    async def _launch_pipeline(self) -> None:
+        """Build and start the Pipecat pipeline (once)."""
+        if self._task is not None:
+            return
+        from pipecat.pipeline.runner import PipelineRunner
+        from pipecat.pipeline.task import PipelineParams, PipelineTask
+
+        from app.pipeline import build_llm_context, build_pipeline
+
+        extra_context = self._extra_context
+        rate = self._rate
+        if self.engine == "live":
+            from app.live import (
+                LiveCallState,
+                build_live_context,
+                build_live_pipeline,
+                build_live_system_prompt,
+            )
+
+            self._live_state = LiveCallState()
+            self._context = build_live_context()
+            pipeline, self._llm = build_live_pipeline(
+                settings=self._settings,
+                transport=_TransportShim(BridgeInput(), self._output),
+                context=self._context,
+                system_instruction=build_live_system_prompt(self._settings, extra_context),
+                transcript=self.transcript,
+                state=self._live_state,
+                on_end_call=self._schedule_assistant_hangup,
+                llm=self._live_llm_override,
+            )
+        else:
+            self._context = build_llm_context()
+            pipeline, self._llm = build_pipeline(
+                settings=self._settings,
+                transport=_TransportShim(BridgeInput(), self._output),
+                context=self._context,
+                extra_context=extra_context,
+                services=self._services,
+                on_end_call=self._schedule_assistant_hangup,
+                transcript=self.transcript,
+                language=self.call_context.language if self.call_context else None,
+            )
         self._task = PipelineTask(
             pipeline,
             params=PipelineParams(audio_in_sample_rate=rate, audio_out_sample_rate=rate),
@@ -789,18 +856,68 @@ class CallConversation(_BaseConversation):
         # frame is queued.
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self._output.started_event.wait(), timeout=2.0)
-        self._started_at = time.monotonic()
-        if self.call_context is not None:
-            self._mute_task = asyncio.create_task(
-                self._poll_ai_muted(), name=f"mute-poll-{self._session_id}"
-            )
-        clog(
-            "INFO",
-            self._session_id,
-            "pipeline started",
-            bridgeSampleRate=rate,
-            contextResolved=bool(self.call_context),
-        )
+
+    async def _live_startup_watchdog(self) -> None:
+        """If the GPT-Live session never starts (no access on this key, API down, bad
+        config), the callee would hear silence for the whole call. Switch this call to
+        the classic pipeline instead, so a failure here costs seconds, not the call."""
+        state = self._live_state
+        deadline = time.monotonic() + self._settings.live_start_timeout_secs
+        while not self._stopped and time.monotonic() < deadline:
+            if state is not None and state.session_started:
+                return
+            await asyncio.sleep(0.1)
+        if self._stopped or (state is not None and state.session_started):
+            return
+        clog("ERROR", self._session_id, "gpt-live session did not start; falling back to classic engine")
+        await self._fallback_to_classic()
+
+    async def _fallback_to_classic(self) -> None:
+        if self._stopped or self.engine != "live":
+            return
+        self._switching = True
+        try:
+            old_task, old_run = self._task, self._run_task
+            self.engine = "classic"
+            self._live_state = None
+            self._llm = None
+            self._task = None
+            self._run_task = None
+            self._context = None
+            if old_task is not None:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(old_task.cancel(), timeout=5.0)
+            if old_run is not None:
+                try:
+                    await asyncio.wait_for(old_run, timeout=5.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError, Exception):  # noqa: BLE001
+                    old_run.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await old_run
+            await self._launch_pipeline()
+        finally:
+            self._switching = False
+        if not self._stopped:
+            await self._speak_greeting()
+            clog("INFO", self._session_id, "classic engine took over the call")
+
+    async def _flush_pending_notes(self) -> None:
+        """Deliver notes added while the phone was ringing, once the session is up."""
+        from app.live import send_private_note
+
+        state = self._live_state
+        for _ in range(100):  # up to ~10 s for the session to start
+            if self._stopped or (state is not None and state.session_started):
+                break
+            await asyncio.sleep(0.1)
+        notes, self._pending_notes = self._pending_notes, []
+        for note in notes:
+            if self._stopped:
+                return
+            try:
+                await send_private_note(self._llm, OPERATOR_NOTE_PREFIX + note)
+            except Exception as exc:  # noqa: BLE001 - a lost note must not hurt the call
+                clog("WARNING", self._session_id, "queued note not delivered", error=type(exc).__name__)
 
     async def _poll_ai_muted(self) -> None:
         """Keep the recipient-side mute flag fresh (one cheap select / 3 s).
@@ -822,7 +939,33 @@ class CallConversation(_BaseConversation):
             return
         asyncio.create_task(self._graceful_assistant_hangup())
 
+    async def _live_goodbye_wait(self) -> None:
+        """GPT-Live streams audio (silence included) at real-time pace all call, so
+        "the sender is idle" never happens. Wait instead until the model has spoken
+        its goodbye (text stopped for a moment), bounded so a call never hangs open."""
+        state = self._live_state
+        t0 = time.monotonic()
+        deadline = t0 + 10.0
+        while not self._stopped and time.monotonic() < deadline:
+            now = time.monotonic()
+            spoke_after = state.last_ai_text_at > t0
+            if spoke_after and state.ai_idle_secs(now) >= 1.5:
+                break
+            if not spoke_after and now - t0 >= 3.5:
+                break  # the goodbye was already said before the tool ran
+            await asyncio.sleep(0.1)
+        await asyncio.sleep(0.8)  # let the last audio reach the callee
+
     async def _graceful_assistant_hangup(self) -> None:
+        if self._live_state is not None:
+            await self._live_goodbye_wait()
+            if self._stopped:
+                return
+            clog("INFO", self._session_id, "assistant requested call termination")
+            with contextlib.suppress(Exception):
+                await self._send_control('{"type":"hangup","reason":"assistant-ended-call"}')
+            await self.stop("assistant-ended-call")
+            return
         # Allow final goodbye audio to be enqueued and drained before hanging up
         await asyncio.sleep(0.4)
         deadline = time.monotonic() + 8.0
@@ -857,7 +1000,7 @@ class CallConversation(_BaseConversation):
             )
         finally:
             clog("INFO", self._session_id, "pipeline ended", reason=reason)
-            if not self._stopped and self._on_ended is not None:
+            if not self._stopped and not self._switching and self._on_ended is not None:
                 with contextlib.suppress(Exception):
                     await self._on_ended(reason)
 
@@ -869,8 +1012,29 @@ class CallConversation(_BaseConversation):
         her next turn. Returns False if the call is not in a state to take it.
         """
         clean = " ".join((text or "").split())[:MAX_NOTE_CHARS]
-        if not clean or self._stopped or self._context is None:
+        if not clean or self._stopped:
             return False
+        if self.engine == "live" and self._context is None:
+            # Still ringing: the live session does not exist yet. Hold the note
+            # and deliver it as soon as the session starts.
+            self._pending_notes.append(clean)
+            return True
+        if self._context is None:
+            return False
+        if self._live_state is not None and self._llm is not None:
+            # A live session's instructions are fixed, so the note goes in on the
+            # model's private "thinking" channel (it uses it, never reads it out).
+            from app.live import send_private_note
+
+            async def _send() -> None:
+                try:
+                    await send_private_note(self._llm, OPERATOR_NOTE_PREFIX + clean)
+                except Exception as exc:  # noqa: BLE001 - a lost note must not hurt the call
+                    clog("WARNING", self._session_id, "operator note not delivered", error=type(exc).__name__)
+
+            asyncio.create_task(_send(), name=f"operator-note-{self._session_id}")
+            clog("INFO", self._session_id, "operator note sent to live session", chars=len(clean))
+            return True
         self._context.add_message(
             {"role": "system", "content": OPERATOR_NOTE_PREFIX + clean}
         )
@@ -901,7 +1065,28 @@ class CallConversation(_BaseConversation):
         await self._task.queue_frame(frame)
 
     async def _speak_greeting(self) -> None:
-        if self._task is None:
+        if self.engine != "live" and self._task is None:
+            return
+        if self.engine == "live":
+            # GPT-Live: the session starts now (not while the phone rings, so
+            # ringing time is never billed). A trailing developer message is how
+            # the service asks the model to speak first, in its own words.
+            from app.live import opening_cue
+
+            await self._launch_pipeline()
+            if self._context is None or self._task is None:
+                return
+            self._context.add_message(
+                {"role": "developer", "content": opening_cue(self._settings.greeting)}
+            )
+            await self._task.queue_frame(LLMRunFrame())
+            clog("INFO", self._session_id, "live model opening the call")
+            if self._live_llm_override is None:  # tests inject their own service
+                self._watchdog = asyncio.create_task(
+                    self._live_startup_watchdog(), name=f"live-watchdog-{self._session_id}"
+                )
+            if self._pending_notes:
+                asyncio.create_task(self._flush_pending_notes(), name=f"pending-notes-{self._session_id}")
             return
         # Default: the model opens the call itself, as the person it speaks
         # as, guided by that person's private brief already in its system
@@ -933,6 +1118,9 @@ class CallConversation(_BaseConversation):
         self._stopped = True
         if _LIVE_CONVERSATIONS.get(self._session_id) is self:
             _LIVE_CONVERSATIONS.pop(self._session_id, None)
+        watchdog, self._watchdog = self._watchdog, None
+        if watchdog is not None and watchdog is not asyncio.current_task():
+            watchdog.cancel()
         mute_task, self._mute_task = self._mute_task, None
         if mute_task is not None:
             mute_task.cancel()
@@ -1020,6 +1208,7 @@ class CallConversation(_BaseConversation):
             "inboundFrames": self._meter.frames,
             "callActiveSource": self.call_active_source or "none",
             "contextResolved": self.call_context is not None,
+            "engine": self.engine,
         }
         if self.transcript is not None:
             out["transcriptWrites"] = self.transcript.writes

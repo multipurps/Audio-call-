@@ -50,9 +50,6 @@ services:
         sync: false
       - key: FISH_API_KEY
         sync: false
-      # Only needed if ASSISTANT_STT_PROVIDER=deepgram (streaming STT).
-      - key: DEEPGRAM_API_KEY
-        sync: false
 
       # --- Non-secret configuration ---------------------------------------
       - key: ASSISTANT_STT_PROVIDER
@@ -61,6 +58,10 @@ services:
         value: luna
       - key: ASSISTANT_TTS_PROVIDER
         value: fish
+      # auto = GPT-Live, except calls that carry the user's cloned voice (Fish).
+      # classic = old STT -> Luna -> Fish pipeline for every call (kill switch).
+      - key: ASSISTANT_CALL_ENGINE
+        value: auto
       - key: ASSISTANT_BRIDGE_SAMPLE_RATE
         value: "16000"
       - key: ASSISTANT_IDLE_TIMEOUT_SECS
