@@ -14,11 +14,14 @@ self.addEventListener('push', (e) => {
       body: data.body,
       icon: './icon-192.png',
       badge: './icon-192.png',
+      tag: data.tag || undefined,
+      data: { url: data.url || './index.html' },
     })
   );
 });
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  e.waitUntil(clients.openWindow('./index.html'));
+  const url = (e.notification.data && e.notification.data.url) || './index.html';
+  e.waitUntil(clients.openWindow(url));
 });
