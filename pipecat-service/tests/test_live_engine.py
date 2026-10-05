@@ -210,6 +210,15 @@ def test_engine_routing():
         load_settings({**base, "ASSISTANT_CALL_ENGINE": "banana"}).validate({})
 
 
+def test_stale_deepgram_env_does_not_stop_the_service_booting():
+    env = {"ASSISTANT_BRIDGE_SECRET": "x" * 32, "OPENAI_API_KEY": "sk-test-key-value-123456", "FISH_API_KEY": "fk_test_key_value_123456",
+           "ASSISTANT_STT_PROVIDER": "deepgram", "ASSISTANT_STT_MODEL": "nova-3-general", "DEEPGRAM_API_KEY": "dg_x"}
+    s = load_settings(env)
+    s.validate(env)
+    assert s.stt_provider == "openai"
+    assert s.resolved_stt_model() == "gpt-4o-mini-transcribe", "a Deepgram model name must not reach OpenAI"
+
+
 def test_deepgram_is_gone():
     from app import config
 

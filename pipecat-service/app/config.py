@@ -75,6 +75,18 @@ class ConfigError(RuntimeError):
     """Raised for invalid or missing configuration. Always fatal at startup."""
 
 
+def _normalise_stt_provider(value: str | None) -> str:
+    """Deepgram was removed. A deployment that still says "deepgram" keeps working on
+    OpenAI STT instead of refusing to boot (a stale env var must not take calls down)."""
+    provider = (value or DEFAULT_STT_PROVIDER).strip().lower()
+    if provider == "deepgram":
+        from loguru import logger
+
+        logger.warning("ASSISTANT_STT_PROVIDER=deepgram is no longer supported; using openai")
+        return "openai"
+    return provider or DEFAULT_STT_PROVIDER
+
+
 def _env(env: Mapping[str, str], key: str, default: str | None = None) -> str | None:
     value = env.get(key)
     if value is None:
@@ -442,9 +454,11 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ),
         send_lead_secs=_env_float(env, "ASSISTANT_SEND_LEAD_SECS", 0.2, minimum=0.02),
         max_frame_bytes=_env_int(env, "ASSISTANT_MAX_FRAME_BYTES", 64 * 1024, minimum=64),
-        stt_provider=_env(env, "ASSISTANT_STT_PROVIDER", DEFAULT_STT_PROVIDER)
-        or DEFAULT_STT_PROVIDER,
-        stt_model=_env(env, "ASSISTANT_STT_MODEL"),
+        stt_provider=_normalise_stt_provider(_env(env, "ASSISTANT_STT_PROVIDER", DEFAULT_STT_PROVIDER)),
+        # A Deepgram model name (e.g. nova-3-general) means nothing to OpenAI STT.
+        stt_model=None
+        if (_env(env, "ASSISTANT_STT_PROVIDER") or "").lower() == "deepgram"
+        else _env(env, "ASSISTANT_STT_MODEL"),
         llm_provider=_env(env, "ASSISTANT_LLM_PROVIDER", default_llm_prov)
         or default_llm_prov,
         llm_model=_env(env, "ASSISTANT_LLM_MODEL") or _env(env, "LUNA_MODEL") or _env(env, "LLM_MODEL"),
