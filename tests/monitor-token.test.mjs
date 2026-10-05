@@ -99,7 +99,7 @@ test('monitor-token reports missing configuration honestly', async () => {
   const f = await setup({ OPENAI_API_KEY: 'test-only' });
   const res = await request(f.handler, 'monitor-token', { callId: 'call-live' });
   assert.equal(res.code, 501);
-  assert.match(res.data.error, /not configured/i);
+  assert.match(res.data.error, /not set up/i);
 });
 
 test('monitor-token requires authentication and a call id', async () => {
@@ -107,4 +107,34 @@ test('monitor-token requires authentication and a call id', async () => {
   assert.equal((await request(f.handler, 'monitor-token', { callId: 'call-live' }, { auth: false })).code, 401);
   assert.equal((await request(f.handler, 'monitor-token', {})).code, 400);
   assert.equal((await request(f.handler, 'monitor-token', { callId: 'call-live' }, { method: 'GET' })).code, 405);
+});
+
+test('plain ws:// URL is refused with a clear reason (HTTPS pages cannot open it)', async () => {
+  const { handler, call } = await (async () => {
+    const f = fixture();
+    const api = await loadApi('api/calls.js', f.db || f, async () => ({ ok: true, json: async () => ({}) }), { ...ENV, PUBLIC_ASSISTANT_WS_URL: 'ws://assistant.test/stream' });
+    return { handler: api.default, call: f };
+  })();
+  const res = await request(handler, 'monitor-token', { callId: 'call-live' });
+  assert.equal(res.code, 501);
+  assert.equal(res.data.code, 'insecure-url');
+  assert.match(res.data.error, /wss:\/\//);
+});
+
+test('https:// shorthand is upgraded to wss://', async () => {
+  const f = fixture();
+  const api = await loadApi('api/calls.js', f.db || f, async () => ({ ok: true, json: async () => ({}) }), { ...ENV, PUBLIC_ASSISTANT_WS_URL: 'https://assistant.test/stream' });
+  const res = await request(api.default, 'monitor-token', { callId: 'call-live' });
+  assert.equal(res.code, 200);
+  assert.match(res.data.url, /^wss:\/\/assistant\.test\/monitor\/call-42\?token=/);
+});
+
+test('missing secret and missing URL name the exact variable', async () => {
+  const f = fixture();
+  const noSecret = await loadApi('api/calls.js', f.db || f, async () => ({}), { ...ENV, ASSISTANT_BRIDGE_SECRET: '' });
+  const r1 = await request(noSecret.default, 'monitor-token', { callId: 'call-live' });
+  assert.equal(r1.data.code, 'missing-secret');
+  const noUrl = await loadApi('api/calls.js', f.db || f, async () => ({}), { ...ENV, PUBLIC_ASSISTANT_WS_URL: '', ASSISTANT_BRIDGE_URL: '' });
+  const r2 = await request(noUrl.default, 'monitor-token', { callId: 'call-live' });
+  assert.equal(r2.data.code, 'missing-url');
 });

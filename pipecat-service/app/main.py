@@ -254,14 +254,31 @@ async def _handle_monitor(session_id: str, websocket: WebSocket, state: ServiceS
                 "monitor auth refused",
                 extra={"sessionId": session_id, "reason": str(exc)},
             )
+            # Accept first so the browser can read WHY. A handshake that is
+            # refused before accept() only surfaces as an opaque close (1006)
+            # and the app could not tell a bad secret from an unreachable host.
             with contextlib.suppress(Exception):
+                await websocket.accept()
+                await websocket.send_json(
+                    {"type": "error", "reason": "auth-refused", "detail": str(exc)}
+                )
                 await websocket.close(code=1008)
             return
 
+    from app.conversation import get_live_conversation
+
     await websocket.accept()
     try:
+        # callLive tells the app whether the AI is actually attached to this
+        # call on this service. False means audio can never arrive (the relay
+        # has not attached, or it used a different session id/secret).
+        call_live = get_live_conversation(session_id) is not None
+        logger.info(
+            "monitor attached",
+            extra={"sessionId": session_id, "callLive": call_live},
+        )
         await websocket.send_json(
-            {"type": "ready", "sessionId": session_id, "userId": user_id}
+            {"type": "ready", "sessionId": session_id, "userId": user_id, "callLive": call_live}
         )
         stats = await run_monitor_socket(
             websocket, hub=get_hub(), session_id=session_id

@@ -221,3 +221,31 @@ class TestMonitorSocket:
             assert hub.subscriber_count("call-42") == 0
 
         asyncio.run(run())
+
+
+class TestMonitorRoute:
+    """The /monitor websocket must say WHY it refused or whether the AI is on the call."""
+
+    def _client(self, monkeypatch):
+        from fastapi.testclient import TestClient
+
+        from app.config import Settings
+        from app.main import create_app
+
+        settings = Settings(bridge_secret=SECRET)
+        return TestClient(create_app(settings))
+
+    def test_bad_token_is_accepted_then_explained(self, monkeypatch):
+        client = self._client(monkeypatch)
+        with client.websocket_connect("/monitor/call-1?token=bad.token.value") as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "error"
+            assert msg["reason"] == "auth-refused"
+
+    def test_ready_reports_call_not_live(self, monkeypatch):
+        client = self._client(monkeypatch)
+        token = sign_monitor_token(SECRET, session_id="call-9", user_id="user-1", ttl_secs=600)
+        with client.websocket_connect(f"/monitor/call-9?token={token}") as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "ready"
+            assert msg["callLive"] is False

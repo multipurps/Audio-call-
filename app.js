@@ -1,5 +1,6 @@
 import { normalizePhone } from './lib/phoneNumbers.js';
 import { decodeMonitorFrame } from './lib/monitorFrame.js';
+import { describeMonitorMessage, describeMonitorClose, noAudioMessage, MONITOR_NO_AUDIO_MS } from './lib/monitorStatus.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // Installed PWAs (especially iOS "Add to Home Screen") can keep showing a
@@ -1939,6 +1940,7 @@ function stopCallMonitor() {
   const mon = callMonitor;
   callMonitor = null;
   if (!mon) return;
+  clearTimeout(mon.noAudioTimer);
   try { mon.ws?.close(); } catch {}
   for (const lane of Object.values(mon.lanes || {})) clearTimeout(lane.flushTimer);
   try { mon.ctx?.close(); } catch {}
@@ -1998,7 +2000,7 @@ async function toggleCallMonitor() {
     }
   } catch {
     abandonCtx();
-    setCallStatePill('connecting', 'Monitoring unavailable');
+    setCallStatePill('connecting', 'Could not reach the app server to start listen-in. Check your connection');
     return;
   }
   if (activeCallScreenId !== callId) { abandonCtx(); return; } // screen changed while fetching
@@ -2007,7 +2009,7 @@ async function toggleCallMonitor() {
     startCallMonitor(payload.url, callId, ctx);
   } catch (err) {
     abandonCtx();
-    setCallStatePill('connecting', 'Monitoring unavailable');
+    setCallStatePill('connecting', `Could not start listen-in: ${String(err?.message || 'audio error').slice(0, 80)}`);
   }
 }
 
@@ -2073,17 +2075,49 @@ function startCallMonitor(url, callId, unlockedCtx) {
   }
   let lastEmysaAudioAt = 0;
 
-  const ws = new WebSocket(url);
+  let ws;
+  try {
+    ws = new WebSocket(url);
+  } catch (err) {
+    try { ctx.close(); } catch {}
+    setCallStatePill('connecting', 'Listen-in address is invalid. PUBLIC_ASSISTANT_WS_URL must be a wss:// address');
+    return;
+  }
   ws.binaryType = 'arraybuffer';
-  const mon = { ws, ctx, gain, state: 'live', callId, lanes };
+  const mon = { ws, ctx, gain, state: 'live', callId, lanes, opened: false, gotAudio: false, callLive: null, explained: false, noAudioTimer: null };
   callMonitor = mon;
+
+  // Honest status: the pill only says "Listening in" once real audio has
+  // arrived. Until then it says what is actually happening.
+  const fail = (text) => {
+    if (callMonitor !== mon) return;
+    clearTimeout(mon.noAudioTimer);
+    stopCallMonitor();
+    setCallStatePill('connecting', text);
+  };
+  setCallStatePill('connecting', 'Connecting to call audio');
+  $('callAudioBtn').classList.add('active');
+  $('callAudioBtn').setAttribute('aria-label', 'Listening in - tap to mute listening');
+
+  ws.onopen = () => { mon.opened = true; };
 
   ws.onmessage = (event) => {
     if (callMonitor !== mon) return;
     if (typeof event.data === 'string') {
-      try {
-        if (JSON.parse(event.data)?.type === 'ended') stopCallMonitor();
-      } catch {}
+      let msg = null;
+      try { msg = JSON.parse(event.data); } catch {}
+      if (msg?.type === 'ended') { stopCallMonitor(); setCallStatePill('connected', 'Call ended'); return; }
+      const info = describeMonitorMessage(msg);
+      if (msg?.type === 'ready') {
+        mon.opened = true;
+        mon.callLive = msg.callLive;
+        clearTimeout(mon.noAudioTimer);
+        mon.noAudioTimer = setTimeout(() => {
+          if (callMonitor === mon && !mon.gotAudio) setCallStatePill('connecting', noAudioMessage(mon.callLive));
+        }, MONITOR_NO_AUDIO_MS);
+      }
+      if (info?.kind === 'error') { mon.explained = true; fail(info.text); return; }
+      if (info && !mon.gotAudio) setCallStatePill(info.kind, info.text);
       return;
     }
     if (ctx.state === 'suspended') ctx.resume?.().catch?.(() => {});
@@ -2091,6 +2125,11 @@ function startCallMonitor(url, callId, unlockedCtx) {
     if (!frame) return;
     const lane = lanes[frame.direction];
     if (!lane) return;
+    if (!mon.gotAudio) {
+      mon.gotAudio = true;
+      clearTimeout(mon.noAudioTimer);
+      if (mon.state === 'live') setCallStatePill('connected', 'Listening in - both sides');
+    }
     const { rate, samples } = frame;
     // Collect ~80 ms before scheduling: 50 tiny nodes a second per side was
     // choppy on a phone connection. A short timer flushes the tail of a
@@ -2109,16 +2148,14 @@ function startCallMonitor(url, callId, unlockedCtx) {
     const emysaTalking = performance.now() - lastEmysaAudioAt < 450;
     lanes[1].gain.gain.setTargetAtTime(emysaTalking ? 0.3 : 1, ctx.currentTime, 0.05);
   };
-  ws.onclose = () => {
-    if (callMonitor === mon) stopCallMonitor();
+  const onGone = (event) => {
+    if (callMonitor !== mon) return;
+    const text = describeMonitorClose({ opened: mon.opened, code: event?.code, hadAudio: mon.gotAudio, alreadyExplained: mon.explained });
+    if (text) fail(text);
+    else { clearTimeout(mon.noAudioTimer); stopCallMonitor(); }
   };
-  ws.onerror = () => {
-    if (callMonitor === mon) stopCallMonitor();
-  };
-
-  $('callAudioBtn').classList.add('active');
-  $('callAudioBtn').setAttribute('aria-label', 'Monitoring live — tap to mute listening');
-  setCallStatePill('connected', 'Listening in · both sides');
+  ws.onclose = onGone;
+  ws.onerror = onGone;
 }
 
 function closeCallScreen() {

@@ -56,17 +56,34 @@ async function monitorToken(req, res, supabase, userId) {
     .maybeSingle();
   if (!call) return res.status(404).json({ error: 'Call not found' });
   if (!['queued', 'ringing', 'in_progress'].includes(call.status)) {
-    return res.status(409).json({ error: 'Call is not live' });
+    return res.status(409).json({ error: `Call is not live (status: ${call.status})`, code: 'not-live' });
   }
   const sessionId = callSessionId(call);
   if (!sessionId) {
-    return res.status(409).json({ error: 'Listening in is not enabled for this call type yet' });
+    console.warn(`monitorToken: no bridge session for call=${callId} platform=${call.platform} hasPlatformCallId=${Boolean(call.platform_call_id)}`);
+    return res.status(409).json({ error: call.platform === 'phone' || call.platform === 'twilio' ? 'Listen-in is not enabled for phone calls yet' : 'This call has no live audio session yet (WhatsApp has not attached the assistant). Try again in a few seconds.', code: 'no-session' });
   }
 
   const secret = process.env.ASSISTANT_BRIDGE_SECRET;
-  const wsBase = (process.env.PUBLIC_ASSISTANT_WS_URL || process.env.ASSISTANT_BRIDGE_URL || '').trim();
-  if (!secret || !wsBase) {
-    return res.status(501).json({ error: 'Live monitoring is not configured (set PUBLIC_ASSISTANT_WS_URL and ASSISTANT_BRIDGE_SECRET)' });
+  let wsBase = (process.env.PUBLIC_ASSISTANT_WS_URL || process.env.ASSISTANT_BRIDGE_URL || '').trim();
+  if (!secret) {
+    console.error(`monitorToken: ASSISTANT_BRIDGE_SECRET is not set on Vercel call=${callId}`);
+    return res.status(501).json({ error: 'Listen-in is not set up: ASSISTANT_BRIDGE_SECRET is missing on Vercel', code: 'missing-secret' });
+  }
+  if (!wsBase) {
+    console.error(`monitorToken: PUBLIC_ASSISTANT_WS_URL is not set call=${callId}`);
+    return res.status(501).json({ error: 'Listen-in is not set up: PUBLIC_ASSISTANT_WS_URL is missing on Vercel', code: 'missing-url' });
+  }
+  // The app is served over HTTPS, so the browser refuses a plain ws:// socket
+  // (mixed content) and the monitor would stay silent. Accept https:// as
+  // shorthand, and refuse anything that cannot work with a clear reason.
+  wsBase = wsBase.replace(/^https:\/\//i, 'wss://').replace(/^http:\/\//i, 'ws://');
+  if (!/^wss:\/\//i.test(wsBase)) {
+    const local = /^ws:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(wsBase);
+    if (!local) {
+      console.error(`monitorToken: assistant URL is not wss:// call=${callId}`);
+      return res.status(501).json({ error: 'Listen-in needs a secure URL: set PUBLIC_ASSISTANT_WS_URL to a wss:// address', code: 'insecure-url' });
+    }
   }
 
   const exp = Math.floor(Date.now() / 1000) + 6 * 3600;
@@ -74,6 +91,7 @@ async function monitorToken(req, res, supabase, userId) {
     .update(`monitor:${sessionId}:${userId}:${exp}`)
     .digest('hex');
   const token = `${exp}.${userId}.${sig}`;
+  console.log(`monitorToken: issued call=${callId} session=${sessionId}`);
   const base = wsBase.replace(/\/stream\/?$/, '').replace(/\/+$/, '');
   return res.status(200).json({
     token,
