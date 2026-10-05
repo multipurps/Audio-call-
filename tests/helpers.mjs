@@ -80,6 +80,13 @@ export async function loadApi(file, db, fetcher, extraEnv = {}) {
   }
   async function load(path) {
     if (cache.has(path)) return cache.get(path);
+    // Cache the in-flight promise so modules shared by two importers (a diamond
+    // dependency) are fully linked before the second importer receives them.
+    const pending = loadUncached(path);
+    cache.set(path, pending);
+    return pending;
+  }
+  async function loadUncached(path) {
     let module;
     if (path.endsWith('/supabaseAdmin.js')) {
       module = new vm.SyntheticModule(['getServiceClient', 'getAuthedUserId'], function () {
@@ -89,7 +96,6 @@ export async function loadApi(file, db, fetcher, extraEnv = {}) {
     } else {
       module = new vm.SourceTextModule(await readFile(path, 'utf8'), { context, identifier: path });
     }
-    cache.set(path, module);
     await module.link((specifier) => {
       if (specifier.startsWith('node:') || (!specifier.startsWith('.') && !specifier.startsWith('/'))) {
         return loadBuiltin(specifier);
