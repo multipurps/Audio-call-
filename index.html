@@ -9,7 +9,7 @@
 <title>Emysa</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-10-04.1">
+<link rel="stylesheet" href="styles.css?v=2026-10-05.1">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -89,7 +89,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-10-04.1').catch(function (err) {
+        import('./app.js?v=2026-10-05.1').catch(function (err) {
           showBootError('Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -847,24 +847,47 @@
       </div>
     </div>
 
-    <div class="sectionLabel" style="margin-top:24px;">Your cloned voice</div>
-    <p class="hint" id="voiceRecordStatus" style="margin:0 0 14px;"></p>
-
-    <div id="voiceCloneSection" style="display:flex; gap:10px;">
-      <button class="secondaryBtn" id="recordVoiceBtn">Record</button>
-      <button class="secondaryBtn" id="uploadVoiceBtn">Upload</button>
+    <div class="sectionLabel" style="margin-top:24px;">Current voice</div>
+    <div class="profileCard" style="margin-bottom:18px;">
+      <div class="cBody"><div class="cValue" id="currentVoiceName">&mdash;</div></div>
     </div>
-    <input type="file" id="voiceFileInput" accept="audio/*,.m4a,.mp3,.wav,.aac,.caf,.mp4" style="display:none;">
 
-    <div class="previewRow hidden" id="voicePreviewRow">
-      <button class="playCircleBtn" id="voicePreviewBtn" aria-label="Play preview">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-      </button>
-      <div class="cBody">
-        <div class="cValue">Your cloned voice is ready</div>
+    <div class="segmented" id="voiceTypeGroup" style="margin-bottom:6px;">
+      <button class="segmentedBtn active" data-vtype="standard">Standard</button>
+      <button class="segmentedBtn" data-vtype="custom">Custom</button>
+    </div>
+
+    <div id="voicePaneStandard">
+      <div class="sectionLabel">Voice</div>
+      <p class="hint" style="margin:0 0 12px;">Built-in voices. Emysa uses the one you choose on calls.</p>
+      <div id="liveVoiceList"></div>
+    </div>
+
+    <div id="voicePaneCustom" class="hidden">
+      <div class="sectionLabel">Voice</div>
+      <p class="hint" id="voiceRecordStatus" style="margin:0 0 12px;">A voice you create from a recording. Emysa speaks as you.</p>
+      <div class="previewRow voiceCard hidden" id="voicePreviewRow" data-select-custom>
+        <button class="playCircleBtn" id="voicePreviewBtn" aria-label="Play preview">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <div class="cBody">
+          <div class="cValue">Your cloned voice</div>
+          <div class="voiceMeta">Custom &middot; ready</div>
+        </div>
+        <svg class="voiceCheck" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
+      <div class="voiceAddHead" id="voiceAddHead"><span>+</span> Add New Voice</div>
+      <div id="voiceCloneSection" style="display:flex; gap:10px;">
+        <button class="secondaryBtn" id="recordVoiceBtn">Record</button>
+        <button class="secondaryBtn" id="uploadVoiceBtn">Upload</button>
+      </div>
+      <input type="file" id="voiceFileInput" accept="audio/*,.m4a,.mp3,.wav,.aac,.caf,.mp4" style="display:none;">
+      <audio id="voicePreviewAudio" style="display:none;"></audio>
     </div>
-    <audio id="voicePreviewAudio" style="display:none;"></audio>
+
+    <audio id="liveVoiceAudio" style="display:none;"></audio>
+    <button class="primaryBtn" id="voiceApplyBtn" style="margin-top:22px;" disabled>Apply Changes</button>
+    <p class="hint" id="voiceApplyStatus" style="margin:10px 4px 0; min-height:18px;"></p>
 
   </div>
 </div>

@@ -59,7 +59,35 @@ DEFAULT_LLM_MODEL = "gpt-6-luna"
 CALL_ENGINES = ("auto", "live", "classic")
 DEFAULT_CALL_ENGINE = "auto"
 DEFAULT_LIVE_MODEL = "gpt-live-1"
-DEFAULT_LIVE_VOICE = "marin"
+DEFAULT_LIVE_VOICE = "gleam"
+
+#: GPT-Live built-in voices, copied from OpenAI's "Managing GPT-Live sessions" guide
+#: (developers.openai.com/api/docs/guides/live-conversations, voice options table).
+#: Set at session start as audio.output.voice. Mirrored in lib/liveVoices.js; a test
+#: keeps the two lists identical. Do not add a voice here that the guide does not list.
+LIVE_VOICES = (
+    {"id": "quartz", "name": "Quartz", "language": "English", "accent": "Australian", "gender": "feminine"},
+    {"id": "ripple", "name": "Ripple", "language": "English", "accent": "Australian", "gender": "masculine"},
+    {"id": "vesper", "name": "Vesper", "language": "English", "accent": "British", "gender": "masculine"},
+    {"id": "willow", "name": "Willow", "language": "English", "accent": "Irish", "gender": "feminine"},
+    {"id": "stone", "name": "Stone", "language": "English", "accent": "Irish", "gender": "masculine"},
+    {"id": "gleam", "name": "Gleam", "language": "English", "accent": "North American", "gender": "feminine"},
+    {"id": "meridian", "name": "Meridian", "language": "English", "accent": "North American", "gender": "masculine"},
+    {"id": "bossa", "name": "Bossa", "language": "Portuguese", "accent": "Brazilian", "gender": "feminine"},
+    {"id": "tempo", "name": "Tempo", "language": "Portuguese", "accent": "Brazilian", "gender": "masculine"},
+    {"id": "beacon", "name": "Beacon", "language": "English", "accent": "Filipino", "gender": "masculine"},
+    {"id": "delta", "name": "Delta", "language": "English", "accent": "Southern U.S.", "gender": "feminine"},
+    {"id": "cinder", "name": "Cinder", "language": "English", "accent": "Southern U.S.", "gender": "masculine"},
+)
+LIVE_VOICE_IDS = frozenset(v["id"] for v in LIVE_VOICES)
+
+
+def normalise_live_voice(value: object) -> str | None:
+    """A catalogued GPT-Live voice id, or None. Never forwards an unknown name."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip().lower()
+    return value if value in LIVE_VOICE_IDS else None
 DEFAULT_LIVE_BASE_URL = "wss://api.openai.com/v1/live/sessions"
 
 
@@ -183,6 +211,9 @@ class Settings:
     call_engine: str = DEFAULT_CALL_ENGINE
     live_model: str = DEFAULT_LIVE_MODEL
     live_voice: str = DEFAULT_LIVE_VOICE
+    #: Where live_voice came from for THIS call: "user" (their saved Live voice) or
+    #: "env-default" (they have not chosen one; ASSISTANT_LIVE_VOICE / built-in default).
+    live_voice_source: str = "env-default"
     live_base_url: str = DEFAULT_LIVE_BASE_URL
     #: Text model GPT-Live hands tools / lookups / reasoning to. Defaults to the
     #: same Luna model the classic path uses (ASSISTANT_LLM_MODEL).

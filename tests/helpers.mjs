@@ -15,6 +15,7 @@ export function database(seed = {}) {
       select() { return q; },
       insert(value) { mode = 'insert'; values = value; return q; },
       update(value) { mode = 'update'; values = value; return q; },
+      upsert(value) { mode = 'upsert'; values = value; return q; },
       delete() { mode = 'delete'; return q; },
       eq(key, value) { filters.push((r) => r[key] === value); return q; },
       neq(key, value) { filters.push((r) => r[key] !== value); return q; },
@@ -41,6 +42,11 @@ export function database(seed = {}) {
               ...(table === 'chat_sessions' ? { archived: false } : {}), ...value,
             }));
             tables[table].push(...rows);
+          }
+          if (mode === 'upsert') {
+            const existing = tables[table].find((r) => r.user_id === values.user_id);
+            if (existing) Object.assign(existing, values); else tables[table].push({ ...values });
+            rows = [];
           }
           if (mode === 'update') rows.forEach((r) => Object.assign(r, values));
           if (mode === 'delete') tables[table] = tables[table].filter((r) => !rows.includes(r));

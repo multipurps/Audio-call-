@@ -3241,10 +3241,114 @@ async function refreshVoiceStatus() {
   const { status } = await resp.json();
   const ready = status === 'ready';
   $('voiceCloneSection').style.display = ready ? 'none' : 'flex';
+  $('voiceAddHead').classList.toggle('hidden', ready);
   $('voicePreviewRow').classList.toggle('hidden', !ready);
   if (ready) ensureVoiceSwipeDelete();
-  $('voiceRecordStatus').textContent = status === 'pending' ? 'Cloning your voice…' : status === 'failed' ? 'Cloning failed.' : '';
+  $('voiceRecordStatus').textContent = status === 'pending' ? 'Cloning your voice…' : status === 'failed' ? 'Cloning failed.' : 'A voice you create from a recording. Emysa speaks as you.';
+  loadVoicePrefs();
 }
+
+// ---------- voice settings: Standard (GPT-Live voices) + Custom (cloned voice) ----------
+// Two separate choices. Standard saves live_voice_id; Custom is the cloned (Fish) voice. The call
+// engine is picked automatically from which one is selected - it is never shown or chosen here.
+let voicePrefs = null;                       // last saved state from the server
+let voicePending = { type: 'standard', liveVoiceId: null };
+const livePreviewCache = new Map();          // voice id -> object URL
+
+const genderLabel = (g) => (g === 'masculine' ? 'Masculine' : 'Feminine');
+const PLAY_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+const PAUSE_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
+
+function voiceIsDirty() {
+  if (!voicePrefs) return false;
+  const savedType = voicePrefs.useCustomVoice ? 'custom' : 'standard';
+  if (voicePending.type !== savedType) return true;
+  return voicePending.type === 'standard' && voicePending.liveVoiceId !== voicePrefs.liveVoiceId;
+}
+
+function renderVoiceSettings() {
+  if (!voicePrefs) return;
+  const savedName = voicePrefs.useCustomVoice ? 'Your cloned voice' : (voicePrefs.liveVoiceName || 'Not chosen yet');
+  $('currentVoiceName').textContent = savedName;
+  const list = $('liveVoiceList');
+  list.textContent = '';
+  for (const v of voicePrefs.voices) {
+    const card = document.createElement('div');
+    card.className = 'voiceCard' + (voicePending.type === 'standard' && voicePending.liveVoiceId === v.id ? ' selected' : '');
+    card.dataset.voice = v.id;
+    card.innerHTML = `<button class="playCircleBtn" aria-label="Preview ${v.name}">${PLAY_SVG}</button>
+      <div class="cBody"><div class="cValue"></div><div class="voiceMeta"></div></div>
+      <svg class="voiceCheck" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    card.querySelector('.cValue').textContent = v.name;
+    card.querySelector('.voiceMeta').textContent = `${genderLabel(v.gender)} · ${v.accent} · ${v.language}`;
+    card.querySelector('.playCircleBtn').addEventListener('click', (e) => { e.stopPropagation(); previewLiveVoice(v.id, e.currentTarget); });
+    card.addEventListener('click', () => { haptic(); voicePending = { type: 'standard', liveVoiceId: v.id }; renderVoiceSettings(); });
+    list.appendChild(card);
+  }
+  $('voicePreviewRow').classList.toggle('selected', voicePending.type === 'custom');
+  $('voiceApplyBtn').disabled = !voiceIsDirty() || (voicePending.type === 'standard' && !voicePending.liveVoiceId);
+}
+
+async function loadVoicePrefs() {
+  const resp = await authedFetch('/api/voice-clone?action=prefs');
+  if (!resp.ok) return;
+  voicePrefs = await resp.json();
+  const custom = voicePrefs.customVoice?.ready && voicePrefs.useCustomVoice;
+  voicePending = { type: custom ? 'custom' : 'standard', liveVoiceId: voicePrefs.liveVoiceId };
+  renderVoiceSettings();
+}
+
+function showVoiceTab(which) {
+  document.querySelectorAll('#voiceTypeGroup .segmentedBtn').forEach((b) => b.classList.toggle('active', b.dataset.vtype === which));
+  $('voicePaneStandard').classList.toggle('hidden', which !== 'standard');
+  $('voicePaneCustom').classList.toggle('hidden', which !== 'custom');
+}
+document.querySelectorAll('#voiceTypeGroup .segmentedBtn').forEach((b) => b.addEventListener('click', () => { haptic(); showVoiceTab(b.dataset.vtype); }));
+$('voicePreviewRow').addEventListener('click', () => {
+  if (!voicePrefs?.customVoice?.ready) return;
+  haptic(); voicePending = { ...voicePending, type: 'custom' }; renderVoiceSettings();
+});
+
+async function previewLiveVoice(id, btn) {
+  const audio = $('liveVoiceAudio');
+  const status = $('voiceApplyStatus');
+  if (!audio.paused && audio.dataset.voice === id) { audio.pause(); return; }
+  audio.pause();
+  status.textContent = '';
+  try {
+    if (!livePreviewCache.has(id)) {
+      btn.classList.add('loading');
+      const resp = await authedFetch(`/api/voice-clone?action=live-preview&voice=${encodeURIComponent(id)}`);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || 'Preview unavailable');
+      const bytes = Uint8Array.from(atob(data.audioBase64), (c) => c.charCodeAt(0));
+      livePreviewCache.set(id, URL.createObjectURL(new Blob([bytes], { type: data.mimeType || 'audio/wav' })));
+    }
+    audio.dataset.voice = id;
+    audio.src = livePreviewCache.get(id);
+    audio.onplay = () => { btn.innerHTML = PAUSE_SVG; };
+    audio.onpause = audio.onended = () => { btn.innerHTML = PLAY_SVG; };
+    await audio.play();
+  } catch (err) {
+    status.textContent = `Could not play the preview: ${err.message}`;
+  } finally {
+    btn.classList.remove('loading');
+  }
+}
+
+$('voiceApplyBtn').addEventListener('click', async () => {
+  const btn = $('voiceApplyBtn'); const status = $('voiceApplyStatus');
+  btn.disabled = true; status.textContent = 'Saving…';
+  const body = voicePending.type === 'custom'
+    ? { useCustomVoice: true }
+    : { liveVoiceId: voicePending.liveVoiceId, useCustomVoice: false };
+  const resp = await authedFetch('/api/voice-clone?action=prefs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) { status.textContent = data.error || 'Could not save.'; renderVoiceSettings(); return; }
+  voicePrefs = data;
+  status.textContent = 'Saved. Emysa will use this voice on your next call.';
+  renderVoiceSettings();
+});
 
 async function uploadVoiceClip(blob, mimeType, statusEl = $('voiceRecordStatus')) {
   statusEl.textContent = 'Uploading…';
@@ -3256,7 +3360,10 @@ async function uploadVoiceClip(blob, mimeType, statusEl = $('voiceRecordStatus')
   });
   const data = await resp.json().catch(() => ({}));
   statusEl.textContent = resp.ok ? 'Voice cloned.' : (data.error || 'Could not clone voice — try a longer, quieter sample.');
-  if (resp.ok) refreshVoiceStatus();
+  if (resp.ok) {
+    await authedFetch('/api/voice-clone?action=prefs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ useCustomVoice: true }) }).catch(() => {});
+    refreshVoiceStatus();
+  }
 }
 
 let mediaRecorder, recordedChunks = [];
@@ -3302,7 +3409,8 @@ $('voiceFileInput').addEventListener('change', async (e) => {
   await uploadVoiceClip(file, file.type || 'audio/mpeg', statusEl);
 });
 
-$('voicePreviewBtn').addEventListener('click', async () => {
+$('voicePreviewBtn').addEventListener('click', async (e) => {
+  e.stopPropagation();
   const audio = $('voicePreviewAudio');
   if (audio.src && !audio.paused) { audio.pause(); return; }
   if (audio.src) { audio.play().catch(() => {}); return; }

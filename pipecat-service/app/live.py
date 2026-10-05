@@ -28,6 +28,7 @@ What is different, deliberately:
 
 from __future__ import annotations
 
+import array
 import time
 from typing import Any
 
@@ -170,6 +171,13 @@ class LiveCallState:
         self.end_requested: bool = False
         self.session_started: bool = False
         self.session_error: str | None = None
+        self.session_id: str = "-"
+        self.created_at: float = time.monotonic()
+        self.session_started_at: float | None = None
+        self.first_audio_ms: int | None = None
+        self.turn_latencies_ms: list[int] = []
+        self.audible_frames: int = 0
+        self.end_call_requests: int = 0
 
     def ai_idle_secs(self, now: float | None = None) -> float:
         if self.ai_speaking_text:
@@ -182,6 +190,22 @@ class LiveCallState:
 # --------------------------------------------------------------------------
 # Service + pipeline
 # --------------------------------------------------------------------------
+
+
+def live_log(session_id: str, event: str, level: str = "INFO", **fields: Any) -> None:
+    """Production log line for GPT-Live: `[call <id>] [GPT-LIVE] <event> k=v`."""
+    parts = " ".join(f"{k}={v}" for k, v in fields.items())
+    logger.log(level, f"[call {session_id}] [GPT-LIVE] {event}" + (f" {parts}" if parts else ""))
+
+
+def pcm16_is_audible(audio: bytes, threshold: int = 600) -> bool:
+    """True when a PCM16 chunk carries real sound (the live stream sends silence too)."""
+    n = len(audio) // 2
+    if n == 0:
+        return False
+    samples = array.array("h")
+    samples.frombytes(audio[: n * 2])
+    return max(max(samples), -min(samples)) >= threshold
 
 
 def build_end_call_tools() -> Any:
@@ -218,6 +242,7 @@ def build_live_service(
     system_instruction: str,
     on_end_call: Any,
     state: LiveCallState | None = None,
+    session_id: str | None = None,
 ) -> Any:
     """The GPT-Live service with Responses delegation to the Luna backend."""
     from pipecat.services.openai.live.llm import OpenAILiveLLMService
@@ -253,10 +278,13 @@ def build_live_service(
         ),
     )
 
+    sid = session_id or (state.session_id if state is not None else "-")
+
     async def _end_call(params: Any) -> None:
         if state is not None:
             state.end_requested = True
-        logger.info("backend requested end_call")
+            state.end_call_requests += 1
+        live_log(sid, "delegation=end_call backend=luna (hang-up only; Luna is not the conversational LLM)")
         await params.result_callback(
             {"ok": True, "note": "The call is ending. If you have not already, say a brief goodbye."}
         )
@@ -273,7 +301,19 @@ def build_live_service(
         @llm.event_handler("on_session_started")
         async def _started(_service: Any, _session: Any) -> None:
             state.session_started = True
-            logger.info("gpt-live session started")
+            state.session_started_at = time.monotonic()
+            live_log(sid, "session.created", id=getattr(_session, "id", "?"))
+            live_log(sid, f"model={settings.live_model}")
+            live_log(
+                sid,
+                f"voice={settings.live_voice}",
+                source=settings.live_voice_source,
+                sentAs="audio.output.voice",
+            )
+            live_log(
+                sid,
+                "startup_ms_since_answer=%d" % int((state.session_started_at - state.created_at) * 1000),
+            )
 
     return llm
 
@@ -288,6 +328,7 @@ def build_live_pipeline(
     state: LiveCallState | None = None,
     on_end_call: Any = None,
     llm: Any = None,
+    session_id: str | None = None,
 ) -> tuple[Any, Any]:
     """Assemble the GPT-Live pipeline. Returns `(pipeline, llm)`."""
     from pipecat.frames.frames import (
@@ -295,6 +336,8 @@ def build_live_pipeline(
         LLMFullResponseEndFrame,
         LLMFullResponseStartFrame,
         LLMTextFrame,
+        ProposedUserStoppedSpeakingFrame,
+        SpeechOutputAudioRawFrame,
         TranscriptionFrame,
     )
     from pipecat.pipeline.pipeline import Pipeline
@@ -306,10 +349,49 @@ def build_live_pipeline(
     from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
     st = state if state is not None else LiveCallState()
+    if session_id:
+        st.session_id = session_id
     if llm is None:
         llm = build_live_service(
-            settings, system_instruction=system_instruction, on_end_call=on_end_call, state=st
+            settings,
+            system_instruction=system_instruction,
+            on_end_call=on_end_call,
+            state=st,
+            session_id=st.session_id,
         )
+
+    class LiveLatencyProbe(FrameProcessor):
+        """Measures real audible assistant audio, not just 'a frame was sent'.
+
+        first_audio_ms: session started -> first audible output (the opening).
+        turn_latency_ms: caller's turn ended -> first audible reply audio.
+        """
+
+        def __init__(self) -> None:
+            super().__init__(name="LiveLatencyProbe")
+            self._user_end: float | None = None
+            self._awaiting = False
+            self._last_audible = 0.0
+
+        async def process_frame(self, frame: Any, direction: FrameDirection) -> None:
+            await super().process_frame(frame, direction)
+            now = time.monotonic()
+            if isinstance(frame, ProposedUserStoppedSpeakingFrame):
+                self._user_end = now
+                # If the model was still talking, this is not a fresh reply to time.
+                self._awaiting = (now - self._last_audible) > 0.4
+            elif isinstance(frame, SpeechOutputAudioRawFrame) and pcm16_is_audible(frame.audio):
+                st.audible_frames += 1
+                if st.first_audio_ms is None and st.session_started_at is not None:
+                    st.first_audio_ms = int((now - st.session_started_at) * 1000)
+                    live_log(st.session_id, f"first_audio_ms={st.first_audio_ms}", audio="from gpt-live")
+                if self._awaiting and self._user_end is not None:
+                    ms = int((now - self._user_end) * 1000)
+                    st.turn_latencies_ms.append(ms)
+                    live_log(st.session_id, f"turn_latency_ms={ms}", note="caller speech end -> first audible gpt-live audio")
+                    self._awaiting = False
+                self._last_audible = now
+            await self.push_frame(frame, direction)
 
     class LiveTranscriptNote(FrameProcessor):
         """Records one side of the call into the app's live transcript.
@@ -367,6 +449,7 @@ def build_live_pipeline(
             aggregators.user(),
             LiveTranscriptNote("contact"),
             llm,
+            LiveLatencyProbe(),
             LiveTranscriptNote("ai"),
             transport.output(),
             aggregators.assistant(),

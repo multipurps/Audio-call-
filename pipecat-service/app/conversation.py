@@ -33,13 +33,14 @@ from __future__ import annotations
 import asyncio
 import collections
 import contextlib
+import dataclasses
 import time
 from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
-from app.call_context import CallContext, TranscriptLog, resolve_call_context
-from app.config import Settings
+from app.call_context import CallContext, TranscriptLog, fetch_voice_prefs, resolve_call_context
+from app.config import Settings, normalise_live_voice
 from app.monitor import DIRECTION_CALLER, DIRECTION_EMYSA, get_hub
 
 #: Last-resort opener, spoken verbatim only when the model cannot open the call
@@ -539,6 +540,7 @@ class CallLogObserver(BaseObserver):
         self._llm_chars = 0
         self._tts_bytes = 0
         self._tts_frames = 0
+        self._vad_stop_at: float | None = None
 
     def _first_sight(self, frame: Any) -> bool:
         frame_id = getattr(frame, "id", None)
@@ -578,6 +580,7 @@ class CallLogObserver(BaseObserver):
                 clog("INFO", sid, "caller speech started")
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             if self._first_sight(frame):
+                self._vad_stop_at = time.monotonic()
                 clog("INFO", sid, "caller speech ended, stt started")
         elif isinstance(frame, TranscriptionFrame):
             if self._first_sight(frame):
@@ -604,6 +607,14 @@ class CallLogObserver(BaseObserver):
                 clog("INFO", sid, "tts started")
         elif isinstance(frame, TTSAudioRawFrame):
             if self._first_sight(frame):
+                if self._vad_stop_at is not None:
+                    clog(
+                        "INFO",
+                        sid,
+                        "[CLASSIC] first_audio_ms=%d" % int((time.monotonic() - self._vad_stop_at) * 1000),
+                        note="caller speech end -> first Fish audio",
+                    )
+                    self._vad_stop_at = None
                 self._tts_bytes += len(frame.audio)
                 self._tts_frames += 1
         elif isinstance(frame, TTSStoppedFrame):
@@ -710,6 +721,10 @@ class CallConversation(_BaseConversation):
         self._pending_notes: list[str] = []
         self._switching = False
         self._watchdog: asyncio.Task[None] | None = None
+        self._engine_reason = "init"
+        self._fallback = False
+        self._fallback_reason: str | None = None
+        self._first_engine = self.engine
 
         self._task: Any = None
         self._runner: Any = None
@@ -742,6 +757,8 @@ class CallConversation(_BaseConversation):
         if self.call_context is not None:
             self.transcript = TranscriptLog(self.call_context)
             extra_context = self.call_context.extra_context or None
+
+        await self._resolve_call_voice_and_engine()
 
         rate = self._settings.bridge_sample_rate
         # The output processor is created first only so the sender can call
@@ -797,6 +814,91 @@ class CallConversation(_BaseConversation):
             contextResolved=bool(self.call_context),
         )
 
+    async def _resolve_call_voice_and_engine(self) -> None:
+        """Pick this call's engine and voice from the user's saved choices.
+
+        The engine is automatic: a user with a ready cloned voice who has it selected
+        runs the classic pipeline (STT -> Luna -> Fish); everyone else runs GPT-Live
+        with their own saved Live voice. The Live voice and the cloned voice are two
+        separate settings and are never used in place of each other.
+        """
+        sid = self._session_id
+        if self._services is not None or self._settings.mock_mode:
+            self._engine_reason = "mock-or-injected-services"
+            clog("INFO", sid, f"[CALL ENGINE] selected={self._engine_label()}", reason=self._engine_reason)
+            return
+        uid = (getattr(self.call_context, "user_id", None) if self.call_context else None) or self.user_id
+        prefs = await fetch_voice_prefs(self._settings, uid, sid) if uid else None
+        hello_clone = self._settings.tts_voice_id if self._settings.tts_voice_is_per_call else None
+        custom_id = (prefs.custom_voice_id if prefs and prefs.custom_voice_id else None) or hello_clone
+        use_custom = prefs.use_custom_voice if prefs and prefs.use_custom_voice is not None else True
+        want_custom = bool(custom_id) and use_custom
+
+        updates: dict[str, Any] = {}
+        if want_custom:
+            updates.update(tts_voice_id=custom_id, tts_voice_is_per_call=True)
+        elif hello_clone:
+            # The user picked a Standard (GPT-Live) voice; the relay's clone must not force classic.
+            updates.update(tts_voice_id=None, tts_voice_is_per_call=False)
+        chosen = normalise_live_voice(prefs.live_voice_id) if prefs else None
+        if chosen:
+            updates.update(live_voice=chosen, live_voice_source="user")
+        else:
+            updates.update(live_voice_source="env-default")
+        self._settings = dataclasses.replace(self._settings, **updates)
+
+        self.engine = self._settings.engine_for_call()
+        self._first_engine = self.engine
+        cfg = self._settings.call_engine
+        if cfg == "classic":
+            self._engine_reason = "ASSISTANT_CALL_ENGINE=classic (kill switch)"
+        elif cfg == "live" and want_custom:
+            self._engine_reason = "ASSISTANT_CALL_ENGINE=live forces GPT-Live; the user's custom voice is ignored"
+        elif want_custom:
+            self._engine_reason = "user has a custom (cloned) voice selected"
+        elif self.engine == "classic":
+            self._engine_reason = "no OPENAI_API_KEY/LUNA_API_KEY for GPT-Live"
+        else:
+            self._engine_reason = "no custom voice selected"
+        clog(
+            "INFO",
+            sid,
+            f"[CALL ENGINE] selected={self._engine_label()}",
+            reason=self._engine_reason,
+            userKnown=bool(uid),
+            prefsRead=prefs is not None,
+            customVoice=bool(want_custom),
+            liveVoice=self._settings.live_voice if self.engine == "live" else "-",
+            liveVoiceSource=self._settings.live_voice_source if self.engine == "live" else "-",
+            via=self.platform,
+        )
+
+    def _engine_label(self) -> str:
+        return "gpt-live" if self.engine == "live" else "classic"
+
+    def _log_engine_summary(self, reason: str) -> None:
+        """One unmistakable end-of-call line: which engine actually handled the call."""
+        st = self._live_state
+        final = self._engine_label()
+        live_ms = st.first_audio_ms if st is not None else None
+        turns = st.turn_latencies_ms if st is not None else []
+        clog(
+            "INFO",
+            self._session_id,
+            f"[CALL ENGINE] summary final_engine={final}",
+            first_engine=("gpt-live" if self._first_engine == "live" else "classic"),
+            gpt_live_session_created=bool(st is not None and st.session_started),
+            gpt_live_voice=(self._settings.live_voice if final == "gpt-live" else "-"),
+            fallback=self._fallback,
+            fallback_reason=self._fallback_reason or "-",
+            fish_tts_used=(final == "classic"),
+            luna_conversational_llm_used=(final == "classic"),
+            gpt_live_first_audio_ms=live_ms if live_ms is not None else "-",
+            gpt_live_turn_latency_ms=(",".join(str(t) for t in turns[:12]) or "-"),
+            transcript_source=("gpt-live" if final == "gpt-live" else "stt+classic"),
+            end_reason=reason,
+        )
+
     async def _launch_pipeline(self) -> None:
         """Build and start the Pipecat pipeline (once)."""
         if self._task is not None:
@@ -827,8 +929,17 @@ class CallConversation(_BaseConversation):
                 state=self._live_state,
                 on_end_call=self._schedule_assistant_hangup,
                 llm=self._live_llm_override,
+                session_id=self._session_id,
             )
         else:
+            clog(
+                "INFO",
+                self._session_id,
+                "[CALL ENGINE] classic pipeline starting (STT -> Luna -> Fish)",
+                reason=self._engine_reason,
+            )
+            clog("INFO", self._session_id, "[FISH] tts", voiceIdTail=(self._settings.tts_voice_id or "default")[-4:], custom=self._settings.tts_voice_is_per_call)
+            clog("INFO", self._session_id, "[LUNA] conversational llm", model=self._settings.resolved_llm_model())
             self._context = build_llm_context()
             pipeline, self._llm = build_pipeline(
                 settings=self._settings,
@@ -869,7 +980,14 @@ class CallConversation(_BaseConversation):
             await asyncio.sleep(0.1)
         if self._stopped or (state is not None and state.session_started):
             return
-        clog("ERROR", self._session_id, "gpt-live session did not start; falling back to classic engine")
+        reason = (
+            f"session.created not received within {self._settings.live_start_timeout_secs:.0f}s "
+            "(see 'pipeline error' lines above for the API's reason)"
+        )
+        clog("ERROR", self._session_id, "[GPT-LIVE] attempted=true session.created=false fallback=true", reason=reason)
+        clog("ERROR", self._session_id, "[CALL ENGINE] selected=classic reason=gpt-live-start-failed")
+        self._fallback = True
+        self._fallback_reason = reason
         await self._fallback_to_classic()
 
     async def _fallback_to_classic(self) -> None:
@@ -1130,6 +1248,7 @@ class CallConversation(_BaseConversation):
         # monitor must never outlive the call it is listening to.
         get_hub().close_room(self._session_id)
         clog("INFO", self._session_id, "conversation stopping", reason=reason, **self.stats())
+        self._log_engine_summary(reason)
         # Persist whatever the transcript has accumulated so far before the
         # pipeline is torn down — the end report then waits out the carrier's
         # own outcome callback and only fills in a status nobody reported.

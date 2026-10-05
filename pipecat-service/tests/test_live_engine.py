@@ -254,7 +254,7 @@ async def test_live_call_end_to_end(fake, monkeypatch):
 
         start = fake.of("session.start")[0]["session"]
         assert start["model"] == "gpt-live-1"
-        assert start["audio"]["output"]["voice"] == "marin"
+        assert start["audio"]["output"]["voice"] == "gleam"
         assert "Private brief: ask Sam" in start["instructions"]
         assert "[[END_CALL]]" not in start["instructions"]
         deleg = start["delegation"]
@@ -364,3 +364,76 @@ async def test_falls_back_to_classic_when_the_live_session_cannot_start(fake, mo
         assert conv._task is not None and conv._run_task is not None and not conv._run_task.done(), "classic pipeline is running"
     finally:
         await conv.stop("test")
+
+
+# ---------------------------------------------------------------- per-user voice + automatic engine
+
+def _prefs(**kw):
+    from app.call_context import VoicePrefs
+
+    async def _fetch(*_a, **_k):
+        return VoicePrefs(**kw)
+
+    return _fetch
+
+
+async def test_users_live_voice_is_what_gpt_live_session_starts_with(fake, monkeypatch):
+    import app.conversation as conv_mod
+
+    monkeypatch.setattr(conv_mod, "fetch_voice_prefs", _prefs(live_voice_id="meridian"))
+    conv, *_ = make_live_conversation(fake, monkeypatch)
+    await conv.start()
+    try:
+        assert conv.engine == "live" and conv._settings.live_voice_source == "user"
+        await conv.note_call_active("relay-signal")
+        await asyncio.wait_for(fake.started.wait(), 5)
+        assert fake.of("session.start")[0]["session"]["audio"]["output"]["voice"] == "meridian"
+    finally:
+        await conv.stop("test")
+
+
+async def test_unknown_live_voice_is_never_forwarded(fake, monkeypatch):
+    import app.conversation as conv_mod
+
+    monkeypatch.setattr(conv_mod, "fetch_voice_prefs", _prefs(live_voice_id="not-a-voice"))
+    conv, *_ = make_live_conversation(fake, monkeypatch)
+    await conv.start()
+    try:
+        assert conv._settings.live_voice == "gleam" and conv._settings.live_voice_source == "env-default"
+    finally:
+        await conv.stop("test")
+
+
+async def test_selected_custom_voice_runs_classic_even_if_a_live_voice_is_saved(fake, monkeypatch):
+    import app.conversation as conv_mod
+
+    monkeypatch.setattr(conv_mod, "fetch_voice_prefs", _prefs(live_voice_id="gleam", use_custom_voice=True, custom_voice_id="cloneVoice12345"))
+    conv, *_ = make_live_conversation(fake, monkeypatch)
+    conv._launch_pipeline = lambda: asyncio.sleep(0)  # routing only; no real pipeline needed
+    await conv.start()
+    try:
+        assert conv.engine == "classic"
+        assert conv._settings.tts_voice_id == "cloneVoice12345"
+    finally:
+        await conv.stop("test")
+
+
+async def test_choosing_a_standard_voice_beats_the_relays_clone(fake, monkeypatch):
+    import app.conversation as conv_mod
+
+    monkeypatch.setattr(conv_mod, "fetch_voice_prefs", _prefs(live_voice_id="gleam", use_custom_voice=False, custom_voice_id="cloneVoice12345"))
+    conv, *_ = make_live_conversation(fake, monkeypatch, voice_clone=True)
+    await conv.start()
+    try:
+        assert conv.engine == "live" and conv._settings.tts_voice_is_per_call is False
+    finally:
+        await conv.stop("test")
+
+
+def test_live_voice_catalog_is_the_documented_twelve():
+    from app.config import LIVE_VOICES, normalise_live_voice
+
+    assert [v["id"] for v in LIVE_VOICES] == [
+        "quartz", "ripple", "vesper", "willow", "stone", "gleam", "meridian", "bossa", "tempo", "beacon", "delta", "cinder",
+    ]
+    assert normalise_live_voice(" Gleam ") == "gleam" and normalise_live_voice("marin") is None

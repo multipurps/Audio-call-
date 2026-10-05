@@ -699,6 +699,53 @@ def build_extra_context(context: CallContext) -> str:
     return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class VoicePrefs:
+    """What the user chose for their voice. The call engine is derived from this."""
+
+    live_voice_id: str | None = None
+    #: None = no preference row; the user's clone (if any) keeps being used.
+    use_custom_voice: bool | None = None
+    custom_voice_id: str | None = None
+
+
+async def fetch_voice_prefs(settings: Settings, user_id: str, session_id: str) -> VoicePrefs | None:
+    """The user's saved Live voice, custom-voice choice and ready cloned voice id.
+
+    Returns None (logged) when it cannot be read; the caller then keeps its defaults.
+    """
+    if settings.mock_mode or not user_id or not settings.supabase_url or not settings.supabase_service_role_key:
+        return None
+    rest = _Rest(settings.supabase_url, settings.supabase_service_role_key, timeout_secs=4.0)
+    try:
+        prefs_rows = await rest.select(
+            "voice_preferences",
+            select="live_voice_id,use_custom_voice",
+            filters={"user_id": f"eq.{user_id}"},
+            limit=1,
+        )
+        clone_rows = await rest.select(
+            "voice_profiles",
+            select="provider_voice_id,status",
+            filters={"user_id": f"eq.{user_id}"},
+            limit=1,
+        )
+    except Exception as exc:  # noqa: BLE001 - a missing table must not take the call down
+        _log("WARNING", session_id, "[CALL ENGINE] could not read voice preferences", error=type(exc).__name__, detail=str(exc)[:160])
+        return None
+    finally:
+        await rest.aclose()
+    prefs = prefs_rows[0] if prefs_rows else {}
+    clone = clone_rows[0] if clone_rows else {}
+    custom_id = clone.get("provider_voice_id") if clone.get("status") == "ready" else None
+    use_custom = prefs.get("use_custom_voice")
+    return VoicePrefs(
+        live_voice_id=prefs.get("live_voice_id") or None,
+        use_custom_voice=use_custom if isinstance(use_custom, bool) else None,
+        custom_voice_id=custom_id or None,
+    )
+
+
 async def resolve_call_context(
     settings: Settings,
     *,

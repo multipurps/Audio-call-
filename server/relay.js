@@ -32,10 +32,17 @@ if (process.env.NODE_ENV !== 'test') {
   console.log(`relay listening on :${PORT}`);
 
   wss.on('connection', (ws, req) => {
-    // Phone calls run on the Pipecat assistant service when enabled.
-    if (bridgeEnabled()) return handleTwilioViaPipecat(ws, req, { WS: WebSocket });
     const url = new URL(req.url, 'http://localhost');
     const callId = url.searchParams.get('callId');
+    // Phone calls run on the Pipecat assistant service when enabled.
+    if (bridgeEnabled()) {
+      console.log(`[CALL ENGINE] twilio call=${callId} path=pipecat-service (GPT-Live eligible; the service logs the final engine choice)`);
+      return handleTwilioViaPipecat(ws, req, { WS: WebSocket });
+    }
+    console.log(
+      `[CALL ENGINE] selected=classic-relay call=${callId} reason=TWILIO_VIA_PIPECAT is not "true" or ASSISTANT_BRIDGE_URL/ASSISTANT_BRIDGE_SECRET missing ` +
+      `-> this relay runs STT -> Luna -> Fish. GPT-Live CANNOT run on this path.`,
+    );
     const state = {
       callId,
       streamSid: null,
@@ -308,6 +315,7 @@ async function hangupCall(state) {
 }
 
 async function finalizeCall(state) {
+  console.log(`[CALL ENGINE] summary final_engine=classic-relay call=${state.callId} gpt_live_session_created=false fallback=false fish_tts_used=true luna_conversational_llm_used=true transcript_source=stt+classic`);
   if (!supabase || !state.callId) return;
   // Transcript is persisted turn-by-turn via pushTranscript; flush once more
   // so the closing lines survive even if the status webhook is slow, then

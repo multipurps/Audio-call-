@@ -947,3 +947,16 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .transcriptBubble{min-width:0; overflow-wrap:anywhere; word-break:normal;}
 .transcriptLine{min-width:0;}
 #panelProfileSetup, #panelRent{max-height:100%; overflow-y:auto; padding:56px 0 24px; -webkit-overflow-scrolling:touch;}
+
+/* Voice settings: Standard (GPT-Live voices) + Custom (cloned voice) cards */
+.voiceCard{display:flex; align-items:center; gap:12px; margin-top:10px; padding:12px 14px; border-radius:18px; cursor:pointer;
+  background:var(--glass-bg); border:1px solid var(--glass-border); -webkit-tap-highlight-color:transparent;}
+.voiceCard.selected{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset;}
+.voiceCard .cBody{flex:1; min-width:0;}
+.voiceCard .cValue{font-size:15.5px; font-weight:650; color:#fff;}
+.voiceMeta{font-size:12.5px; color:var(--dim); margin-top:2px; line-height:1.35;}
+.voiceCheck{width:22px; height:22px; flex:none; color:var(--accent); opacity:0; transition:opacity .15s ease;}
+.voiceCard.selected .voiceCheck{opacity:1;}
+.voiceCard .playCircleBtn.loading{opacity:.55;}
+.voiceAddHead{display:flex; align-items:center; gap:12px; margin:18px 4px 12px; font-size:15.5px; font-weight:600; color:#fff;}
+.voiceAddHead span{font-size:26px; line-height:1; color:var(--accent); font-weight:300;}
