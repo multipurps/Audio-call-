@@ -1,5 +1,6 @@
 import { normalizePhone } from './lib/phoneNumbers.js';
 import { decodeMonitorFrame } from './lib/monitorFrame.js';
+import { floatToPcm16k, decodeAppCallFrame, describeAppCallMessage, describeAppCallClose, describeMicError } from './lib/appCallAudio.js';
 import { describeMonitorMessage, describeMonitorClose, noAudioMessage, MONITOR_NO_AUDIO_MS } from './lib/monitorStatus.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -1047,6 +1048,7 @@ function minimizeCallScreenToChat() {
 }
 
 function endAssistantCall() {
+  stopAppCallSession({ hangUp: true });
   if (waveRecorder && waveRecorder.state === 'recording') waveRecorder.stop();
   assistantCallOpen = false;
   clearInterval(callTimerInterval);
@@ -1099,37 +1101,239 @@ function openAssistantCallScreen() {
     assistantMuted = !assistantMuted;
     $('callMuteBtn').classList.toggle('active', assistantMuted);
     setCallStatePill(assistantMuted ? 'muted' : 'listening', assistantMuted ? 'Microphone muted' : 'Connected · Listening');
-    if (assistantMuted && waveRecorder?.state === 'recording') waveRecorder.stop();
-    else if (!assistantMuted && assistantCallOpen) startAssistantListening();
+    if (appCall) appCall.muted = assistantMuted;
   };
   $('callKeypadBtn').onclick = () => {
     $('dialStatus').textContent = '';
     updateDialMatch();
     $('keypadDialog').showModal();
   };
-  $('waveRow').onclick = () => {
-    if (waveRecorder && waveRecorder.state === 'recording') waveRecorder.stop();
-    else if (!assistantListening && !assistantSpeaking) startAssistantListening();
+  $('waveRow').onclick = null; // the mic is always open during a live call
+
+  // A real live session: the mic stays open and Emysa answers in her own voice
+  // as the model generates it (GPT-Live, unless the cloned voice is chosen).
+  startAppCallSession();
+}
+
+// ---- In-app Emysa live call ------------------------------------------------
+// One continuous GPT-Live session over a websocket to the assistant service:
+// the microphone streams up the whole call, Emysa's voice streams back as the
+// model generates it, and either side can interrupt. Which engine and voice is
+// used is decided by the service from the user's saved choice (GPT-Live always,
+// except when the cloned voice is selected). The transcript is read from the
+// call row as the service writes it, so it stays visible while you talk.
+let appCall = null;
+
+function stopAppCallSession({ hangUp = false } = {}) {
+  const call = appCall;
+  appCall = null;
+  if (!call) return;
+  clearInterval(call.transcriptTimer);
+  try { if (hangUp && call.ws?.readyState === WebSocket.OPEN) call.ws.send(JSON.stringify({ type: 'hangup' })); } catch {}
+  const closeSoon = () => { try { call.ws?.close(); } catch {} };
+  if (hangUp) setTimeout(closeSoon, 300); else closeSoon();
+  try { call.stream?.getTracks().forEach((t) => t.stop()); } catch {}
+  try { call.micNode?.disconnect(); call.source?.disconnect(); } catch {}
+  for (const src of call.sources || []) { try { src.stop(); } catch {} }
+  $('waveRow')?.classList.remove('speaking');
+}
+
+function finishAppCallUi(text, { close = false } = {}) {
+  stopAppCallSession();
+  setCallStatePill('connecting', text);
+  if (close) setTimeout(() => { if (assistantCallOpen) endAssistantCall(); }, 1200);
+}
+
+async function startAppCallSession() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx || !navigator.mediaDevices?.getUserMedia || !window.WebSocket) {
+    setCallStatePill('connecting', 'This device cannot do live voice calls');
+    return;
+  }
+  setCallStatePill('connecting', 'Connecting to Emysa…');
+  // Created and resumed inside the tap gesture: iOS refuses audio otherwise.
+  const ctx = getAssistantAudioCtx();
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+    });
+  } catch (err) {
+    finishAppCallUi(describeMicError(err));
+    return;
+  }
+  if (!assistantCallOpen) { stream.getTracks().forEach((t) => t.stop()); return; }
+
+  let started;
+  try {
+    const resp = await authedFetch('/api/calls?action=app-call-start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: currentChatSessionId }),
+    });
+    started = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      stream.getTracks().forEach((t) => t.stop());
+      finishAppCallUi(started?.error || 'Could not start the call');
+      return;
+    }
+  } catch {
+    stream.getTracks().forEach((t) => t.stop());
+    finishAppCallUi('Could not reach the app server to start the call. Check your connection');
+    return;
+  }
+  if (!assistantCallOpen) { stream.getTracks().forEach((t) => t.stop()); return; }
+
+  let ws;
+  try {
+    ws = new WebSocket(started.url);
+  } catch {
+    stream.getTracks().forEach((t) => t.stop());
+    finishAppCallUi('The call address is invalid. PUBLIC_ASSISTANT_WS_URL must be a wss:// address');
+    return;
+  }
+  ws.binaryType = 'arraybuffer';
+
+  const out = ctx.createGain();
+  out.gain.value = 1;
+  out.connect(ctx.destination);
+  const call = {
+    ws, stream, ctx, out, callId: started.callId, opened: false, explained: false, ended: false,
+    muted: assistantMuted, sources: new Set(), nextTime: 0, renderedLines: 0, transcriptTimer: null,
+    source: null, micNode: null, pending: [], pendingSamples: 0,
+  };
+  appCall = call;
+  const JITTER = 0.06;
+  const MAX_LAG = 1.2;
+
+  // -- microphone -> service ------------------------------------------------
+  const sendPcm = (floats) => {
+    if (call.muted || ws.readyState !== WebSocket.OPEN) return;
+    const pcm = floatToPcm16k(floats, ctx.sampleRate);
+    if (pcm.length) ws.send(pcm.buffer);
+  };
+  call.source = ctx.createMediaStreamSource(stream);
+  const startMic = async () => {
+    try {
+      if (!ctx.audioWorklet) throw new Error('no worklet');
+      const code = "class P extends AudioWorkletProcessor{process(i){const c=i[0]&&i[0][0];if(c)this.port.postMessage(c.slice(0));return true}}registerProcessor('mic-tap',P)";
+      const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+      await ctx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
+      const node = new AudioWorkletNode(ctx, 'mic-tap');
+      let acc = [];
+      let n = 0;
+      const need = Math.round(ctx.sampleRate * 0.02);
+      node.port.onmessage = (e) => {
+        acc.push(e.data); n += e.data.length;
+        if (n >= need) {
+          const merged = new Float32Array(n);
+          let o = 0; for (const c of acc) { merged.set(c, o); o += c.length; }
+          acc = []; n = 0;
+          sendPcm(merged);
+        }
+      };
+      call.source.connect(node);
+      // A silent sink keeps the tap pulled by the graph without any audible output.
+      const sink = ctx.createGain();
+      sink.gain.value = 0;
+      node.connect(sink);
+      sink.connect(ctx.destination);
+      call.micNode = node;
+    } catch {
+      // Older Safari: ScriptProcessor still works.
+      const node = ctx.createScriptProcessor(1024, 1, 1);
+      node.onaudioprocess = (e) => sendPcm(new Float32Array(e.inputBuffer.getChannelData(0)));
+      call.source.connect(node);
+      const sink = ctx.createGain();
+      sink.gain.value = 0;
+      node.connect(sink);
+      sink.connect(ctx.destination);
+      call.micNode = node;
+    }
   };
 
-  // Ring once, like a real call being placed, before Emysa "picks up" —
-  // then speak first on connect, since a real call has a greeting before
-  // it ever waits on you rather than only after your own input round-trips.
-  (async () => {
-    setCallStatePill('connecting', 'Ringing…');
-    const ctx = getAssistantAudioCtx();
-    if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
-    await playRingTone(ctx);
-    if (!assistantCallOpen) return;
-    setCallStatePill('listening', 'Connected · Listening');
-    // Short and varied so it never sounds like a script.
-    const openers = ['Yeah, go ahead.', 'Mm-hm, I’m listening.', 'Okay, tell me.', 'Yes? What’s going on?'];
-    const greeting = openers[Math.floor(Math.random() * openers.length)];
-    appendCallTranscriptLine('ai', greeting);
-    await speakReply(greeting);
-    if (assistantCallOpen && !assistantMuted) startAssistantListening();
-  })();
+  // -- service -> speaker (gapless, interruptible) ----------------------------
+  const play = (frame) => {
+    const { rate, samples } = frame;
+    const audio = ctx.createBuffer(1, samples.length, rate);
+    const ch = audio.getChannelData(0);
+    for (let i = 0; i < samples.length; i++) ch[i] = samples[i] / 32768;
+    const src = ctx.createBufferSource();
+    src.buffer = audio;
+    src.connect(out);
+    const now = ctx.currentTime;
+    if (!call.nextTime || call.nextTime < now) call.nextTime = now + (call.nextTime ? 0.03 : JITTER);
+    if (call.nextTime > now + MAX_LAG) return;
+    src.start(call.nextTime);
+    call.nextTime += audio.duration;
+    call.sources.add(src);
+    $('waveRow')?.classList.add('speaking');
+    if (!call.muted) setCallStatePill('speaking', 'Emysa is speaking');
+    src.onended = () => {
+      call.sources.delete(src);
+      if (!call.sources.size && appCall === call) {
+        $('waveRow')?.classList.remove('speaking');
+        if (!call.muted) setCallStatePill('listening', 'Connected · Listening');
+      }
+    };
+  };
+  const clearPlayback = () => {
+    for (const src of call.sources) { try { src.stop(); } catch {} }
+    call.sources.clear();
+    call.nextTime = 0;
+    $('waveRow')?.classList.remove('speaking');
+  };
+
+  // -- transcript from the call row -------------------------------------------
+  const pollTranscript = async () => {
+    if (appCall !== call || !call.callId) return;
+    try {
+      const { data } = await supabase.from('calls').select('transcript').eq('id', call.callId).maybeSingle();
+      const lines = Array.isArray(data?.transcript) ? data.transcript : [];
+      for (; call.renderedLines < lines.length; call.renderedLines++) {
+        const line = lines[call.renderedLines];
+        const text = line?.content || line?.text || '';
+        if (text) appendCallTranscriptLine(line?.speaker || line?.role, text);
+      }
+    } catch {}
+  };
+
+  ws.onopen = () => { call.opened = true; };
+  ws.onmessage = (event) => {
+    if (appCall !== call) return;
+    if (typeof event.data === 'string') {
+      let msg = null;
+      try { msg = JSON.parse(event.data); } catch {}
+      if (msg?.type === 'interrupt') { clearPlayback(); return; }
+      const info = describeAppCallMessage(msg);
+      if (!info) return;
+      if (info.kind === 'error') { call.explained = true; finishAppCallUi(info.text); return; }
+      if (info.kind === 'ended') { call.ended = true; finishAppCallUi('Call ended', { close: true }); return; }
+      if (msg.type === 'ready') {
+        call.opened = true;
+        startMic();
+        setCallStatePill('listening', 'Connected · Listening');
+        call.transcriptTimer = setInterval(pollTranscript, 1200);
+      }
+      return;
+    }
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    const frame = decodeAppCallFrame(event.data);
+    if (frame) play(frame);
+  };
+  const onGone = (event) => {
+    if (appCall !== call) return;
+    const text = describeAppCallClose({ opened: call.opened, code: event?.code, explained: call.explained, ended: call.ended });
+    if (text) finishAppCallUi(text);
+    else stopAppCallSession();
+  };
+  ws.onclose = onGone;
+  ws.onerror = onGone;
 }
+
 
 async function startAssistantListening() {
   if (assistantListening || assistantMuted || assistantSpeaking || !assistantCallOpen) return;

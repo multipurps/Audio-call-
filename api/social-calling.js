@@ -83,7 +83,7 @@ export default async function handler(req, res) {
 // Telegram call to that same number. Set RELAY_CALLBACK_SECRET the same on
 // both mp-relay and here for this to be checked, and APP_API_URL on mp-relay
 // to this app's real deployed domain.
-const PLATFORM_LABELS = { whatsapp: 'WhatsApp', telegram: 'Telegram', signal: 'Signal' };
+const PLATFORM_LABELS = { whatsapp: 'WhatsApp', telegram: 'Telegram', signal: 'Signal', app: 'Emysa' };
 
 async function relayCallStatus(req, res, supabase) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
@@ -127,7 +127,7 @@ async function relayCallStatus(req, res, supabase) {
   if ((!bodyUserId && !incomingCallId && !platformCallId) || (!peerIdentifier && !incomingCallId && !platformCallId) || !rawCallStatus) {
     return res.status(400).json({ error: 'userId (or callId), peerIdentifier (or callId) and status required' });
   }
-  if (!['whatsapp', 'telegram', 'signal'].includes(platform)) return res.status(400).json({ error: 'platform must be whatsapp, telegram or signal' });
+  if (!['whatsapp', 'telegram', 'signal', 'app'].includes(platform)) return res.status(400).json({ error: 'platform must be whatsapp, telegram, signal or app' });
 
   // A real chat-session uuid. WaCalls sends the app's own chat session id
   // here; the pipecat end-report and mp-relay send carrier bridge ids

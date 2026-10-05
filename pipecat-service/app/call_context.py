@@ -373,7 +373,7 @@ class CallContext:
         if status not in ("completed", "no_answer", "failed"):
             status = "completed" if active else "failed"
 
-        if settings.public_app_url and self.platform in ("whatsapp", "telegram"):
+        if settings.public_app_url and self.platform in ("whatsapp", "telegram", "app"):
             body = {
                 "callId": self.call_id,
                 "userId": self.user_id,

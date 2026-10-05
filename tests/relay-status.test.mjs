@@ -260,3 +260,26 @@ test('unauthenticated or malformed reports are rejected outright', async () => {
   // No call mutation happened on any rejected report.
   assert.equal(row(f, 'call-a').status, 'ringing');
 });
+
+test('an in-app (platform app) call end gets its status, summary and chat follow-up like any call', async () => {
+  const f = await setup();
+  f.db.tables.calls.push({
+    id: 'call-app', user_id: 'user-1', session_id: '11111111-1111-1111-1111-111111111111',
+    platform: 'app', to_number: 'Emysa', contact_id: null, platform_call_id: 'pc-app-1',
+    status: 'in_progress', objective: 'Have a live voice conversation with the user.',
+    answered_at: f.iso(90_000),
+    transcript: [
+      { speaker: 'user', content: 'Remind me to confirm the venue on Friday.', ts: f.iso(80_000) },
+      { speaker: 'assistant', content: 'Will do. Friday, venue confirmation.', ts: f.iso(70_000) },
+    ],
+    created_at: f.iso(95_000), updated_at: f.iso(95_000),
+  });
+  const res = await relay(f.handler, {
+    callId: 'call-app', userId: 'user-1', sessionId: 'call-pc-app-1', platform: 'app', status: 'completed', durationSeconds: 60,
+  });
+  assert.equal(res.code, 200, JSON.stringify(res.data));
+  const stored = row(f, 'call-app');
+  assert.equal(stored.status, 'completed');
+  assert.ok(stored.ended_at);
+  assert.equal(stored.summary_status, 'completed', 'the summary is generated for an in-app call');
+});

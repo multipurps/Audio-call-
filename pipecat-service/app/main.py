@@ -192,6 +192,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def monitor(session_id: str, websocket: WebSocket) -> None:
         await _handle_monitor(session_id, websocket, state)
 
+    @app.websocket("/app-call/{session_id}")
+    async def app_call(session_id: str, websocket: WebSocket) -> None:
+        await _handle_app_call(session_id, websocket, state)
+
     @app.post("/calls/{session_id}/note")
     async def call_note(session_id: str, request: Request) -> JSONResponse:
         return await _handle_note(session_id, request, state)
@@ -293,6 +297,57 @@ async def _handle_monitor(session_id: str, websocket: WebSocket, state: ServiceS
         )
         with contextlib.suppress(Exception):
             await websocket.close(code=1011)
+
+
+async def _handle_app_call(session_id: str, websocket: WebSocket, state: ServiceState) -> None:
+    """One in-app Emysa call: the browser talks to the same GPT-Live conversation
+    a WhatsApp call uses (the conversation, not this handler, picks the engine
+    and voice from the user's saved choice)."""
+    from app.app_call import AppCallTokenError, BrowserAcafSocket, verify_app_call_token
+
+    settings = state.settings
+    if state.shutting_down:
+        await websocket.close(code=1013)
+        return
+    token = websocket.query_params.get("token") or ""
+    try:
+        user_id = (
+            "mock-user" if settings.mock_mode
+            else verify_app_call_token(settings.bridge_secret or "", token, session_id=session_id)
+        )
+    except AppCallTokenError as exc:
+        logger.warning("app call auth refused", extra={"sessionId": session_id, "reason": str(exc)})
+        with contextlib.suppress(Exception):
+            await websocket.accept()
+            await websocket.send_json({"type": "error", "reason": "auth-refused", "detail": str(exc)})
+            await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    peer = BrowserAcafSocket(websocket, secret=settings.bridge_secret or "", session_id=session_id, user_id=user_id)
+    bridge: AcafBridge | None = None
+    try:
+        bridge = AcafBridge(websocket=peer, settings=settings, registry=state.registry)  # type: ignore[arg-type]
+        state.active_bridges.add(bridge)
+        logger.info("app call started", extra={"sessionId": session_id})
+        await bridge.run()
+    except WebSocketDisconnect:
+        logger.info("app call websocket disconnected", extra={"sessionId": session_id})
+    except CapacityError as exc:
+        logger.warning("refusing app call", extra={"reason": str(exc)})
+        with contextlib.suppress(Exception):
+            await websocket.send_json({"type": "error", "reason": "busy"})
+            await websocket.close(code=1013)
+    except Exception as exc:  # noqa: BLE001 - one call must not kill the service
+        logger.exception("app call failed", extra={"error": type(exc).__name__, "detail": str(exc)[:300]})
+        with contextlib.suppress(Exception):
+            await websocket.send_json({"type": "error", "reason": "call-failed"})
+            await websocket.close(code=1011)
+    finally:
+        if bridge is not None:
+            state.active_bridges.discard(bridge)
+            with contextlib.suppress(Exception):
+                await bridge.close("app-call-ended")
 
 
 async def _reaper_loop(state: ServiceState) -> None:

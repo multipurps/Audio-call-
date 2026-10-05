@@ -1,7 +1,8 @@
 import { confirmCallPlan } from '../lib/callPlans.js';
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { endCallRow } from '../lib/callHangup.js';
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
+import { resolveVoiceChoice } from '../lib/voiceChoice.js';
 import { callSessionId } from '../lib/callNote.js';
 import { maybeGenerateCallSummary, waitForCallSummary } from '../lib/callSession.js';
 import {
@@ -25,6 +26,7 @@ export default async function handler(req, res) {
     case 'delete': return deleteCalls(req, res, supabase, userId);
     case 'get': return getCall(req, res, supabase, userId);
     case 'monitor-token': return monitorToken(req, res, supabase, userId);
+    case 'app-call-start': return appCallStart(req, res, supabase, userId);
     case 'summarize': return summarizeCall(req, res, supabase, userId);
     // Phone line (Twilio): bring your own number, or rent one.
     case 'line-get': case 'line-verify-start': case 'line-verify-status':
@@ -43,6 +45,65 @@ export default async function handler(req, res) {
 // The same token shape is verified by pipecat-service/app/monitor.py:
 // HMAC-SHA256(secret, "monitor:{sessionId}:{userId}:{exp}") as
 // "{exp}.{userId}.{hexsig}".
+// The in-app Emysa call: a live GPT-Live session (mic open the whole call, the
+// model's voice streamed back), the same conversation WhatsApp calls run. The
+// service picks the engine and voice from the user's saved choice: GPT-Live
+// always, except when the user chose their cloned voice. This only creates the
+// call row (so persona, transcript, summary and push work like any call) and
+// mints a short-lived token for the browser; the browser never sees the secret.
+async function appCallStart(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const secret = process.env.ASSISTANT_BRIDGE_SECRET;
+  let wsBase = (process.env.PUBLIC_ASSISTANT_WS_URL || process.env.ASSISTANT_BRIDGE_URL || '').trim();
+  if (!secret) return res.status(501).json({ error: 'Live calls are not set up: ASSISTANT_BRIDGE_SECRET is missing on Vercel', code: 'missing-secret' });
+  if (!wsBase) return res.status(501).json({ error: 'Live calls are not set up: PUBLIC_ASSISTANT_WS_URL is missing on Vercel', code: 'missing-url' });
+  wsBase = wsBase.replace(/^https:\/\//i, 'wss://').replace(/^http:\/\//i, 'ws://');
+  if (!/^wss:\/\//i.test(wsBase) && !/^ws:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(wsBase)) {
+    return res.status(501).json({ error: 'Live calls need a secure URL: set PUBLIC_ASSISTANT_WS_URL to a wss:// address', code: 'insecure-url' });
+  }
+
+  // Link the call to the chat it was started from, so the summary lands in that thread.
+  let chatSessionId = null;
+  const requested = req.body?.sessionId;
+  if (typeof requested === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requested)) {
+    const { data: chat } = await supabase.from('chat_sessions').select('id').eq('id', requested).eq('user_id', userId).maybeSingle();
+    chatSessionId = chat?.id || null;
+  }
+
+  const choice = await resolveVoiceChoice(supabase, userId);
+  const platformCallId = randomUUID();
+  const sessionId = `call-${platformCallId}`;
+  const { data: row, error } = await supabase.from('calls').insert({
+    user_id: userId,
+    platform: 'app',
+    platform_call_id: platformCallId,
+    to_number: 'Emysa',
+    objective: 'Have a live voice conversation with the user.',
+    instructions: 'This is a live voice conversation directly with the person you work for, inside their app. You are Emysa, their assistant. Speak to them directly, naturally and briefly, as you would on a call with someone you know well. There is nobody else on this call to speak to or to represent.',
+    status: 'in_progress',
+    answered_at: new Date().toISOString(),
+    session_id: chatSessionId,
+    transcript: [],
+  }).select('id').single();
+  if (error || !row) {
+    console.error(`appCallStart: could not create the call row user=${userId} error=${error?.message}`);
+    return res.status(500).json({ error: 'Could not start the call' });
+  }
+
+  const exp = Math.floor(Date.now() / 1000) + 600;
+  const sig = createHmac('sha256', secret).update(`appcall:${sessionId}:${userId}:${exp}`).digest('hex');
+  const token = `${exp}.${userId}.${sig}`;
+  const base = wsBase.replace(/\/stream\/?$/, '').replace(/\/+$/, '');
+  console.log(`[voice] app call start call=${row.id} engine=${choice.mode === 'custom' ? 'classic' : 'gpt-live'} provider=${choice.provider} voice=${choice.mode === 'custom' ? 'clone' : choice.voiceId} source=${choice.source}`);
+  return res.status(200).json({
+    callId: row.id,
+    sessionId,
+    engine: choice.mode === 'custom' ? 'classic' : 'gpt-live',
+    sampleRate: 16000,
+    url: `${base}/app-call/${encodeURIComponent(sessionId)}?token=${encodeURIComponent(token)}`,
+  });
+}
+
 async function monitorToken(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { callId } = req.body || {};
