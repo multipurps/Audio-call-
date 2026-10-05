@@ -62,7 +62,7 @@ export function database(seed = {}) {
 
 export async function loadApi(file, db, fetcher, extraEnv = {}) {
   const context = vm.createContext({ console, URLSearchParams, Buffer, Date, Map, Set, AbortSignal,
-    FormData, Blob,
+    FormData, Blob, setTimeout, clearTimeout,
     fetch: fetcher, process: { env: { OPENAI_API_KEY: 'test-only', TWILIO_ACCOUNT_SID: 'test-only',
       TWILIO_AUTH_TOKEN: 'test-only', TWILIO_FROM_NUMBER: '+14155550000', PUBLIC_APP_URL: 'https://example.test', ...extraEnv } },
   });

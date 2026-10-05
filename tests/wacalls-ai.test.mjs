@@ -4,7 +4,7 @@ import { database, loadApi, request } from './helpers.mjs';
 
 const ENV = { WACALLS_RELAY_URL: 'https://relay.test', WACALLS_INTERNAL_SECRET: 'secret-test-value' };
 
-function fixture({ start, attach, hangup } = {}) {
+function fixture({ start, attach, hangup, history } = {}) {
   const db = database({
     whatsapp_accounts: [{ user_id: 'user-1', wacalls_session_id: 'wa-sess-1', status: 'connected' }],
     chat_sessions: [{ id: 'chat-1', user_id: 'user-1', title: 'New chat', archived: false }],
@@ -14,7 +14,8 @@ function fixture({ start, attach, hangup } = {}) {
     const path = url.replace('https://relay.test', '');
     calls.push({ path, method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null, timeoutSignal: options.signal });
     let handler;
-    if (path.endsWith('/calls') && options.method === 'POST') handler = start;
+    if (path.endsWith('/history')) handler = history;
+    else if (path.endsWith('/calls') && options.method === 'POST') handler = start;
     else if (path.endsWith('/ai')) handler = attach;
     else if (options.method === 'DELETE') handler = hangup;
     const result = handler ? await handler() : { status: 200, body: {} };
@@ -130,4 +131,45 @@ test('the assistant chat path attaches the AI and tells the user when it cannot'
   assert.ok(paths.includes('DELETE /api/sessions/wa-sess-1/calls/call-3'));
   const said = JSON.stringify(res.data);
   assert.ok(!/Calling Alex on WhatsApp/.test(said), 'must not claim the call is going ahead');
+});
+
+test('"no such call" + a call the relay says ended reports the real reason, does not hang up, and keeps the WhatsApp link', async () => {
+  const f = fixture({
+    start: ok({ call: { callId: 'call-5' } }),
+    attach: fail(404, 'no such call'),
+    history: ok({ rows: [{ callId: 'call-5', endedAt: 1, endReason: 'declined' }] }),
+    hangup: ok({}),
+  });
+  const res = await place(f);
+  assert.equal(res.code, 502, 'a call-level 404 must not be surfaced as a dead session');
+  assert.match(res.data.error, /ended before the assistant could join/);
+  assert.match(res.data.error, /declined/);
+  assert.ok(!f.calls.some((c) => c.method === 'DELETE'), 'nothing to hang up - the call already ended');
+  assert.equal(f.db.tables.whatsapp_accounts[0].wacalls_session_id, 'wa-sess-1', 'session must not be cleared');
+});
+
+test('"no such call" while the call is still live is retried once and then succeeds', async () => {
+  let attaches = 0;
+  const f = fixture({
+    start: ok({ call: { callId: 'call-6' } }),
+    attach: async () => (++attaches === 1 ? { status: 404, body: { error: 'no such call' } } : { status: 200, body: { status: 'attached' } }),
+    history: ok({ rows: [{ callId: 'call-6' }] }),
+  });
+  const res = await place(f);
+  assert.equal(res.code, 200);
+  assert.equal(res.data.aiAttached, true);
+  assert.equal(attaches, 2);
+});
+
+test('if the history lookup itself fails, the failure is still reported (after one retry) and the call is hung up', async () => {
+  const f = fixture({
+    start: ok({ call: { callId: 'call-8' } }),
+    attach: fail(404, 'no such call'),
+    history: fail(500, 'boom'),
+    hangup: ok({}),
+  });
+  const res = await place(f);
+  assert.equal(res.code, 502);
+  assert.match(res.data.error, /assistant could not join/);
+  assert.equal(f.db.tables.whatsapp_accounts[0].wacalls_session_id, 'wa-sess-1');
 });
