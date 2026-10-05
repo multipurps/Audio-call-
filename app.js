@@ -1,6 +1,7 @@
 import { normalizePhone } from './lib/phoneNumbers.js';
 import { decodeMonitorFrame } from './lib/monitorFrame.js';
 import { floatToPcm16k, decodeAppCallFrame, describeAppCallMessage, describeAppCallClose, describeMicError } from './lib/appCallAudio.js';
+import { primeAudioSession, createCallOutput, watchLifecycle, pickOutputMode, micNeedsRestart } from './lib/appCallOutput.js';
 import { describeMonitorMessage, describeMonitorClose, noAudioMessage, MONITOR_NO_AUDIO_MS } from './lib/monitorStatus.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -1135,6 +1136,7 @@ function stopAppCallSession({ hangUp = false } = {}) {
   try { call.stream?.getTracks().forEach((t) => t.stop()); } catch {}
   try { call.micNode?.disconnect(); call.source?.disconnect(); } catch {}
   for (const src of call.sources || []) { try { src.stop(); } catch {} }
+  try { call.unwatch?.(); call.output?.dispose(); } catch {}
   $('waveRow')?.classList.remove('speaking');
 }
 
@@ -1151,9 +1153,17 @@ async function startAppCallSession() {
     return;
   }
   setCallStatePill('connecting', 'Connecting to Emysa…');
-  // Created and resumed inside the tap gesture: iOS refuses audio otherwise.
+  // Everything here runs inside the tap gesture: iOS refuses audio otherwise.
+  // 1) Tell WebKit this page is a call BEFORE the mic opens.
+  // 2) Reply audio is rendered as a MediaStream track (see lib/appCallOutput.js),
+  //    never through ctx.destination, so iOS keeps it at call volume while the
+  //    mic is live. The element is started now so the tap unlocks it.
+  const audioDebug = (...a) => { try { if (localStorage.getItem('emysaAudioDebug')) console.log('[call-audio]', ...a); } catch {} };
+  const session = primeAudioSession(navigator);
   const ctx = getAssistantAudioCtx();
-  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  const output = createCallOutput({ ctx, doc: document, nav: navigator, mode: pickOutputMode(localStorage), log: audioDebug });
+  void output.start('tap');
+  audioDebug('start', { mode: output.mode, sessionType: session.type, ctx: ctx.state, rate: ctx.sampleRate });
 
   let stream;
   try {
@@ -1161,10 +1171,11 @@ async function startAppCallSession() {
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
     });
   } catch (err) {
+    output.dispose();
     finishAppCallUi(describeMicError(err));
     return;
   }
-  if (!assistantCallOpen) { stream.getTracks().forEach((t) => t.stop()); return; }
+  if (!assistantCallOpen) { stream.getTracks().forEach((t) => t.stop()); output.dispose(); return; }
 
   let started;
   try {
@@ -1176,31 +1187,32 @@ async function startAppCallSession() {
     started = await resp.json().catch(() => ({}));
     if (!resp.ok) {
       stream.getTracks().forEach((t) => t.stop());
+      output.dispose();
       finishAppCallUi(started?.error || 'Could not start the call');
       return;
     }
   } catch {
     stream.getTracks().forEach((t) => t.stop());
+    output.dispose();
     finishAppCallUi('Could not reach the app server to start the call. Check your connection');
     return;
   }
-  if (!assistantCallOpen) { stream.getTracks().forEach((t) => t.stop()); return; }
+  if (!assistantCallOpen) { stream.getTracks().forEach((t) => t.stop()); output.dispose(); return; }
 
   let ws;
   try {
     ws = new WebSocket(started.url);
   } catch {
     stream.getTracks().forEach((t) => t.stop());
+    output.dispose();
     finishAppCallUi('The call address is invalid. PUBLIC_ASSISTANT_WS_URL must be a wss:// address');
     return;
   }
   ws.binaryType = 'arraybuffer';
 
-  const out = ctx.createGain();
-  out.gain.value = 1;
-  out.connect(ctx.destination);
+  const out = output.input; // reply audio is mixed here; never connected to ctx.destination in stream mode
   const call = {
-    ws, stream, ctx, out, callId: started.callId, opened: false, explained: false, ended: false,
+    ws, stream, ctx, out, output, callId: started.callId, opened: false, explained: false, ended: false,
     muted: assistantMuted, sources: new Set(), nextTime: 0, renderedLines: 0, transcriptTimer: null,
     source: null, micNode: null, pending: [], pendingSamples: 0,
   };
@@ -1236,24 +1248,45 @@ async function startAppCallSession() {
         }
       };
       call.source.connect(node);
-      // A silent sink keeps the tap pulled by the graph without any audible output.
-      const sink = ctx.createGain();
-      sink.gain.value = 0;
-      node.connect(sink);
-      sink.connect(ctx.destination);
+      // Keeps the tap pulled by the graph without any audible output (and
+      // without opening the Web Audio output unit).
+      output.silentSink(node);
       call.micNode = node;
     } catch {
       // Older Safari: ScriptProcessor still works.
       const node = ctx.createScriptProcessor(1024, 1, 1);
       node.onaudioprocess = (e) => sendPcm(new Float32Array(e.inputBuffer.getChannelData(0)));
       call.source.connect(node);
-      const sink = ctx.createGain();
-      sink.gain.value = 0;
-      node.connect(sink);
-      sink.connect(ctx.destination);
+      output.silentSink(node);
       call.micNode = node;
     }
   };
+
+  // -- screen lock / app switch -------------------------------------------------
+  // iOS interrupts the audio session on lock. Bring the output back (and the mic,
+  // if the OS ended it) when the page returns; the call itself is untouched.
+  const reacquireMic = async () => {
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+      });
+      if (appCall !== call) { fresh.getTracks().forEach((t) => t.stop()); return; }
+      try { call.source?.disconnect(); } catch {}
+      call.stream = fresh;
+      call.source = ctx.createMediaStreamSource(fresh);
+      if (call.micNode) call.source.connect(call.micNode);
+      audioDebug('mic reacquired');
+    } catch (err) {
+      audioDebug('mic reacquire failed', err?.name);
+    }
+  };
+  call.unwatch = watchLifecycle({
+    doc: document, win: window, ctx, output,
+    onRecovered: (reason, r) => {
+      audioDebug('recovered', reason, r);
+      if (appCall === call && micNeedsRestart(call.stream)) void reacquireMic();
+    },
+  });
 
   // -- service -> speaker (gapless, interruptible) ----------------------------
   const play = (frame) => {
