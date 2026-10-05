@@ -260,9 +260,17 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .chatAvatar{width:26px; height:26px; border-radius:50%; flex:none; background:var(--panel); color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; overflow:hidden;}
 .chatAvatar img{width:100%; height:100%; object-fit:cover;}
 .chatMsg{max-width:82%; font-size:15px; line-height:1.45; overflow-wrap:anywhere; word-break:break-word; min-width:0;}
-.chatMsgUser{align-self:flex-end; background:var(--panel); color:#fff; padding:10px 16px; border-radius:18px 18px 4px 18px;}
-.chatMsgAssistant{align-self:flex-start; color:var(--dim);}
+/* iMessage-style bubbles: solid blue for the user, dark gray for Emysa,
+   each with a tail corner on the side it points toward. */
+.chatMsgUser{align-self:flex-end; background:#0b84ff; color:#fff; padding:10px 16px; border-radius:18px 18px 4px 18px;}
+.chatMsgAssistant{align-self:flex-start; background:#26262a; color:#fff; padding:10px 16px; border-radius:18px 18px 18px 4px;}
 .chatMsgTappable{cursor:pointer; text-decoration:underline; text-decoration-color:rgba(255,255,255,0.25); text-underline-offset:3px;}
+.miniToast{
+  position:fixed; left:50%; bottom:120px; transform:translateX(-50%) translateY(10px);
+  background:rgba(30,30,30,.95); color:#fff; font-size:13.5px; font-weight:600; padding:8px 16px;
+  border-radius:20px; opacity:0; pointer-events:none; transition:opacity .15s ease, transform .15s ease; z-index:200;
+}
+.miniToast.show{opacity:1; transform:translateX(-50%) translateY(0);}
 .chatDayDivider{align-self:center; font-size:11.5px; color:var(--dim); opacity:0.7; margin:6px 0;}
 
 
@@ -593,20 +601,29 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .recentChatMenuItem.danger{color:#ff6b6b;}
 .recentChatMenuItem:active{background:rgba(255,255,255,0.08);}
 
-/* ---------- recent calls — exact copy of the reference iOS screenshot ---------- */
+/* ---------- Recent: card rows with an avatar, like the reference screenshot.
+   #screen-recent h1.pageTitle{display:none} further down hides the title (an
+   Arena change) so the search bar carries its own top safe-area margin here
+   instead of relying on the title's height to clear the notch. */
 #screen-recent.active{display:flex; flex-direction:column; background:#000;}
-#screen-recent h1.pageTitle{font-size:27px; font-weight:800; color:#fff; padding-top:max(env(safe-area-inset-top,0px),46px); margin-bottom:12px;}
-#screen-recent .searchBar{background:#1c1c1e; border:none; border-radius:11px; color:#8e8e93;}
+#screen-recent .searchBar{
+  background:#1c1c1e; border:none; border-radius:12px; color:#8e8e93;
+  margin:calc(var(--safe-top) + 14px) 0 14px;
+}
 #screen-recent .searchBar svg{color:#8e8e93;}
 #screen-recent .searchBar input{color:#fff; font-size:14px;}
 #screen-recent .searchBar input::placeholder{color:#8e8e93;}
 #screen-recent .savedChatRow{
-  display:flex; align-items:center; gap:10px; background:none; border:none; border-radius:0;
-  padding:12px 0; border-bottom:1px solid #262628; margin-bottom:0; cursor:pointer;
+  display:flex; align-items:center; gap:12px; width:100%; background:#1c1c1e;
+  border:none; border-radius:16px; padding:12px 14px; margin-bottom:8px; cursor:pointer;
 }
-#screen-recent .savedChatRow:last-child{border-bottom:none;}
-#screen-recent .savedChatTitle{font-size:16px; font-weight:600; color:#fff;}
-#screen-recent .savedChatDate{font-size:13px; color:#8e8e93;}
+#screen-recent .savedChatRow:active{background:#262628;}
+.savedChatAvatar{
+  width:44px; height:44px; border-radius:50%; flex:none; color:#fff;
+  display:flex; align-items:center; justify-content:center; font-weight:700; font-size:17px;
+}
+#screen-recent .savedChatTitle{font-size:15.5px; font-weight:600; color:#fff;}
+#screen-recent .savedChatDate{font-size:12.5px; color:#8e8e93;}
 #screen-recent .recentChatKebabBtn{color:#8e8e93;}
 #screen-recent .recentChatMenu{background:#26262a; border:none; box-shadow:0 12px 40px rgba(0,0,0,.5);}
 #screen-recent .recentChatMenuItem:active{background:rgba(255,255,255,.08);}

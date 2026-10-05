@@ -489,6 +489,51 @@ function formatDayLabel(iso) {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+// Long-press-to-copy, since the browser's own text-selection "Copy" works
+// inconsistently across mobile browsers for short tap targets like a chat
+// bubble. Mirrors makeSwipeDelete's pattern: a held pointerdown fires the
+// action and swallows the click that would otherwise follow it.
+function attachLongPressCopy(el, getText) {
+  let timer = null;
+  let longPressed = false;
+  el.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    longPressed = false;
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      longPressed = true;
+      try {
+        await navigator.clipboard.writeText(getText());
+        showToast('Copied');
+      } catch {
+        showToast('Could not copy');
+      }
+    }, 500);
+  });
+  const cancel = () => clearTimeout(timer);
+  el.addEventListener('pointerup', cancel);
+  el.addEventListener('pointermove', cancel);
+  el.addEventListener('pointerleave', cancel);
+  el.addEventListener('pointercancel', cancel);
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
+  el.addEventListener('click', (e) => { if (longPressed) { e.stopImmediatePropagation(); e.preventDefault(); longPressed = false; } }, true);
+}
+function showToast(text) {
+  let toast = $('miniToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'miniToast';
+    toast.className = 'miniToast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = text;
+  toast.classList.remove('show');
+  void toast.offsetWidth;
+  toast.classList.add('show');
+  clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => toast.classList.remove('show'), 1400);
+}
+
 function appendChatBubble(m) {
   const row = document.createElement('div');
   row.className = `chatMsgRow ${m.role === 'user' ? 'chatMsgRowUser' : 'chatMsgRowAssistant'}`;
@@ -512,6 +557,7 @@ function appendChatBubble(m) {
     el.addEventListener('click', () => openCallFromMessage(m.call_id));
   }
   if (m.call_plan) renderCallPlanAction(el, m.call_plan);
+  attachLongPressCopy(el, () => m.content);
   row.appendChild(avatar);
   row.appendChild(el);
   $('homeChat').appendChild(row);
@@ -1428,16 +1474,12 @@ function showPreCallContext(target, channel) {
   $('briefInput').placeholder = 'Call instructions…';
 }
 function beginPreCall(target, channel) {
-  // Keep one running thread per person: if this contact (or this bare
-  // number, when there's no saved contact) already has a session, pick it
-  // back up instead of leaving whatever chat happened to be open — that's
-  // what lets "Mr A"'s whole call history live under one row in Recent.
-  const existing = recentChatSessions.find((s) => (
-    target.contactId ? s.contact_id === target.contactId : s.call_label === (target.name || target.toNumber)
-  ));
-  if (existing && existing.id !== currentChatSessionId) {
-    openChatSession(existing.id);
-  }
+  // One conversation per person is enforced server-side now (peer_key,
+  // resolvePersonSession) — it folds whatever chat this call started from
+  // into that person's canonical session and tells the client to switch
+  // (sendChatMessage's sessionSwitched handling), matched by phone number
+  // rather than this client's guess at contact_id/label. No need to
+  // pre-emptively switch chats here anymore.
   showPreCallContext(target, channel);
   document.querySelector('[data-tab=home]').click();
   $('briefInput').focus();
@@ -2652,33 +2694,18 @@ async function loadRecentChats() {
   renderRecentChatsList(recentChatSessions);
 }
 
-// Sessions come back newest-first, one per call ever placed — which meant
-// calling the same contact five times produced five separate rows, each
-// just a raw number if the call_plan didn't carry a contact name. Collapse
-// them to one row per contact (or per number, for calls with no saved
-// contact), keeping only the most recent session for that person: that
-// becomes "their" thread going forward, same one beginPreCall() reuses.
-function groupSessionsByContact(sessions) {
-  const seen = new Map();
-  const ordered = [];
-  for (const s of sessions) {
-    const key = s.contact_id || s.call_label || s.id;
-    if (seen.has(key)) continue;
-    seen.set(key, s);
-    ordered.push(s);
-  }
-  return ordered;
-}
-
+// One row per session is already one row per person now — chat_sessions
+// has a unique (user_id, peer_key) index (sql/019), kept that way server-side
+// by resolvePersonSession/lib/personSession.js, matched on phone number
+// rather than contact_id or a free-text label. Nothing to re-group here.
 function renderRecentChatsList(sessions) {
   const list = $('recentChatsList');
   list.innerHTML = '';
-  const grouped = groupSessionsByContact(sessions || []);
-  if (!grouped.length) {
+  if (!sessions?.length) {
     list.innerHTML = `<div class="authHint" style="text-align:left;">No call chats yet — prepare a call from Contacts or call Emysa.</div>`;
     return;
   }
-  for (const s of grouped) {
+  for (const s of sessions) {
     const row = document.createElement('div');
     row.className = 'savedChatRow';
     // Lead with who it is (a saved contact's name, or the number if that's
