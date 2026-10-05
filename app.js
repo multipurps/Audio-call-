@@ -2314,9 +2314,14 @@ function renderCallsList(calls) {
     const el = document.createElement('div');
     el.className = 'recentRow';
 
+    // A muted, per-person gradient (hashed from their name/number) rather
+    // than the flat theme-accent color, which looked identical for every
+    // row and didn't match the soft varied avatar look in the reference.
+    const hue = hueForName(name);
+    const avatarStyle = `background:radial-gradient(circle at 32% 28%, hsl(${hue},45%,68%), hsl(${(hue + 25) % 360},30%,34%));`;
     const avatarHtml = isKnown
-      ? `<div class="recentAvatar">${escapeHtml((name || '?')[0].toUpperCase())}</div>`
-      : `<div class="recentAvatar"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1c0-2.76-3.58-5-8-5z"/></svg></div>`;
+      ? `<div class="recentAvatar" style="${avatarStyle}">${escapeHtml((name || '?')[0].toUpperCase())}</div>`
+      : `<div class="recentAvatar" style="${avatarStyle}"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1c0-2.76-3.58-5-8-5z"/></svg></div>`;
 
     const subtitle = callSummaryLine(latest) || (isKnown ? '' : 'unknown');
     const countBadge = group.length > 1 ? `<span class="recentCount">${group.length}</span>` : '';
@@ -3686,7 +3691,13 @@ async function lineStepDone() {
 
 function openLineSetup() { lineSetupVoluntary = true; loadLineState().then(showLineSetup); }
 $('callingLinesBtn').addEventListener('click', openLineSetup);
-$('lineSetupBack').addEventListener('click', () => { stopLinePolls(); authScreen.classList.add('hidden'); });
+$('lineSetupBack').addEventListener('click', () => {
+  stopLinePolls();
+  authScreen.classList.add('hidden');
+  // Opened voluntarily means it was opened from Connected accounts (Profile) —
+  // return there instead of wherever hiding authScreen happens to reveal.
+  if (lineSetupVoluntary) openSheet('sheet-social-calling');
+});
 $('lineRemoveLink').addEventListener('click', async () => {
   const rented = lineState.line?.mode === 'rent';
   if (!confirm(rented ? 'Release your rented number? You will lose it.' : 'Remove your verified number?')) return;
