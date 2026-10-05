@@ -904,8 +904,6 @@ function shortDateLabel(iso) {
 
 $('homeMenuBtn').addEventListener('click', () => startNewChat());
 
-let waveRecorder = null;
-let waveChunks = [];
 let assistantCallOpen = false;
 let callTranscriptForSummary = [];
 
@@ -990,53 +988,6 @@ function base64ToArrayBuffer(base64) {
 }
 const AUDIO_BTN_HTML = '<div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M16 9C16.5 9.5 17 10.5 17 12C17 13.5 16.5 14.5 16 15M19 6C20.5 7.5 21 10 21 12C21 14 20.5 16.5 19 18M13 3L7 8H5C3.89543 8 3 8.89543 3 10V14C3 15.1046 3.89543 16 5 16H7L13 21V3Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>\n          Speaker';
 const MORE_BTN_HTML = '<div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg></div>\n          More';
-async function speakReply(text) {
-  if (!text || !text.trim() || !assistantCallOpen) return;
-  // Guards startAssistantListening() (and the manual tap-to-talk path)
-  // from ever opening the mic while Emysa's own voice is still coming out
-  // of the speaker — without this, the mic picks up that audio as if the
-  // user said it (there's no real echo cancellation on raw AudioContext
-  // output — see the comment above getAssistantAudioCtx), which both
-  // mis-transcribes Emysa's own words as user speech and, if a reply to
-  // that gets spoken before this one finishes, plays two replies at once.
-  assistantSpeaking = true;
-  setCallStatePill('speaking', 'Emysa speaking…');
-  try {
-    const resp = await authedFetch('/api/assistant?action=speak', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      console.error('speakReply: /api/assistant?action=speak failed:', resp.status, data?.error, data?.detail);
-      if (assistantCallOpen) appendCallTranscriptLine('ai', `[voice output failed: ${data?.error || resp.status}]`);
-      return;
-    }
-    if (!assistantCallOpen) return;
-    const ctx = getAssistantAudioCtx();
-    if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
-    const audioBuffer = await ctx.decodeAudioData(base64ToArrayBuffer(data.audioBase64));
-    await new Promise((resolve) => {
-      const source = ctx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(ctx.destination);
-      source.onended = resolve;
-      try { source.start(); } catch { resolve(); }
-    });
-  } catch (err) {
-    // Voice output failing shouldn't block the text conversation from continuing,
-    // but it should be visible instead of vanishing silently.
-    console.error('speakReply: request threw:', err);
-    if (assistantCallOpen) appendCallTranscriptLine('ai', '[voice output failed: network error]');
-  } finally {
-    assistantSpeaking = false;
-    if (assistantCallOpen) {
-      setCallStatePill(assistantMuted ? 'muted' : 'listening', assistantMuted ? 'Microphone muted' : 'Connected · Listening');
-    }
-  }
-}
-
 // "More" menu on the Emysa call screen - lets you send a photo (camera or
 // library) for Emysa to actually look at, via the vision-capable model
 // (openai/gpt-4o-mini through the same fal.ai proxy used for text turns).
@@ -1112,7 +1063,7 @@ async function sendCallPhoto(file) {
     if (reply && assistantCallOpen) {
       appendCallTranscriptLine('ai', reply);
       callTranscriptForSummary.push({ role: 'user', content: '[sent a photo]' }, { role: 'assistant', content: reply });
-      await speakReply(reply);
+      // Shown as text only: the live GPT-Live session owns the voice for the whole call.
     }
   } catch (err) {
     console.error('sendCallPhoto failed:', err);
@@ -1131,7 +1082,6 @@ function minimizeCallScreenToChat() {
 
 function endAssistantCall() {
   stopAppCallSession({ hangUp: true });
-  if (waveRecorder && waveRecorder.state === 'recording') waveRecorder.stop();
   assistantCallOpen = false;
   clearInterval(callTimerInterval);
   $('callScreen').classList.add('hidden');
@@ -1475,112 +1425,6 @@ async function startAppCallSession() {
   ws.onerror = onGone;
 }
 
-
-async function startAssistantListening() {
-  if (assistantListening || assistantMuted || assistantSpeaking || !assistantCallOpen) return;
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
-    waveChunks = [];
-    // Don't hardcode a mimeType — Safari/iOS doesn't support webm at all
-    // and silently records something else regardless of what you ask for,
-    // so pick from what this browser actually says it supports and use
-    // that same real value later, instead of always claiming "audio/webm".
-    const recorderMime = ['audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg']
-      .find((t) => window.MediaRecorder?.isTypeSupported?.(t)) || '';
-    waveRecorder = recorderMime ? new MediaRecorder(stream, { mimeType: recorderMime }) : new MediaRecorder(stream);
-    assistantListening = true;
-    $('waveRow').classList.add('speaking');
-    waveRecorder.ondataavailable = (e) => waveChunks.push(e.data);
-
-    // Auto-stop on silence, the same idea as the phone-call relay's turn
-    // detection — without this, recording only ever ended if the person
-    // tapped the wave a second time, which they had no reason to know to
-    // do, and just looked like the assistant never responding.
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 512;
-    audioCtx.createMediaStreamSource(stream).connect(analyser);
-    const levels = new Uint8Array(analyser.frequencyBinCount);
-    let hasSpoken = false;
-    let lastLoudAt = Date.now();
-    let watchdog = null;
-
-    function checkSilence() {
-      if (!waveRecorder || waveRecorder.state !== 'recording') return;
-      analyser.getByteTimeDomainData(levels);
-      let sumSq = 0;
-      for (let i = 0; i < levels.length; i++) { const v = (levels[i] - 128) / 128; sumSq += v * v; }
-      const volume = Math.sqrt(sumSq / levels.length);
-      const now = Date.now();
-      if (volume > 0.04) { hasSpoken = true; lastLoudAt = now; }
-      if (hasSpoken && now - lastLoudAt > 900) { waveRecorder.stop(); return; }
-      if (!hasSpoken && now - lastLoudAt > 8000) { waveRecorder.stop(); return; } // gave up waiting for any speech at all
-      watchdog = requestAnimationFrame(checkSilence);
-    }
-    watchdog = requestAnimationFrame(checkSilence);
-
-    waveRecorder.onstop = async () => {
-      cancelAnimationFrame(watchdog);
-      audioCtx.close().catch(() => {});
-      stream.getTracks().forEach((t) => t.stop());
-      assistantListening = false;
-      $('waveRow').classList.remove('speaking');
-      if (waveChunks.length && assistantCallOpen && hasSpoken) {
-        try {
-          const actualMime = waveRecorder.mimeType || recorderMime || 'audio/webm';
-          const blob = new Blob(waveChunks, { type: actualMime });
-          const base64 = await blobToBase64(blob);
-          const resp = await authedFetch('/api/assistant?action=transcribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ audioBase64: base64, mimeType: actualMime }),
-          });
-          const data = await resp.json();
-          if (resp.ok && data.text?.trim()) {
-            appendCallTranscriptLine('user', data.text.trim());
-            callTranscriptForSummary.push({ role: 'user', content: data.text.trim() });
-            setCallStatePill('connecting', 'Emysa thinking…');
-            let shouldTerminateAfterReply = false;
-            await sendChatMessage(data.text.trim(), async (reply, resData) => {
-              if (resData?.endCall) shouldTerminateAfterReply = true;
-              if (assistantCallOpen && reply) {
-                appendCallTranscriptLine('ai', reply);
-                callTranscriptForSummary.push({ role: 'assistant', content: reply });
-                await speakReply(reply);
-              }
-            }, 'call', currentCallChannel());
-            if (shouldTerminateAfterReply && assistantCallOpen) {
-              setCallStatePill('ended', 'Call ended');
-              endAssistantCall();
-              return;
-            }
-          } else if (!resp.ok) {
-            const errText = data.detail ? `${data.error}: ${data.detail}`.slice(0, 300) : (data.error || "Sorry, I didn't catch that.");
-            // Errors are shown in the transcript, never spoken — Emysa's voice
-            // is reserved for actual replies, not failure messages.
-            appendCallTranscriptLine('ai', errText);
-          }
-        } catch (err) {
-          if (assistantCallOpen) {
-            appendCallTranscriptLine('ai', "Sorry, something went wrong there — try again.");
-          }
-        }
-      }
-      // This used to be skipped whenever the block above was never entered
-      // (silence, no speech detected) because that path used a bare
-      // `return` before ever reaching this line - so the mic just went
-      // dead and stayed dead until Mute was toggled twice. Now it always
-      // runs, whichever path was taken above.
-      if (assistantCallOpen && !assistantMuted) startAssistantListening();
-    };
-    waveRecorder.start();
-  } catch (err) {
-    assistantListening = false;
-    alert('Microphone access is needed to talk to Emysa by voice.');
-  }
-}
 
 // ---------- Call channel: Emysa (voice) / WhatsApp / Telegram / Phone ----------
 const CALL_CHANNEL_KEY = 'emysa.callChannel';
