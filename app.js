@@ -98,21 +98,26 @@ async function authedFetch(url, options = {}) {
 }
 
 // ---------- tabs ----------
-document.querySelectorAll('.tabBtn').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tabBtn').forEach((b) => { b.classList.remove('active'); b.removeAttribute('aria-current'); });
-    btn.setAttribute('aria-current', 'page');
-    btn.classList.add('active');
-    document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active', 'fadeIn'));
-    const target = $(`screen-${btn.dataset.tab}`);
-    target.classList.add('active', 'fadeIn');
-    if (btn.dataset.tab === 'contacts') { loadContacts(); renderMyCard(); }
-    $('homeInputBar').classList.toggle('visible', btn.dataset.tab === 'home');
-    if (btn.dataset.tab === 'recent') { loadRecentChats(); loadCalls(); }
-    if (btn.dataset.tab === 'profile') renderProfileHeader();
-    if (btn.dataset.tab === 'home') startMessagePolling(); else stopMessagePolling();
+// Home / Chat / Recent / Profile are the bottom tabs. Contacts is a screen
+// reached from Home (People > See all, More, Call someone) and from Profile; it
+// keeps Home highlighted in the nav since it is a child of Home.
+function showTab(name) {
+  const navTab = name === 'contacts' ? 'home' : name;
+  document.querySelectorAll('.tabBtn').forEach((b) => {
+    const on = b.dataset.tab === navTab;
+    b.classList.toggle('active', on);
+    if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   });
-});
+  document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active', 'fadeIn'));
+  $(`screen-${name}`).classList.add('active', 'fadeIn');
+  if (name === 'contacts') { loadContacts(); renderMyCard(); }
+  $('homeInputBar').classList.toggle('visible', name === 'chat');
+  if (name === 'recent') { loadRecentChats(); loadCalls(); }
+  if (name === 'profile') renderProfileHeader();
+  if (name === 'home') loadHome();
+  if (name === 'chat') startMessagePolling(); else stopMessagePolling();
+}
+document.querySelectorAll('.tabBtn').forEach((btn) => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
 
 
 // ---------- auth ----------
@@ -269,6 +274,8 @@ async function enterApp(session) {
   loadRecentChats();
 
   redeemPendingReferral();
+  loadHome(true);
+  resumePaymentCheck();
 }
 
 async function redeemPendingReferral() {
@@ -1681,7 +1688,7 @@ function renderMyCard() {
   if (userAvatarUrl) avatarEl.appendChild(createSafeAvatarImg(userAvatarUrl));
   else avatarEl.textContent = name[0].toUpperCase();
 }
-$('myCardRow').addEventListener('click', () => document.querySelector('[data-tab=profile]').click());
+$('myCardRow').addEventListener('click', () => showTab('profile'));
 $('contactsAddBtn').addEventListener('click', () => {
   $('contactEditor').open = !$('contactEditor').open;
   if ($('contactEditor').open) $('newContactName').focus();
@@ -1746,7 +1753,7 @@ function beginPreCall(target, channel) {
   // rather than this client's guess at contact_id/label. No need to
   // pre-emptively switch chats here anymore.
   showPreCallContext(target, channel);
-  document.querySelector('[data-tab=home]').click();
+  showTab('chat');
   $('briefInput').focus();
 }
 $('cancelPreCallBtn').addEventListener('click', async () => {
@@ -2644,7 +2651,7 @@ function renderCallsList(calls) {
     // chats works: placing a call folds them into one).
     const sessionId = group.map((x) => x.session_id).find(Boolean);
     const open = () => {
-      if (sessionId) { openChatSession(sessionId); document.querySelector('[data-tab=home]').click(); }
+      if (sessionId) { openChatSession(sessionId); showTab('chat'); }
       else details();
     };
     el.tabIndex = 0;
@@ -3030,7 +3037,7 @@ function renderRecentChatsList(sessions) {
     row.addEventListener('keydown', (e) => { if (e.target === row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); row.click(); } });
     row.addEventListener('click', () => {
       openChatSession(s.id);
-      document.querySelector('#tabBar .tabBtn[data-tab="home"]').click();
+      showTab('chat');
     });
     row.querySelector('.recentChatKebabBtn').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -3091,6 +3098,250 @@ async function loadCalls() {
   lastLoadedCalls = calls || [];
   renderCallsList(lastLoadedCalls);
 }
+
+
+// ---------- Home: command center ----------
+let homeBalance = null;
+let homeLoadedAt = 0;
+
+function formatMinutes(n) {
+  const m = Math.max(0, Math.floor(Number(n) || 0));
+  return `${m} minute${m === 1 ? '' : 's'}`;
+}
+function relTimeShort(iso) {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return '';
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return 'now';
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  return d < 30 ? `${d}d` : shortDateLabel(iso);
+}
+
+function renderBalance() {
+  $('dashMinutes').textContent = homeBalance ? formatMinutes(homeBalance.remaining) : '–';
+  $('dashBalanceSub').textContent = homeBalance?.pending ? 'confirming payment…' : 'remaining';
+}
+
+async function loadBalance() {
+  const resp = await authedFetch('/api/referrals?action=billing').catch(() => null);
+  if (!resp?.ok) return;
+  homeBalance = await resp.json();
+  renderBalance();
+}
+
+async function loadHomePeople() {
+  const [contactsResp, callsResp] = await Promise.all([
+    authedFetch('/api/contacts').catch(() => null),
+    authedFetch('/api/calls?action=list').catch(() => null),
+  ]);
+  if (!contactsResp?.ok) return;
+  const { contacts } = await contactsResp.json();
+  const calls = callsResp?.ok ? ((await callsResp.json()).calls || []) : [];
+  renderHomePeople(contacts || [], calls);
+}
+
+// Only people saved inside Emysa (never device contacts). Most recently called
+// first, then the rest alphabetically; four fit the row.
+function renderHomePeople(contacts, calls) {
+  const lastCall = new Map();
+  for (const call of calls) {
+    if (!call.contact_id || call.call_kind === 'emysa') continue;
+    const prev = lastCall.get(call.contact_id);
+    if (!prev || call.created_at > prev) lastCall.set(call.contact_id, call.created_at);
+  }
+  const ordered = [...contacts].sort((a, b) => {
+    const la = lastCall.get(a.id) || '';
+    const lb = lastCall.get(b.id) || '';
+    return la === lb ? (a.name || '').localeCompare(b.name || '') : (la < lb ? 1 : -1);
+  }).slice(0, 4);
+  const row = $('dashPeopleRow');
+  row.textContent = '';
+  if (!ordered.length) {
+    const empty = document.createElement('div');
+    empty.className = 'dashEmpty';
+    empty.textContent = 'Add someone in Contacts to call them by name.';
+    row.appendChild(empty);
+    return;
+  }
+  for (const c of ordered) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'dashPerson';
+    btn.setAttribute('aria-label', `Call ${c.name}`);
+    const avatar = document.createElement('span');
+    avatar.className = 'dashAvatar';
+    avatar.textContent = ((c.name || '?').trim()[0] || '?').toUpperCase();
+    const name = document.createElement('span');
+    name.className = 'dashPersonName';
+    name.textContent = c.name;
+    const sub = document.createElement('span');
+    sub.className = 'dashPersonSub';
+    sub.textContent = lastCall.has(c.id) ? `Last call · ${relTimeShort(lastCall.get(c.id))}` : 'No calls yet';
+    btn.append(avatar, name, sub);
+    btn.addEventListener('click', () => openContactMethods(c, btn));
+    row.appendChild(btn);
+  }
+}
+
+function loadHome(force = false) {
+  if (!currentSession) return;
+  if (!force && Date.now() - homeLoadedAt < 15000) return;
+  homeLoadedAt = Date.now();
+  loadBalance();
+  loadHomePeople();
+}
+
+// Quick actions. Each one opens something that already exists: no new backend.
+// Scheduling, follow-ups and questions start a fresh chat with a starter line.
+function openChatWith(starter) {
+  startNewChat();
+  showTab('chat');
+  const input = $('briefInput');
+  input.value = starter;
+  input.dispatchEvent(new Event('input'));
+  input.focus();
+  input.setSelectionRange(starter.length, starter.length);
+}
+const HOME_ACTIONS = {
+  call: () => showTab('contacts'),
+  schedule: () => openChatWith('Schedule a call with '),
+  followup: () => openChatWith('Follow up with '),
+  ask: () => openChatWith('Find out '),
+  more: () => $('moreDialog').showModal(),
+};
+document.querySelectorAll('#dashActions .dashAction').forEach((btn) => btn.addEventListener('click', () => HOME_ACTIONS[btn.dataset.action]?.()));
+$('dashSettingsBtn').addEventListener('click', () => showTab('profile'));
+$('dashPeopleAll').addEventListener('click', () => showTab('contacts'));
+document.querySelectorAll('[data-more]').forEach((btn) => btn.addEventListener('click', () => {
+  $('moreDialog').close();
+  const which = btn.dataset.more;
+  if (which === 'keypad') { showTab('contacts'); $('openKeypadBtn').click(); }
+  if (which === 'contacts') showTab('contacts');
+  if (which === 'newchat') { startNewChat(); showTab('chat'); $('briefInput').focus(); }
+}));
+
+// ---------- Add time (paid through Bachs hosted checkout) ----------
+// The payment page is opened as a separate window so the installed PWA is never
+// navigated away. The minutes are credited server-side (signed webhook, or the
+// verify call below when the app comes back to the foreground), so nothing here
+// can add minutes by itself.
+const PAY_FLAG = 'emysa_pay_started';
+const PAY_FLAG_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+const formatPrice = (amount, currency) => {
+  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(Number(amount)); }
+  catch { return `${amount} ${currency}`; }
+};
+const payPending = () => {
+  const at = Number(localStorage.getItem(PAY_FLAG) || 0);
+  if (at && Date.now() - at > PAY_FLAG_MAX_AGE_MS) { localStorage.removeItem(PAY_FLAG); return false; }
+  return Boolean(at);
+};
+
+function renderAddTimePacks() {
+  const box = $('addTimePacks');
+  box.textContent = '';
+  $('addTimeBalance').textContent = homeBalance ? `${formatMinutes(homeBalance.remaining)} remaining` : '';
+  if (!homeBalance?.payments || !homeBalance.packs?.length) {
+    $('addTimeStatus').textContent = homeBalance ? 'Adding time is not available yet.' : 'Could not load options. Check your connection and try again.';
+    return;
+  }
+  for (const pack of homeBalance.packs) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'addTimePack';
+    const label = document.createElement('span');
+    label.textContent = formatMinutes(pack.minutes);
+    const price = document.createElement('span');
+    price.className = 'price';
+    price.textContent = formatPrice(pack.amount, pack.currency);
+    btn.append(label, price);
+    btn.addEventListener('click', () => startCheckout(pack, btn));
+    box.appendChild(btn);
+  }
+}
+
+async function openAddTime() {
+  $('addTimeStatus').textContent = '';
+  $('addTimeOpen').classList.add('hidden');
+  if (!homeBalance) await loadBalance();
+  renderAddTimePacks();
+  if (!$('addTimeDialog').open) $('addTimeDialog').showModal();
+}
+
+async function startCheckout(pack, btn) {
+  const buttons = [...document.querySelectorAll('#addTimePacks .addTimePack')];
+  buttons.forEach((b) => { b.disabled = true; });
+  $('addTimeStatus').textContent = 'Opening secure payment…';
+  try {
+    const resp = await authedFetch('/api/referrals?action=checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packId: pack.id }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.url) throw new Error(data.error || 'Could not open payment. Try again.');
+    localStorage.setItem(PAY_FLAG, String(Date.now()));
+    // No 'noopener' feature: it makes window.open return null, which would look
+    // like a blocked window. The opener link is cut by hand instead.
+    const opened = window.open(data.url, '_blank');
+    if (opened) {
+      try { opened.opener = null; } catch {}
+      $('addTimeDialog').close();
+    } else {
+      // The browser blocked the window (the request finished after the tap).
+      // A real tap on a link always works, including in an installed PWA.
+      $('addTimeOpen').href = data.url;
+      $('addTimeOpen').classList.remove('hidden');
+      $('addTimeStatus').textContent = 'Tap to continue to payment.';
+    }
+    watchPayment();
+  } catch (err) {
+    $('addTimeStatus').textContent = err.message || 'Could not open payment. Try again.';
+  } finally {
+    buttons.forEach((b) => { b.disabled = false; });
+  }
+}
+
+let payWatching = false;
+async function verifyPayment() {
+  const resp = await authedFetch('/api/referrals?action=billing-verify', { method: 'POST' }).catch(() => null);
+  if (!resp?.ok) return null;
+  const data = await resp.json();
+  const before = homeBalance?.remaining;
+  homeBalance = { ...(homeBalance || {}), ...data, payments: true, packs: homeBalance?.packs || [] };
+  renderBalance();
+  if (before != null && data.remaining > before) {
+    showToast(`${formatMinutes(data.remaining - before)} added`);
+    if ($('addTimeDialog').open) $('addTimeDialog').close();
+  }
+  if (!data.pending) localStorage.removeItem(PAY_FLAG);
+  return data;
+}
+
+// After the payment window: check as soon as the app is foregrounded, then keep
+// checking for up to two minutes in case the payment is still processing.
+async function watchPayment() {
+  if (payWatching || !currentSession) return;
+  payWatching = true;
+  try {
+    for (let i = 0; i < 24 && payPending(); i++) {
+      if (document.visibilityState === 'visible') {
+        const data = await verifyPayment();
+        if (data && !data.pending) break;
+      }
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  } finally { payWatching = false; }
+}
+function resumePaymentCheck() { if (payPending()) watchPayment(); }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resumePaymentCheck(); });
+window.addEventListener('pageshow', resumePaymentCheck);
+
+$('dashBalanceBtn').addEventListener('click', openAddTime);
+$('dashAddTime').addEventListener('click', openAddTime);
 
 // ---------- name (persist on blur) ----------
 $('profileName').addEventListener('blur', async () => {
@@ -3238,7 +3489,7 @@ $('referralsBtn').addEventListener('click', () => { loadReferrals(); openSheet('
 $('callAnsweringBtn').addEventListener('click', () => { loadCallAnswering(); openSheet('sheet-call-answering'); });
 $('memoriesBtn').addEventListener('click', () => { loadMemories(); openSheet('sheet-memories'); });
 $('callSettingsBtn').addEventListener('click', () => { loadCallSettings(); openSheet('sheet-call-settings'); });
-$('contactsBtn').addEventListener('click', () => { closeSheets(); document.querySelector('[data-tab=contacts]').click(); });
+$('contactsBtn').addEventListener('click', () => { closeSheets(); showTab('contacts'); });
 $('archiveBtn').addEventListener('click', () => { loadArchivedChats(); openSheet('sheet-archive'); });
 $('getStartedBtn').addEventListener('click', () => openSheet('sheet-get-started'));
 

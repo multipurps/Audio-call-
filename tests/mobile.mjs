@@ -104,7 +104,7 @@ try {
     await expect(page.locator('#contactCallDialog')).not.toContainText('Emysa');
     await page.screenshot({ path: `test-results/methods-${width}.png` });
     await page.locator('[data-method=phone]').click();
-    await expect(page.locator('#screen-home')).toHaveClass(/active/);
+    await expect(page.locator('#screen-chat')).toHaveClass(/active/);
     await expect(page.locator('#preCallLabel')).toHaveText('Alex Morgan · Phone');
     assert.equal(dialed, 0);
     await page.locator('#briefInput').fill('Confirm lunch at noon. Keep it friendly.');

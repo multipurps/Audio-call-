@@ -9,7 +9,7 @@
 <title>Emysa</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-10-05.6">
+<link rel="stylesheet" href="styles.css?v=2026-10-06.1">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -37,6 +37,22 @@
     </script>
   </head>
 <body>
+<!-- Icon sprite for the Home screen and the Chat tab. Every icon is one <symbol>:
+     24x24 viewBox, drawn with currentColor strokes so it follows the theme.
+     To swap an icon, replace the contents of its <symbol> and keep the id. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="ic-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 7.2V12l3.2 2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="ic-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="ic-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="ic-phone" viewBox="0 0 24 24"><path d="M6.6 10.8c1.2 2.4 3.2 4.4 5.6 5.6l1.9-1.9c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.5.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.5.1.4 0 .8-.2 1l-1.9 1.9z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+  <symbol id="ic-calendar" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 3v4M16 3v4M4 10.5h16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="15" r="1.1" fill="currentColor"/></symbol>
+  <symbol id="ic-followup" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8.3 12.4l2.6 2.6 4.8-5.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="ic-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.8" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M20.5 20.5l-4.7-4.7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+  <symbol id="ic-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="18.5" cy="12" r="1.7" fill="currentColor"/></symbol>
+  <symbol id="ic-settings" viewBox="0 0 24 24"><path d="M4 8h8.5M17.5 8H20M4 16h2.5M11.5 16H20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="15" cy="8" r="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="9" cy="16" r="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+  <symbol id="ic-people" viewBox="0 0 24 24"><circle cx="9.5" cy="8" r="3.3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3.5 19c.5-3.1 3-4.8 6-4.8s5.5 1.7 6 4.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M15.8 5.2a3.1 3.1 0 0 1 0 5.6M18.2 14.6c1.6.6 2.7 2 3 4.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+  <symbol id="ic-chat" viewBox="0 0 24 24"><path d="M6 4.5h12a2.5 2.5 0 0 1 2.5 2.5v8A2.5 2.5 0 0 1 18 17.5h-6.2L8 20.5v-3H6A2.5 2.5 0 0 1 3.5 15V7A2.5 2.5 0 0 1 6 4.5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+</svg>
 
 <div id="app">
 
@@ -89,7 +105,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-10-05.6').catch(function (err) {
+        import('./app.js?v=2026-10-06.1').catch(function (err) {
           showBootError('Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -293,6 +309,46 @@
   <div id="screens">
 
     <div class="screen active" id="screen-home">
+      <header class="dashHeader">
+        <div class="dashBrand">
+          <img class="dashLogo" src="icon-192.png" alt="">
+          <div>
+            <div class="dashName">Emysa</div>
+            <div class="dashTag">Your calls. Your people. Your voice.</div>
+          </div>
+        </div>
+        <button type="button" class="dashIconBtn" id="dashSettingsBtn" aria-label="Settings"><svg class="ic"><use href="#ic-settings"/></svg></button>
+      </header>
+
+      <section class="dashCard dashBalance" aria-label="Balance">
+        <span class="dashBalanceIcon"><svg class="ic"><use href="#ic-clock"/></svg></span>
+        <button type="button" class="dashBalanceBody" id="dashBalanceBtn" aria-label="Balance and add time">
+          <span class="dashLabel">Balance</span>
+          <span class="dashMinutes"><span id="dashMinutes">–</span><svg class="ic dashChev"><use href="#ic-chevron"/></svg></span>
+          <span class="dashSub" id="dashBalanceSub">remaining</span>
+        </button>
+        <button type="button" class="dashAddBtn" id="dashAddTime"><svg class="ic"><use href="#ic-plus"/></svg>Add time</button>
+      </section>
+
+      <h2 class="dashHeading">What should Emysa handle?</h2>
+      <div class="dashActions" id="dashActions">
+        <button type="button" class="dashAction" data-action="call"><svg class="ic"><use href="#ic-phone"/></svg><span>Call someone</span></button>
+        <button type="button" class="dashAction" data-action="schedule"><svg class="ic"><use href="#ic-calendar"/></svg><span>Schedule a call</span></button>
+        <button type="button" class="dashAction" data-action="followup"><svg class="ic"><use href="#ic-followup"/></svg><span>Follow up for me</span></button>
+        <button type="button" class="dashAction" data-action="ask"><svg class="ic"><use href="#ic-search"/></svg><span>Ask / find something</span></button>
+        <button type="button" class="dashAction dashActionMore" data-action="more"><svg class="ic"><use href="#ic-more"/></svg><span>More</span></button>
+      </div>
+
+      <section class="dashCard dashPeople" aria-label="People">
+        <div class="dashSectionHead">
+          <span class="dashSectionTitle"><svg class="ic"><use href="#ic-people"/></svg>People</span>
+          <button type="button" class="dashLink" id="dashPeopleAll">See all<svg class="ic"><use href="#ic-chevron"/></svg></button>
+        </div>
+        <div class="dashPeopleRow" id="dashPeopleRow"></div>
+      </section>
+    </div>
+
+    <div class="screen" id="screen-chat">
       <div class="homeHeader">
         <button class="homeHeaderBtn" id="homeMenuBtn" aria-label="New chat"><svg viewBox="0 0 24 24" fill="none"><path d="M4 20h4l10.5-10.5a2 2 0 0 0 0-2.83l-1.17-1.17a2 2 0 0 0-2.83 0L4 16v4z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></button>
         <div class="homeHeaderTitle">
@@ -521,7 +577,7 @@
 
   </div>
 
-  <div id="homeInputBar" class="visible">
+  <div id="homeInputBar">
     <div class="channelBadge" id="channelBadge"><span class="dot"></span><span id="channelBadgeText"></span></div>
     <textarea id="briefInput" aria-label="Message Emysa" maxlength="4000" rows="1" placeholder="Message" enterkeyhint="go"></textarea>
     <button id="sendBtn" aria-label="Send">
@@ -534,10 +590,10 @@
     <button class="tabBtn active" data-tab="home" aria-label="Home" aria-current="page">
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path opacity="0.5" d="M2 12.2039C2 9.91549 2 8.77128 2.5192 7.82274C3.0384 6.87421 3.98695 6.28551 5.88403 5.10813L7.88403 3.86687C9.88939 2.62229 10.8921 2 12 2C13.1079 2 14.1106 2.62229 16.116 3.86687L18.116 5.10812C20.0131 6.28551 20.9616 6.87421 21.4808 7.82274C22 8.77128 22 9.91549 22 12.2039V13.725C22 17.6258 22 19.5763 20.8284 20.7881C19.6569 22 17.7712 22 14 22H10C6.22876 22 4.34315 22 3.17157 20.7881C2 19.5763 2 17.6258 2 13.725V12.2039Z" fill="currentColor"/><path d="M11.25 18C11.25 18.4142 11.5858 18.75 12 18.75C12.4142 18.75 12.75 18.4142 12.75 18V15C12.75 14.5858 12.4142 14.25 12 14.25C11.5858 14.25 11.25 14.5858 11.25 15V18Z" fill="currentColor"/></svg>
     <span>Home</span></button>
+    <button class="tabBtn" data-tab="chat" aria-label="Chat"><svg class="ic" viewBox="0 0 24 24"><use href="#ic-chat"/></svg><span>Chat</span></button>
     <button class="tabBtn" data-tab="recent" aria-label="Recent">
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M22 12c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2s10 4.477 10 10zm-4.581 3.324a1 1 0 0 0-.525-1.313L13 12.341V6.5a1 1 0 0 0-2 0v6.17c0 .6.357 1.143.909 1.379l4.197 1.8a1 1 0 0 0 1.313-.525z" fill="currentColor"/></svg>
     <span>Recent</span></button>
-    <button class="tabBtn" data-tab="contacts" aria-label="Contacts"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="4" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="9" r="2.5" fill="currentColor"/><path d="M8 17c0-4 8-4 8 0M2 7h3M2 12h3M2 17h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span>Contacts</span></button>
     <button class="tabBtn" data-tab="profile" aria-label="Profile">
       <span class="tabAvatarRing">
         <svg viewBox="0 0 24 24" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M6.75 6.5C6.75 3.6005 9.1005 1.25 12 1.25C14.8995 1.25 17.25 3.6005 17.25 6.5C17.25 9.3995 14.8995 11.75 12 11.75C9.1005 11.75 6.75 9.3995 6.75 6.5Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M4.25 18.5714C4.25 15.6325 6.63249 13.25 9.57143 13.25H14.4286C17.3675 13.25 19.75 15.6325 19.75 18.5714C19.75 20.8792 17.8792 22.75 15.5714 22.75H8.42857C6.12081 22.75 4.25 20.8792 4.25 18.5714Z" fill="currentColor"/></svg>
@@ -1200,6 +1256,21 @@
   <div class="iosMenuGroup">
     <button class="contactMethod iosRow iosRowLink" data-method="telegram"><span class="methodSymbol methodSymbol--brand"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" fill="#29A9EB"/><path d="M5.6 11.85 16.9 7.5c.52-.19 1 .13.83.94l-1.97 9.28c-.14.63-.52.79-1.05.49l-2.9-2.14-1.4 1.35c-.16.16-.29.29-.6.29l.21-3.05 5.55-5.02c.24-.21-.05-.33-.37-.12l-6.86 4.32-2.96-.93c-.64-.2-.66-.64.14-.96z" fill="#fff"/></svg></span><span class="iosRowTitle">Telegram</span><svg class="iosChevron" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <button class="contactMethod iosRow iosRowLink" data-method="whatsapp"><span class="methodSymbol methodSymbol--brand"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3C7.03 3 3 7.03 3 12c0 1.66.46 3.22 1.25 4.56L3 21l4.6-1.2A8.93 8.93 0 0 0 12 21c4.97 0 9-4.03 9-9s-4.03-9-9-9z" fill="#25D366"/><path d="M8.7 7.6c.2-.44.4-.45.6-.46h.5c.17 0 .4-.06.6.47.24.6.8 2.07.87 2.22.07.16.12.34.02.55-.09.2-.14.32-.28.5-.14.16-.3.36-.42.49-.14.14-.29.3-.13.58.17.3.75 1.24 1.62 2 1.12.99 2.06 1.3 2.36 1.44.3.14.47.12.65-.07.18-.2.75-.87.95-1.17.2-.3.4-.24.66-.14.28.1 1.75.83 2.05.98.3.15.5.22.57.35.08.13.08.75-.17 1.47-.25.72-1.46 1.4-2 1.49-.55.1-1 .17-3.4-.71-2.88-1.06-4.7-4-4.85-4.19-.14-.2-1.16-1.55-1.16-2.95 0-1.4.73-2.08.99-2.36z" fill="#fff"/></svg></span><span class="iosRowTitle">WhatsApp</span><svg class="iosChevron" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  </div>
+</dialog>
+<dialog id="addTimeDialog" class="callDialog addTimeSheet" aria-labelledby="addTimeTitle">
+  <button type="button" data-dismiss="addTimeDialog" class="callDetailDone" aria-label="Close">Done</button>
+  <h2 id="addTimeTitle" class="addTimeTitle">Add time</h2>
+  <p class="addTimeBalance" id="addTimeBalance"></p>
+  <div class="addTimePacks" id="addTimePacks"></div>
+  <a class="addTimeOpen hidden" id="addTimeOpen" target="_blank" rel="noopener noreferrer">Open payment page</a>
+  <p class="authHint addTimeStatus" id="addTimeStatus" role="status"></p>
+</dialog>
+<dialog id="moreDialog" class="callDialog actionSheet iosMenu" aria-label="More">
+  <div class="iosMenuGroup">
+    <button type="button" class="iosRow iosRowLink" data-more="keypad"><span class="iosRowTitle">Keypad</span></button>
+    <button type="button" class="iosRow iosRowLink" data-more="contacts"><span class="iosRowTitle">Contacts</span></button>
+    <button type="button" class="iosRow iosRowLink" data-more="newchat"><span class="iosRowTitle">New chat</span></button>
   </div>
 </dialog>
 <dialog id="callDetailDialog" class="callDialog callDetailDialog" aria-labelledby="callDetailName">

@@ -195,8 +195,8 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .socialRow{display:flex; gap:10px;}
 .socialRow .socialBtn{flex:1;}
 
-/* ---------- home: chat with the assistant ---------- */
-#screen-home.active{display:flex; flex-direction:column; overflow:hidden; padding:0;}
+/* ---------- chat: talk to the assistant (was the Home screen) ---------- */
+#screen-chat.active{display:flex; flex-direction:column; overflow:hidden; padding:0;}
 
 .homeHeader{
   flex:none; display:flex; align-items:flex-start; justify-content:space-between;
@@ -960,3 +960,56 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .voiceCard .playCircleBtn.loading{opacity:.55;}
 .voiceAddHead{display:flex; align-items:center; gap:12px; margin:18px 4px 12px; font-size:15.5px; font-weight:600; color:#fff;}
 .voiceAddHead span{font-size:26px; line-height:1; color:var(--accent); font-weight:300;}
+
+/* ---------- home: Emysa's personal communication command center ----------
+   Restrained on purpose: theme variables only, one accent, no gradients, no
+   decoration. Icons come from the sprite at the top of index.html. */
+.ic{width:22px; height:22px; flex:none;}
+.dashHeader{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:max(env(safe-area-inset-top),56px) 0 18px;}
+.dashBrand{display:flex; align-items:center; gap:12px; min-width:0;}
+.dashLogo{width:44px; height:44px; border-radius:13px; object-fit:cover; flex:none;}
+.dashName{font-size:28px; font-weight:700; letter-spacing:-0.02em; line-height:1.1;}
+.dashTag{font-size:13px; color:var(--dim); margin-top:3px;}
+.dashIconBtn{width:44px; height:44px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; color:var(--icon-color); background:var(--glass-bg); border:1px solid var(--glass-border);}
+
+.dashCard{background:var(--glass-bg); border:1px solid var(--glass-border); border-radius:24px;}
+.dashBalance{display:flex; align-items:center; gap:14px; padding:16px 16px 16px 18px;}
+.dashBalanceIcon{width:52px; height:52px; flex:none; border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--accent); border:1.5px solid var(--glass-border);}
+.dashBalanceIcon .ic{width:26px; height:26px;}
+.dashBalanceBody{flex:1; min-width:0; display:flex; flex-direction:column; align-items:flex-start; text-align:left; gap:1px; color:#fff;}
+.dashLabel, .dashSub{font-size:13px; color:var(--dim);}
+.dashMinutes{display:flex; align-items:center; gap:4px; font-size:26px; font-weight:650; letter-spacing:-0.01em; line-height:1.15;}
+.dashChev{width:16px; height:16px; color:var(--dim);}
+.dashAddBtn{flex:none; display:flex; align-items:center; gap:6px; padding:11px 16px; border-radius:999px; color:#fff; font-size:15px; font-weight:600; border:1px solid var(--glass-border); background:rgba(255,255,255,0.05);}
+.dashAddBtn .ic{width:16px; height:16px; color:var(--accent);}
+.dashAddBtn:active, .dashAction:active, .dashPerson:active{opacity:.7;}
+
+.dashHeading{font-size:20px; font-weight:600; letter-spacing:-0.01em; margin:28px 0 12px 2px;}
+.dashActions{display:grid; grid-template-columns:repeat(4, 1fr) 0.9fr; gap:10px;}
+.dashAction{display:flex; flex-direction:column; align-items:center; justify-content:flex-start; gap:10px; padding:16px 4px 12px; min-height:92px; border-radius:20px; color:#fff; background:var(--glass-bg); border:1px solid var(--glass-border);}
+.dashAction .ic{width:27px; height:27px; color:var(--accent);}
+.dashActionMore .ic{color:var(--dim);}
+.dashAction span{font-size:13px; font-weight:500; line-height:1.2; text-align:center; overflow-wrap:break-word; max-width:100%;}
+
+.dashPeople{margin-top:16px; padding:16px 18px 18px;}
+.dashSectionHead{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+.dashSectionTitle{display:flex; align-items:center; gap:8px; font-size:19px; font-weight:600;}
+.dashSectionTitle .ic{color:var(--accent);}
+.dashLink{display:flex; align-items:center; gap:2px; font-size:15px; color:var(--dim);}
+.dashLink .ic{width:16px; height:16px;}
+.dashPeopleRow{display:grid; grid-template-columns:repeat(4, 1fr); gap:6px;}
+.dashPerson{display:flex; flex-direction:column; align-items:center; gap:5px; min-width:0; color:#fff;}
+.dashAvatar{width:54px; height:54px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:22px; font-weight:600; background:rgba(255,255,255,0.1); overflow:hidden;}
+.dashPersonName{max-width:100%; font-size:16px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.dashPersonSub{font-size:12px; color:var(--dim); text-align:center; line-height:1.25;}
+.dashEmpty{grid-column:1 / -1; font-size:14px; color:var(--dim);}
+
+/* Add time sheet */
+.addTimeTitle{font-size:24px; font-weight:700; margin:6px 0 4px;}
+.addTimeBalance{font-size:14px; color:var(--dim); margin-bottom: 8px;}
+.addTimePack{display:flex; align-items:center; justify-content:space-between; width:100%; margin-top:10px; padding:16px 18px; border-radius:18px; color:#fff; font-size:17px; font-weight:600; text-align:left; background:var(--glass-bg); border:1px solid var(--glass-border);}
+.addTimePack:active{opacity:.7;}
+.addTimePack .price{color:var(--dim); font-weight:500;}
+.addTimeOpen{display:block; margin-top:14px; padding:14px; border-radius:14px; text-align:center; font-size:16px; font-weight:600; color:#fff; text-decoration:none; background:var(--accent-grad);}
+.addTimeStatus{margin:12px 2px 0; min-height:18px;}
+@media(prefers-reduced-motion:reduce){.dashAddBtn, .dashAction, .dashPerson{transition:none;}}
