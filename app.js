@@ -3942,20 +3942,18 @@ $('deleteAccountBtn').addEventListener('click', () => {
 });
 
 // ---------- theme ----------
-document.querySelectorAll('.themeSwatch').forEach((sw) => {
-  sw.addEventListener('click', () => {
-    document.querySelectorAll('.themeSwatch').forEach((s) => s.classList.remove('active'));
-    sw.classList.add('active');
-    document.documentElement.setAttribute('data-theme', sw.dataset.theme);
-    localStorage.setItem('theme', sw.dataset.theme);
-  });
-});
-const savedTheme = localStorage.getItem('theme');
-if (savedTheme) {
-  document.documentElement.setAttribute('data-theme', savedTheme);
-  document.querySelector(`.themeSwatch[data-theme="${savedTheme}"]`)?.classList.add('active');
-  document.querySelector('.themeSwatch.active:not([data-theme="' + savedTheme + '"])')?.classList.remove('active');
+const THEMES = { dark: '#0b0b0b', brave: '#1d5a55' };
+function applyTheme(name) {
+  if (!THEMES[name]) name = 'dark';
+  document.documentElement.setAttribute('data-theme', name);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEMES[name]);
+  document.querySelectorAll('.themeSwatch').forEach((s) => s.classList.toggle('active', s.dataset.theme === name));
+  return name;
 }
+document.querySelectorAll('.themeSwatch').forEach((sw) => {
+  sw.addEventListener('click', () => localStorage.setItem('theme', applyTheme(sw.dataset.theme)));
+});
+applyTheme(localStorage.getItem('theme'));
 
 // ---------- voice cloning ----------
 async function refreshVoiceStatus() {
