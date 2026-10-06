@@ -12,6 +12,7 @@ import {
   findDuplicateActiveCall,
   appendTranscriptEntry,
   maybeGenerateCallSummary,
+  formatSummaryForChat,
   waitForCallSummary,
 } from '../lib/callSession.js';
 
@@ -349,7 +350,7 @@ async function relayCallStatus(req, res, supabase) {
     let text;
     if (summaryResult?.status === 'completed' && summaryResult.summary) {
       // The real summary IS the report — never a generic "Call finished".
-      text = summaryResult.summary;
+      text = formatSummaryForChat(summaryResult.summary, summaryResult.summaryJson);
     } else if (storedReason) {
       text = storedReason;
     } else if (summaryResult?.status === 'skipped') {

@@ -264,7 +264,7 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
    each with a tail corner on the side it points toward. */
 .chatMsgUser{align-self:flex-end; background:#0b84ff; color:#fff; padding:10px 16px; border-radius:18px 18px 4px 18px;}
 .chatMsgAssistant{align-self:flex-start; background:#26262a; color:#fff; padding:10px 16px; border-radius:18px 18px 18px 4px;}
-.chatMsgTappable{cursor:pointer; text-decoration:underline; text-decoration-color:rgba(255,255,255,0.25); text-underline-offset:3px;}
+.chatMsgTappable{cursor:pointer;}
 .miniToast{
   position:fixed; left:50%; bottom:120px; transform:translateX(-50%) translateY(10px);
   background:rgba(30,30,30,.95); color:#fff; font-size:13.5px; font-weight:600; padding:8px 16px;

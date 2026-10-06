@@ -7,7 +7,7 @@ import { createChatCompletion, hasConfiguredLlm } from '../lib/llmClient.js';
 import { resolvePersonSession } from '../lib/personSession.js';
 import { normalizePhone } from '../lib/phoneNumbers.js';
 import { callSessionId } from '../lib/callNote.js';
-import { maybeGenerateCallSummary, waitForCallSummary } from '../lib/callSession.js';
+import { maybeGenerateCallSummary, waitForCallSummary, recoverMissingSummaries } from '../lib/callSession.js';
 import {
   availableChannels, checkVerification, getPhoneLine, isApproved, publicLine,
   removeLine, rentNumber, rentSettings, searchNumbers, startVerification,
@@ -30,6 +30,7 @@ export default async function handler(req, res) {
     case 'get': return getCall(req, res, supabase, userId);
     case 'monitor-token': return monitorToken(req, res, supabase, userId);
     case 'app-call-start': return appCallStart(req, res, supabase, userId);
+    case 'recover-summaries': return recoverSummaries(req, res, supabase, userId);
     case 'app-call-brief': return appCallBrief(req, res, supabase, userId);
     case 'summarize': return summarizeCall(req, res, supabase, userId);
     // Phone line (Twilio): bring your own number, or rent one.
@@ -128,6 +129,21 @@ async function appCallBrief(req, res, supabase, userId) {
     return res.status(500).json({ error: 'Could not prepare the call. Nothing was dialed.' });
   }
 }
+
+// Called by the app whenever it opens: any finished call that never got its
+// summary (or only the generic "Finished the call" line) is filled in now.
+async function recoverSummaries(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  try {
+    const out = await recoverMissingSummaries(supabase, userId);
+    if (out.recovered) console.log(`recoverSummaries: user=${userId} recovered=${out.recovered}`);
+    return res.status(200).json(out);
+  } catch (err) {
+    console.error('recoverSummaries failed', err?.message || err);
+    return res.status(200).json({ recovered: 0 });
+  }
+}
+
 
 // The in-app Emysa call: a live GPT-Live session (mic open the whole call, the
 // model's voice streamed back), the same conversation WhatsApp calls run. The

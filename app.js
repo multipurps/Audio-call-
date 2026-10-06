@@ -425,7 +425,22 @@ async function initHomeChat() {
 
   startMessagePolling();
   resumeActiveCallIfAny();
+  recoverCallSummaries();
 }
+
+// Finished calls that never got their summary are filled in on the server
+// whenever the app opens or returns to the foreground (at most every 2 minutes).
+let lastSummaryRecoveryAt = 0;
+async function recoverCallSummaries() {
+  if (!currentUser || Date.now() - lastSummaryRecoveryAt < 120_000) return;
+  lastSummaryRecoveryAt = Date.now();
+  try {
+    const resp = await authedFetch('/api/calls?action=recover-summaries', { method: 'POST' });
+    const out = await resp.json().catch(() => ({}));
+    if (out?.recovered > 0 && currentChatSessionId) await openChatSession(currentChatSessionId);
+  } catch {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') recoverCallSummaries(); });
 
 async function openChatSession(sessionId) {
   const revision = ++chatRevision;

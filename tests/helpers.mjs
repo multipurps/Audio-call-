@@ -32,6 +32,7 @@ export function database(seed = {}) {
         }));
         return q;
       },
+      gte(key, value) { filters.push((r) => r[key] >= value); return q; },
       gt(key, value) { filters.push((r) => r[key] > value); return q; },
       is(key, value) {
         // Postgres `IS NULL` matches both NULL and absent columns; the
