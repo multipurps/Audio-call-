@@ -22,13 +22,17 @@ export default async function handler(req, res) {
     case 'delete-background': return deleteBackground(req, res, supabase);
     case 'analytics': return analytics(req, res, supabase);
     case 'send-announcement': return sendAnnouncement(req, res, supabase);
+    case 'overview': return overview(req, res, supabase);
+    case 'credit-ledger': return creditLedger(req, res, supabase);
+    case 'grant-credit': return grantCredit(req, res, supabase);
+    case 'rates': return rates(req, res, supabase);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
   }
 }
 
 async function listUsers(req, res, supabase) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
-  const { data: authUsers, error: listErr } = await supabase.auth.admin.listUsers();
+  const { data: authUsers, error: listErr } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
   if (listErr) return res.status(500).json({ error: listErr.message });
 
   // This Supabase project may be shared with other apps — only list users
@@ -40,7 +44,7 @@ async function listUsers(req, res, supabase) {
   const appUserIds = new Set((profileRows || []).map((p) => p.user_id));
 
   const { data: approvals } = await supabase.from('user_approvals').select('user_id, approved');
-  const { data: usage } = await supabase.from('user_usage').select('user_id, call_minutes_used, monthly_minute_limit');
+  const { data: usage } = await supabase.from('user_usage').select('user_id, call_minutes_used, monthly_minute_limit, bonus_minutes');
 
   const approvalMap = new Map((approvals || []).map((a) => [a.user_id, a.approved]));
   const usageMap = new Map((usage || []).map((u) => [u.user_id, u]));
@@ -54,6 +58,7 @@ async function listUsers(req, res, supabase) {
       approved: !!approvalMap.get(u.id),
       minutes_used: usageMap.get(u.id)?.call_minutes_used ?? 0,
       minutes_limit: usageMap.get(u.id)?.monthly_minute_limit ?? 60,
+      bonus_minutes: Number(usageMap.get(u.id)?.bonus_minutes ?? 0),
     }));
 
   return res.status(200).json({ users });
@@ -129,11 +134,14 @@ async function deleteBackground(req, res, supabase) {
 
 async function analytics(req, res, supabase) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
-  const { data: authUsers, error: listErr } = await supabase.auth.admin.listUsers();
+  const { data: authUsers, error: listErr } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
   if (listErr) return res.status(500).json({ error: listErr.message });
   const emailById = new Map(authUsers.users.map((u) => [u.id, u.email]));
 
-  const { data: calls, error: callsErr } = await supabase.from('calls').select('user_id, duration_seconds, created_at');
+  const days = Number(req.query.days);
+  let q = supabase.from('calls').select('user_id, duration_seconds, created_at');
+  if ([7, 30, 90].includes(days)) q = q.gte('created_at', new Date(Date.now() - days * 864e5).toISOString());
+  const { data: calls, error: callsErr } = await q;
   if (callsErr) return res.status(500).json({ error: callsErr.message });
 
   const byUser = new Map();
@@ -194,4 +202,99 @@ async function sendAnnouncement(req, res, supabase) {
   );
 
   return res.status(200).json({ sent, failed, total: (subs || []).length });
+}
+
+// ---------- revenue, credits, provider cost rates ----------
+async function fetchAll(build) {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await build().range(from, from + 999);
+    if (error) throw error;
+    out.push(...data);
+    if (data.length < 1000) return out;
+  }
+}
+
+async function getRates(supabase) {
+  const { data } = await supabase.from('admin_settings').select('value').eq('key', 'provider_rates').maybeSingle();
+  const v = data?.value || {};
+  return { twilio: Number(v.twilio) || 0, fish: Number(v.fish) || 0, openai: Number(v.openai) || 0 };
+}
+
+async function overview(req, res, supabase) {
+  if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
+  const days = [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 30;
+  const since = new Date(Date.now() - days * 864e5).toISOString();
+  try {
+    const paidAll = await fetchAll(() => supabase.from('minute_purchases').select('user_id, amount, minutes, currency, paid_at').eq('status', 'paid').order('paid_at', { ascending: false }));
+    const currency = paidAll[0]?.currency || 'USD'; // one currency at a time; others are left out of the totals
+    const paid = paidAll.filter((p) => p.currency === currency);
+    const sold = paid.filter((p) => p.paid_at >= since);
+    const calls = await fetchAll(() => supabase.from('calls').select('user_id, duration_seconds, created_at').gte('created_at', since).order('created_at'));
+    const { count: totalUsers } = await supabase.from('profiles').select('user_id', { count: 'exact', head: true });
+    const rates = await getRates(supabase);
+
+    const series = new Map();
+    for (let i = days - 1; i >= 0; i--) series.set(new Date(Date.now() - i * 864e5).toISOString().slice(0, 10), { revenue: 0, minutes: 0 });
+    for (const p of sold) { const d = series.get(String(p.paid_at).slice(0, 10)); if (d) d.revenue += Number(p.amount); }
+    let minutesUsed = 0;
+    for (const c of calls) {
+      const m = Math.ceil((c.duration_seconds || 0) / 60); // same rounding the billing code uses
+      minutesUsed += m;
+      const d = series.get(String(c.created_at).slice(0, 10)); if (d) d.minutes += m;
+    }
+    const ratePerMin = rates.twilio + rates.fish + rates.openai;
+    const revenue = sold.reduce((a, p) => a + Number(p.amount), 0);
+    return res.status(200).json({
+      days, currency, revenue, allTimeRevenue: paid.reduce((a, p) => a + Number(p.amount), 0),
+      purchases: sold.length, minutesSold: sold.reduce((a, p) => a + Number(p.minutes), 0),
+      payingUsers: new Set(sold.map((p) => p.user_id)).size,
+      activeUsers: new Set(calls.map((c) => c.user_id)).size, totalUsers: totalUsers || 0,
+      calls: calls.length, minutesUsed, ratePerMin, cost: minutesUsed * ratePerMin,
+      series: [...series].map(([d, v]) => ({ d, ...v })),
+    });
+  } catch (err) { return res.status(500).json({ error: err.message }); }
+}
+
+async function creditLedger(req, res, supabase) {
+  if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
+  const bought = await supabase.from('minute_purchases').select('user_id, minutes, amount, currency, paid_at').eq('status', 'paid').order('paid_at', { ascending: false }).limit(60);
+  const granted = await supabase.from('credit_ledger').select('user_id, minutes, note, created_at').order('created_at', { ascending: false }).limit(60);
+  if (bought.error || granted.error) return res.status(500).json({ error: (bought.error || granted.error).message });
+  const entries = [
+    ...bought.data.map((p) => ({ user_id: p.user_id, minutes: Number(p.minutes), source: 'purchase', note: `${p.amount} ${p.currency}`, at: p.paid_at })),
+    ...granted.data.map((g) => ({ user_id: g.user_id, minutes: Number(g.minutes), source: 'admin', note: g.note, at: g.created_at })),
+  ].sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 80);
+  return res.status(200).json({ entries });
+}
+
+async function grantCredit(req, res, supabase) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { targetUserId, minutes, note } = req.body || {};
+  const m = Number(minutes);
+  if (!targetUserId) return res.status(400).json({ error: 'targetUserId required' });
+  if (!Number.isFinite(m) || m === 0 || Math.abs(m) > 100000) return res.status(400).json({ error: 'minutes must be a non-zero number up to 100000' });
+  const { data, error } = await supabase.rpc('admin_grant_minutes', { p_user: targetUserId, p_minutes: m, p_note: String(note || '').slice(0, 200) });
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ ok: true, bonus_minutes: Number(data) });
+}
+
+async function rates(req, res, supabase) {
+  if (req.method === 'POST') {
+    const clean = {};
+    for (const k of ['twilio', 'fish', 'openai']) {
+      const n = Number(req.body?.[k] ?? 0);
+      if (!Number.isFinite(n) || n < 0 || n > 1000) return res.status(400).json({ error: `Invalid ${k} rate` });
+      clean[k] = n;
+    }
+    const { error } = await supabase.from('admin_settings').upsert({ key: 'provider_rates', value: clean, updated_at: new Date().toISOString() });
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(200).json({ ok: true, rates: clean });
+  }
+  const paid = await fetchAll(() => supabase.from('minute_purchases').select('amount, minutes, currency, paid_at').eq('status', 'paid').order('paid_at', { ascending: false }));
+  const cur = paid[0]?.currency || 'USD';
+  const rows = paid.filter((p) => p.currency === cur);
+  const mins = rows.reduce((a, p) => a + Number(p.minutes), 0);
+  const amt = rows.reduce((a, p) => a + Number(p.amount), 0);
+  return res.status(200).json({ rates: await getRates(supabase), currency: cur, pricePerMin: mins ? amt / mins : 0 });
 }

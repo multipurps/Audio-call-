@@ -57,9 +57,7 @@ async function enterAdmin() {
     $('notAdminBox').classList.add('hidden');
     document.getElementById('authScreen').classList.add('hidden');
     $('adminApp').classList.remove('hidden');
-    renderUsers(await resp.json());
-    loadBackgrounds();
-    loadUsage();
+    initPanel((await resp.json()).users);
   } catch (err) {
     // A thrown error in here used to leave the splash screen stuck forever
     // with zero feedback — any network hiccup on the first fetch, and
@@ -72,57 +70,176 @@ async function enterAdmin() {
   }
 }
 
-// ---------- users: approve + per-user minute limit ----------
-function renderUsers({ users }) {
-  const list = $('adminUserList');
-  list.innerHTML = '';
-  for (const u of users) {
-    const row = document.createElement('div');
-    row.className = 'adminUserRow';
-    row.style.flexDirection = 'column';
-    row.style.alignItems = 'stretch';
-    row.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
-        <div>
-          <div class="adminUserEmail">${u.email}</div>
-          <div class="adminUserMeta">${u.minutes_used}/${u.minutes_limit} min used this period</div>
-        </div>
-        <button class="adminApproveBtn ${u.approved ? 'approved' : ''}">${u.approved ? 'Approved' : 'Approve'}</button>
-      </div>
-      <div class="minuteLimitRow">
-        <span style="font-size:11.5px; color:var(--dim);">Monthly limit</span>
-        <input type="number" min="0" step="10" value="${u.minutes_limit}" class="minuteLimitInput">
-        <button class="minuteLimitSave">Save</button>
-      </div>`;
+// ---------- panel shell ----------
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+async function api(action, { method = 'GET', body, qs = '' } = {}) {
+  const resp = await authedFetch(`/api/admin?action=${action}${qs}`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.error || `Request failed (${resp.status})`);
+  return data;
+}
+const money = (n, cur = 'USD') => { try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur, maximumFractionDigits: 2 }).format(n || 0); } catch { return `${cur} ${(n || 0).toFixed(2)}`; } };
+const num = (n) => Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 1 });
+const card = (l, v, s = '', wide = false) => `<div class="aCard${wide ? ' wide' : ''}"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
+const fail = (el, err) => { el.innerHTML = `<div class="aHint">${esc(err.message)}</div>`; };
 
-    row.querySelector('.adminApproveBtn').addEventListener('click', async () => {
-      await authedFetch('/api/admin?action=set-approval', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetUserId: u.id, approved: !u.approved }),
-      });
-      const resp = await authedFetch('/api/admin?action=list-users');
-      if (resp.ok) renderUsers(await resp.json());
-    });
+let range = 30, usersCache = [], current = 'overview';
+const TITLES = { overview: 'Overview', users: 'Users', usage: 'Usage', credits: 'Credits', costs: 'Costs & providers', content: 'Content & push' };
+const loaders = { overview: loadOverview, users: loadUsers, usage: loadUsage, credits: loadCredits, costs: loadCosts, content: loadBackgrounds };
 
-    row.querySelector('.minuteLimitSave').addEventListener('click', async (e) => {
-      const input = row.querySelector('.minuteLimitInput');
-      const val = Number(input.value);
-      if (!Number.isFinite(val) || val < 0) return;
-      e.target.textContent = 'Saving...';
-      await authedFetch('/api/admin?action=set-approval', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetUserId: u.id, monthlyMinuteLimit: val }),
-      });
-      e.target.textContent = 'Saved';
-      setTimeout(() => { e.target.textContent = 'Save'; }, 1200);
-      const meta = row.querySelector('.adminUserMeta');
-      meta.textContent = `${u.minutes_used}/${val} min used this period`;
-    });
+function openSection(name) {
+  current = name;
+  $('adminApp').classList.remove('open');
+  document.querySelectorAll('.aSec').forEach((el) => el.classList.toggle('on', el.id === `sec-${name}`));
+  document.querySelectorAll('#aDrawer .nav[data-s]').forEach((el) => el.classList.toggle('on', el.dataset.s === name));
+  $('aTitle').textContent = TITLES[name];
+  $('aChips').style.display = name === 'overview' || name === 'usage' ? '' : 'none';
+  loaders[name]();
+}
+function initPanel(users) {
+  usersCache = users;
+  $('menuBtn').onclick = () => $('adminApp').classList.add('open');
+  $('aScrim').onclick = () => $('adminApp').classList.remove('open');
+  $('refreshBtn').onclick = () => loaders[current]();
+  document.querySelectorAll('#aDrawer .nav[data-s]').forEach((el) => { el.onclick = () => openSection(el.dataset.s); });
+  document.querySelectorAll('#aChips button').forEach((el) => {
+    el.onclick = () => {
+      range = Number(el.dataset.d);
+      document.querySelectorAll('#aChips button').forEach((b) => b.classList.toggle('on', b === el));
+      loaders[current]();
+    };
+  });
+  openSection('overview');
+}
+const emailOf = (id) => usersCache.find((u) => u.id === id)?.email || id.slice(0, 8);
 
-    list.appendChild(row);
-  }
+// ---------- overview: revenue + analysis ----------
+async function loadOverview() {
+  const el = $('sec-overview');
+  el.innerHTML = '<div class="aHint">Loading…</div>';
+  try {
+    const o = await api('overview', { qs: `&days=${range}` });
+    const hasRates = o.ratePerMin > 0;
+    const profit = o.revenue - o.cost;
+    const max = Math.max(...o.series.map((x) => x.revenue), 1);
+    el.innerHTML = `<div class="aGrid">
+      ${card('Revenue', money(o.revenue, o.currency), `${o.purchases} purchase${o.purchases === 1 ? '' : 's'} · ${money(o.allTimeRevenue, o.currency)} all time`)}
+      ${card('Est. profit', hasRates ? `<span class="${profit < 0 ? 'aNeg' : 'aPos'}">${money(profit, o.currency)}</span>` : '—', hasRates ? `after ${money(o.cost, o.currency)} provider cost` : 'set provider rates in Costs')}
+      ${card('Minutes sold', num(o.minutesSold), `${o.payingUsers} paying user${o.payingUsers === 1 ? '' : 's'}`)}
+      ${card('Minutes used', num(o.minutesUsed), `${o.calls} calls`)}
+      ${card('Active users', num(o.activeUsers), `of ${num(o.totalUsers)} total`)}
+      ${card('Avg per call', o.calls ? `${num(o.minutesUsed / o.calls)}m` : '—', `last ${o.days} days`)}
+      <div class="aCard wide"><div class="l">Daily revenue</div><div class="aBars">${o.series.map((x) => `<i title="${x.d}: ${money(x.revenue, o.currency)}" style="height:${Math.max(2, (x.revenue / max) * 100)}%"></i>`).join('')}</div></div>
+    </div>`;
+  } catch (err) { fail(el, err); }
+}
+
+// ---------- users ----------
+async function loadUsers() {
+  const el = $('sec-users');
+  try { usersCache = (await api('list-users')).users; } catch (err) { return fail(el, err); }
+  el.innerHTML = `<div class="aField"><input type="search" id="userSearch" placeholder="Search email"></div><div id="userRows"></div>`;
+  const draw = () => {
+    const q = $('userSearch').value.trim().toLowerCase();
+    $('userRows').innerHTML = usersCache.filter((u) => (u.email || '').toLowerCase().includes(q)).map((u) => `
+      <div class="aRow" data-id="${u.id}">
+        <div class="aFlex"><div style="min-width:0"><div class="t">${esc(u.email)}</div>
+          <div class="m">${num(Math.max(0, u.minutes_limit + u.bonus_minutes - u.minutes_used))} min left · used ${num(u.minutes_used)} of ${num(u.minutes_limit)}${u.bonus_minutes ? ` + ${num(u.bonus_minutes)} credit` : ''}</div></div>
+          <button class="aBtn sm ${u.approved ? 'ghost' : ''}" data-a="approve">${u.approved ? 'Approved' : 'Approve'}</button></div>
+        <div class="aFlex" style="margin-top:10px;"><input type="number" min="0" step="10" value="${u.minutes_limit}" style="width:90px;" aria-label="Monthly limit">
+          <button class="aBtn ghost sm" data-a="limit">Save limit</button><button class="aBtn ghost sm" data-a="credit" style="margin-left:auto;">+ Credit</button></div>
+      </div>`).join('') || '<div class="aHint">No users.</div>';
+  };
+  draw();
+  $('userSearch').oninput = draw;
+  $('userRows').onclick = async (e) => {
+    const btn = e.target.closest('button[data-a]'); if (!btn) return;
+    const row = btn.closest('.aRow'); const u = usersCache.find((x) => x.id === row.dataset.id);
+    if (btn.dataset.a === 'credit') { openSection('credits'); $('creditUser').value = u.id; return; }
+    const val = Number(row.querySelector('input').value);
+    if (btn.dataset.a === 'limit' && (!Number.isFinite(val) || val < 0)) return;
+    btn.textContent = '…';
+    try {
+      await api('set-approval', { method: 'POST', body: btn.dataset.a === 'approve' ? { targetUserId: u.id, approved: !u.approved } : { targetUserId: u.id, monthlyMinuteLimit: val } });
+      loadUsers();
+    } catch (err) { btn.textContent = 'Failed'; }
+  };
+}
+
+// ---------- usage ----------
+async function loadUsage() {
+  const el = $('sec-usage');
+  el.innerHTML = '<div class="aHint">Loading…</div>';
+  try {
+    const { users } = await api('analytics', { qs: `&days=${range}` });
+    if (!users.length) { el.innerHTML = `<div class="aHint">No calls in the last ${range} days.</div>`; return; }
+    const max = Math.max(...users.map((u) => u.minutes), 1);
+    el.innerHTML = users.map((u) => `<div class="aRow"><div class="aFlex"><div class="t" style="min-width:0">${esc(u.email)}</div><b>${num(u.minutes)}m</b></div>
+      <div class="aBars" style="height:6px;margin:8px 0 4px;display:block;background:#eceefa;border-radius:3px;"><i style="display:block;height:6px;width:${(u.minutes / max) * 100}%;border-radius:3px;"></i></div>
+      <div class="m">${u.calls} call${u.calls === 1 ? '' : 's'}${u.lastActive ? ' · last ' + new Date(u.lastActive).toLocaleDateString() : ''}</div></div>`).join('');
+  } catch (err) { fail(el, err); }
+}
+
+// ---------- credits: apply minutes + history ----------
+async function loadCredits() {
+  const el = $('sec-credits');
+  const keep = $('creditUser')?.value;
+  try { usersCache = (await api('list-users')).users; } catch (err) { return fail(el, err); }
+  el.innerHTML = `<div class="aCard"><div class="l" style="margin-bottom:8px;">Apply credit to a user</div>
+    <div class="aField"><select id="creditUser">${usersCache.map((u) => `<option value="${u.id}">${esc(u.email)} (${num(Math.max(0, u.minutes_limit + u.bonus_minutes - u.minutes_used))} left)</option>`).join('')}</select></div>
+    <div class="aField"><input type="number" id="creditMin" placeholder="Minutes" min="1" step="1"></div>
+    <div class="aField"><input type="text" id="creditNote" placeholder="Note (optional)" maxlength="200"></div>
+    <div class="aFlex"><button class="aBtn" id="creditAdd" style="flex:1">Add minutes</button><button class="aBtn ghost" id="creditSub" style="flex:1">Remove</button></div>
+    <div class="aHint" id="creditHint">Purchases are credited automatically after payment. Use this for gifts, refunds and fixes.</div></div>
+    <div class="l" style="margin:16px 4px 8px;color:#6b7186;font-size:13px;">Recent credits</div><div id="ledger"><div class="aHint">Loading…</div></div>`;
+  if (keep) $('creditUser').value = keep;
+  const apply = async (sign) => {
+    const m = Number($('creditMin').value);
+    if (!Number.isFinite(m) || m <= 0) { $('creditHint').textContent = 'Enter minutes above 0.'; return; }
+    $('creditHint').textContent = 'Applying…';
+    try {
+      const r = await api('grant-credit', { method: 'POST', body: { targetUserId: $('creditUser').value, minutes: sign * m, note: $('creditNote').value } });
+      $('creditHint').textContent = `Done. Credit balance is now ${num(r.bonus_minutes)} min.`;
+      $('creditMin').value = ''; $('creditNote').value = '';
+      loadLedger();
+    } catch (err) { $('creditHint').textContent = err.message; }
+  };
+  $('creditAdd').onclick = () => apply(1);
+  $('creditSub').onclick = () => apply(-1);
+  loadLedger();
+}
+async function loadLedger() {
+  const el = $('ledger');
+  try {
+    const { entries } = await api('credit-ledger');
+    el.innerHTML = entries.map((e) => `<div class="aRow"><div class="aFlex"><div class="t" style="min-width:0">${esc(emailOf(e.user_id))}</div><b class="${e.minutes < 0 ? 'aNeg' : 'aPos'}">${e.minutes > 0 ? '+' : ''}${num(e.minutes)}m</b></div>
+      <div class="m">${e.source === 'purchase' ? 'Purchase' : 'Admin'}${e.note ? ' · ' + esc(e.note) : ''} · ${new Date(e.at).toLocaleString()}</div></div>`).join('') || '<div class="aHint">No credits yet.</div>';
+  } catch (err) { fail(el, err); }
+}
+
+// ---------- costs: provider rates per call minute ----------
+async function loadCosts() {
+  const el = $('sec-costs');
+  try {
+    const { rates, currency, pricePerMin } = await api('rates');
+    const field = (k, label) => `<div class="aField"><label>${label} (${currency} per call minute)</label><input type="number" min="0" step="0.001" id="rate_${k}" value="${rates[k] || ''}" placeholder="0"></div>`;
+    el.innerHTML = `<div class="aCard"><div class="aHint" style="margin:0 0 12px;">Enter what each provider costs you per minute of call time, from your own bills. The panel multiplies this by minutes used to estimate cost and profit.</div>
+      ${field('twilio', 'Twilio')}${field('fish', 'Fish Audio')}${field('openai', 'OpenAI')}
+      <button class="aBtn" id="rateSave">Save rates</button><div class="aHint" id="rateHint"></div></div>
+      <div class="aGrid" id="rateSummary" style="margin-top:12px;"></div>`;
+    const summary = () => {
+      const cost = ['twilio', 'fish', 'openai'].reduce((a, k) => a + (Number($(`rate_${k}`).value) || 0), 0);
+      $('rateSummary').innerHTML = card('Your cost / min', money(cost, currency)) + card('You charge / min', pricePerMin ? money(pricePerMin, currency) : '—', 'avg of paid purchases')
+        + (pricePerMin ? card('Margin / min', `<span class="${pricePerMin - cost < 0 ? 'aNeg' : 'aPos'}">${money(pricePerMin - cost, currency)}</span>`, `${((1 - cost / pricePerMin) * 100).toFixed(0)}% of price`, true) : '');
+    };
+    summary();
+    ['twilio', 'fish', 'openai'].forEach((k) => { $(`rate_${k}`).oninput = summary; });
+    $('rateSave').onclick = async () => {
+      $('rateHint').textContent = 'Saving…';
+      try { await api('rates', { method: 'POST', body: { twilio: $('rate_twilio').value || 0, fish: $('rate_fish').value || 0, openai: $('rate_openai').value || 0 } }); $('rateHint').textContent = 'Saved.'; }
+      catch (err) { $('rateHint').textContent = err.message; }
+    };
+  } catch (err) { fail(el, err); }
 }
 
 // ---------- welcome/login/signup background gallery (images + video) ----------
@@ -206,25 +323,6 @@ $('announceSendBtn').addEventListener('click', async () => {
   $('announceTitle').value = '';
   $('announceBody').value = '';
 });
-
-// ---------- usage ----------
-async function loadUsage() {
-  const list = $('adminUsageList');
-  list.innerHTML = '<div class="authHint">Loading…</div>';
-  const resp = await authedFetch('/api/admin?action=analytics');
-  const data = await resp.json();
-  if (!resp.ok) { list.innerHTML = `<div class="authHint">${data.error || 'Could not load usage.'}</div>`; return; }
-  if (!data.users.length) { list.innerHTML = '<div class="authHint">No call activity yet.</div>'; return; }
-  list.innerHTML = data.users.map((u) => `
-    <div class="statRow">
-      <div style="flex:1; min-width:0;">
-        <div class="email">${u.email}</div>
-        <div class="sub">${u.calls} call${u.calls === 1 ? '' : 's'}${u.lastActive ? ' · last active ' + new Date(u.lastActive).toLocaleDateString() : ''}</div>
-      </div>
-      <div class="total">${u.minutes}m</div>
-    </div>
-  `).join('');
-}
 
 // Don't rely solely on onAuthStateChange to ever fire — check the current
 // session directly on load so the boot screen can't get stuck forever if

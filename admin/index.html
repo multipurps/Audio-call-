@@ -11,21 +11,43 @@
 <link rel="apple-touch-icon" href="../icon-192.png">
 <link rel="stylesheet" href="../styles.css">
 <style>
-  /* Admin is a single screen, no tab bar / call-screen chrome from the main app. */
-  #adminApp{position:fixed; inset:0; overflow-y:auto; padding:0 18px 40px;}
-  .adminHeader{padding-top:56px; margin-bottom:20px; text-align:center;}
-  .adminHeader img{width:56px; height:56px; border-radius:16px; margin:0 auto 10px;}
-  .bgGrid{display:grid; grid-template-columns:repeat(3,1fr); gap:8px;}
-  .bgCard{position:relative; border-radius:12px; overflow:hidden; border:1px solid var(--line); aspect-ratio:9/16; background:var(--panel);}
-  .bgCard img, .bgCard video{width:100%; height:100%; object-fit:cover; display:block;}
-  .bgCard button{position:absolute; top:5px; right:5px; width:22px; height:22px; border-radius:50%; background:rgba(0,0,0,0.6); color:#fff; font-size:12px; display:flex; align-items:center; justify-content:center;}
-  .minuteLimitRow{display:flex; align-items:center; gap:6px; margin-top:8px;}
-  .minuteLimitRow input{width:64px; background:var(--panel); border:1px solid var(--line); border-radius:8px; color:#fff; font-size:13px; padding:6px 8px; text-align:center;}
-  .minuteLimitRow button{font-size:11.5px; font-weight:650; padding:6px 10px; border-radius:8px; background:rgba(255,255,255,0.12); color:#fff;}
-  .statRow{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; gap:12px;}
-  .statRow .email{font-size:13.5px; font-weight:600; word-break:break-all;}
-  .statRow .sub{font-size:11.5px; color:var(--dim); margin-top:2px;}
-  .statRow .total{font-size:16px; font-weight:800; color:var(--accent); flex:none; text-align:right;}
+  #adminApp{position:fixed; inset:0; display:flex; flex-direction:column; background:#f3f4fb; color:#1b1f33; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; --ink:#1b1f33; --mute:#6b7186; --card:#fff; --acc:#1b1f33;}
+  #adminApp *{box-sizing:border-box;}
+  #adminApp button{cursor:pointer; border:0; font:inherit; color:inherit; background:none;}
+  #adminApp input,#adminApp select{font:inherit; color:var(--ink); background:#fff; border:1px solid #e1e4f0; border-radius:12px; padding:10px 12px; width:100%; min-width:0;}
+  .aBar{display:flex; align-items:center; gap:12px; padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 10px; background:#fff;}
+  .aIcon{width:42px; height:42px; border-radius:50%; background:#f1f2f9; display:flex; align-items:center; justify-content:center; flex:none;}
+  .aIcon svg{width:22px; height:22px;}
+  .aBar h1{font-size:19px; margin:0; flex:1;}
+  .aChips{display:flex; background:#f1f2f9; border-radius:999px; padding:4px; margin:0 16px 12px; width:fit-content;}
+  .aChips button{padding:8px 14px; border-radius:999px; font-size:13.5px; color:var(--mute);}
+  .aChips button.on{background:#fff; color:var(--ink); font-weight:650; box-shadow:0 1px 4px rgba(0,0,0,.08);}
+  #aBody{flex:1; overflow-y:auto; padding:6px 16px calc(env(safe-area-inset-bottom,0px) + 24px);}
+  .aSec{display:none;} .aSec.on{display:block;}
+  .aGrid{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+  .aCard{background:var(--card); border-radius:24px; padding:16px; box-shadow:0 2px 14px rgba(27,31,51,.06);}
+  .aCard .l{font-size:13px; color:var(--mute);} .aCard .v{font-size:26px; font-weight:700; margin:4px 0 2px; word-break:break-word;} .aCard .s{font-size:12px; color:var(--mute);}
+  .aCard.wide{grid-column:1/-1;}
+  .aBars{display:flex; align-items:flex-end; gap:2px; height:90px; margin-top:10px;}
+  .aBars i{flex:1; background:var(--acc); border-radius:3px 3px 0 0; min-height:2px; opacity:.85;}
+  .aRow{background:#fff; border-radius:18px; padding:12px 14px; margin-bottom:10px; box-shadow:0 2px 10px rgba(27,31,51,.05);}
+  .aRow .t{font-size:14px; font-weight:600; word-break:break-all;} .aRow .m{font-size:12px; color:var(--mute); margin-top:2px;}
+  .aFlex{display:flex; align-items:center; gap:10px; justify-content:space-between;}
+  .aBtn{background:var(--acc)!important; color:#fff!important; padding:10px 16px; border-radius:12px; font-weight:650; font-size:13.5px;}
+  .aBtn.ghost{background:#eceefa!important; color:var(--ink)!important;} .aBtn.sm{padding:7px 11px; font-size:12px;}
+  .aField{margin-bottom:10px;} .aField label{display:block; font-size:12px; color:var(--mute); margin-bottom:4px;}
+  .aHint{font-size:12.5px; color:var(--mute); margin-top:8px; min-height:16px;}
+  .aPos{color:#0f9d68;} .aNeg{color:#d6453d;}
+  .aBg{display:grid; grid-template-columns:repeat(3,1fr); gap:8px;}
+  .aBg .bgCard{position:relative; border-radius:12px; overflow:hidden; aspect-ratio:9/16; background:#e6e8f3;}
+  .aBg img,.aBg video{width:100%; height:100%; object-fit:cover; display:block;}
+  .aBg button{position:absolute; top:5px; right:5px; width:22px; height:22px; border-radius:50%; background:rgba(0,0,0,.6)!important; color:#fff; font-size:12px;}
+  #aScrim{position:fixed; inset:0; background:rgba(15,18,35,.45); opacity:0; pointer-events:none; transition:opacity .2s; z-index:20;}
+  #aDrawer{position:fixed; top:0; bottom:0; left:0; width:min(280px,82vw); background:#fff; z-index:21; transform:translateX(-100%); transition:transform .22s; padding:calc(env(safe-area-inset-top,0px) + 20px) 14px 20px; display:flex; flex-direction:column; gap:4px;}
+  #adminApp.open #aScrim{opacity:1; pointer-events:auto;} #adminApp.open #aDrawer{transform:none;}
+  #aDrawer .brand{display:flex; align-items:center; gap:10px; font-weight:700; font-size:17px; padding:4px 8px 14px;} #aDrawer .brand img{width:36px; height:36px; border-radius:10px;}
+  #aDrawer .nav{text-align:left; padding:13px 14px; border-radius:14px; font-size:15px; color:var(--mute);}
+  #aDrawer .nav.on{background:#f1f2f9; color:var(--ink); font-weight:650;}
 </style>
 </head>
 <body>
@@ -61,33 +83,36 @@
 </div>
 
 <div id="adminApp" class="hidden">
-  <div class="adminHeader">
-    <img src="../icon-192.png" alt="">
-    <h1 class="pageTitle" style="padding-top:0;">Emysa Admin</h1>
+  <div class="aBar"><button class="aIcon" id="menuBtn" aria-label="Menu"><svg viewBox="0 0 21 21" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(3 3)"><path d="m2.5.5h10c1.1045695 0 2 .8954305 2 2v10c0 1.1045695-.8954305 2-2 2h-10c-1.1045695 0-2-.8954305-2-2v-10c0-1.1045695.8954305-2 2-2z"/><path d="m12.5 11.5v-8"/></g></svg></button><h1 id="aTitle">Overview</h1><button class="aIcon" id="refreshBtn" aria-label="Refresh">&#x21bb;</button></div>
+  <div class="aChips" id="aChips"><button data-d="7">7 days</button><button data-d="30" class="on">30 days</button><button data-d="90">90 days</button></div>
+  <div id="aBody">
+    <section class="aSec" id="sec-overview"></section>
+    <section class="aSec" id="sec-users"></section>
+    <section class="aSec" id="sec-usage"></section>
+    <section class="aSec" id="sec-credits"></section>
+    <section class="aSec" id="sec-costs"></section>
+    <section class="aSec" id="sec-content">
+      <div class="aCard"><div class="l">Welcome, login &amp; sign-up backgrounds</div>
+        <div class="aHint">Images or a short video. Keep clips a few MB at most.</div>
+        <div class="aBg" id="bgGrid" style="margin-top:10px;"></div>
+        <button class="aBtn ghost" id="uploadBgBtn" style="margin-top:10px;">Add image or video</button>
+        <input type="file" id="bgFileInput" accept="image/*,video/*" style="display:none;">
+        <div class="aHint" id="bgUploadStatus"></div></div>
+      <div class="aCard" style="margin-top:12px;"><div class="l" style="margin-bottom:8px;">Send announcement</div>
+        <div class="aField"><input type="text" id="announceTitle" placeholder="Title"></div>
+        <div class="aField"><input type="text" id="announceBody" placeholder="Message"></div>
+        <button class="aBtn" id="announceSendBtn">Send push to all users</button>
+        <div class="aHint" id="announceHint"></div></div>
+    </section>
   </div>
-
-  <div class="field">
-    <label>Welcome, login &amp; signup backgrounds</label>
-    <div style="font-size:12.5px; color:var(--dim); margin-bottom:10px;">Upload images or a short video — video takes over as the background when present; keep clips short and compressed, a few MB at most.</div>
-    <div class="bgGrid" id="bgGrid"></div>
-    <button class="secondaryBtn" id="uploadBgBtn" style="margin-top:10px;">Add image or video</button>
-    <input type="file" id="bgFileInput" accept="image/*,video/*" style="display:none;">
-    <div class="authHint" id="bgUploadStatus"></div>
-  </div>
-
-  <div class="field"><label>Users</label></div>
-  <div id="adminUserList"></div>
-
-  <div class="field" style="margin-top:24px;"><label>Send announcement</label></div>
-  <div class="field"><input type="text" id="announceTitle" placeholder="Title"></div>
-  <div class="field"><textarea id="announceBody" placeholder="Message" style="min-height:70px;"></textarea></div>
-  <button class="secondaryBtn" id="announceSendBtn">Send push to all users</button>
-  <div class="authHint" id="announceHint"></div>
-
-  <div class="field" style="margin-top:24px;"><label>Usage</label></div>
-  <div id="adminUsageList"><div class="authHint">Loading…</div></div>
-
-  <button class="secondaryBtn" id="signOutBtn" style="margin-top:24px;">Sign out</button>
+  <div id="aScrim"></div>
+  <nav id="aDrawer">
+    <div class="brand"><img src="../icon-192.png" alt="">Emysa Admin</div>
+    <button class="nav on" data-s="overview">Overview</button><button class="nav" data-s="users">Users</button>
+    <button class="nav" data-s="usage">Usage</button><button class="nav" data-s="credits">Credits</button>
+    <button class="nav" data-s="costs">Costs &amp; providers</button><button class="nav" data-s="content">Content &amp; push</button>
+    <button class="nav" id="signOutBtn" style="margin-top:auto;">Sign out</button>
+  </nav>
 </div>
 
 <script>
@@ -111,7 +136,7 @@
   // standalone app. Tying the import to a version string that changes
   // every deploy forces a genuinely new request each time instead of
   // silently continuing to run whatever was cached from before.
-  import(`./admin.js?v=2026-09-09.6`).catch((err) => showBootFailure('Failed to load admin.js', err));
+  import(`./admin.js?v=2026-10-06.1`).catch((err) => showBootFailure('Failed to load admin.js', err));
 </script>
 <script>
   if ('serviceWorker' in navigator) {
