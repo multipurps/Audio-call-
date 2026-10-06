@@ -3517,7 +3517,6 @@ async function refreshVoiceStatus() {
   $('voiceCloneSection').style.display = ready ? 'none' : 'flex';
   $('voiceAddHead').classList.toggle('hidden', ready);
   $('voicePreviewRow').classList.toggle('hidden', !ready);
-  if (ready) ensureVoiceSwipeDelete();
   $('voiceRecordStatus').textContent = status === 'pending' ? 'Cloning your voice…' : status === 'failed' ? 'Cloning failed.' : 'A voice you create from a recording. Emysa speaks as you.';
   loadVoicePrefs();
 }
@@ -3700,16 +3699,22 @@ $('voicePreviewAudio').addEventListener('play', () => { $('voicePreviewBtn').inn
 $('voicePreviewAudio').addEventListener('pause', () => { $('voicePreviewBtn').innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'; });
 $('voicePreviewAudio').addEventListener('ended', () => { $('voicePreviewBtn').innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'; });
 
-let voiceSwipeWrap = null;
-function ensureVoiceSwipeDelete() {
-  if (voiceSwipeWrap && voiceSwipeWrap.isConnected) return;
-  voiceSwipeWrap = makeSwipeDelete($('voicePreviewRow'), async () => {
+$('deleteVoiceBtn').addEventListener('click', async (e) => {
+  e.stopPropagation();
+  if (!confirm('Delete your cloned voice? You can record a new one after.')) return;
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  try {
     const r = await authedFetch('/api/voice-clone', { method: 'DELETE' });
     if (!r.ok) throw new Error('delete failed');
     $('voicePreviewAudio').removeAttribute('src');
     setTimeout(refreshVoiceStatus, 250);
-  }, { remove: false });
-}
+  } catch {
+    $('voiceRecordStatus').textContent = 'Could not delete your voice. Please try again.';
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 $('voiceBtn').addEventListener('click', () => { openSheet('sheet-voice'); refreshVoiceStatus(); });
 $('socialCallingBtn').addEventListener('click', () => { openSheet('sheet-social-calling'); loadSocialAccounts(); });
