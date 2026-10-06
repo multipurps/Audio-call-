@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { database } from './helpers.mjs';
 import handler from '../api/referrals.js';
-import { verifyWebhookSignature, getPacks, remainingMinutes } from '../lib/billing.js';
+import { verifyWebhookSignature, getUnit, priceFor, remainingMinutes } from '../lib/billing.js';
 
 const SECRET = 'whsec_test';
 const env = { BACHS_API_KEY: 'sk_sandbox_test', BACHS_WEBHOOK_SECRET: SECRET, PUBLIC_APP_URL: 'https://app.example' };
@@ -75,37 +75,50 @@ test('billing status returns balance and the server price list', async () => {
   assert.equal(r.code, 200);
   assert.equal(r.data.remaining, 48);
   assert.equal(r.data.payments, true);
-  assert.deepEqual(r.data.packs.map((p) => p.id), getPacks(env).map((p) => p.id));
+  assert.deepEqual(r.data.unit, getUnit(env));
+  assert.deepEqual(r.data.unit, { minutes: 300, amount: '30.00', maxQty: 10, currency: 'USD' });
 });
 
-test('checkout: server decides the price; unknown pack and missing config are refused', async () => {
+test('checkout: server decides the price from the quantity; bad quantities and missing config are refused', async () => {
   const f = fixture();
   let sent;
   const createCheckoutSession = async (input) => { sent = input; return { checkout_id: 'chk_new', checkout_url: 'https://checkout.bachs.io/chk_new' }; };
-  const bad = await call(f, { action: 'checkout', body: { packId: 'free-1000' }, extra: { createCheckoutSession } });
-  assert.equal(bad.code, 400);
-  const off = await call(f, { action: 'checkout', body: { packId: 'm60' }, extra: { env: { PUBLIC_APP_URL: 'https://app.example' } } });
+  for (const quantity of [0, -1, 1.5, 11, '2; drop', null, undefined]) {
+    const bad = await call(f, { action: 'checkout', body: { quantity }, extra: { createCheckoutSession } });
+    assert.equal(bad.code, 400, String(quantity));
+  }
+  const off = await call(f, { action: 'checkout', body: { quantity: 1 }, extra: { env: { PUBLIC_APP_URL: 'https://app.example' } } });
   assert.equal(off.code, 503);
-  const ok = await call(f, { action: 'checkout', body: { packId: 'm60', amount: '0.01', minutes: 9999 }, extra: { createCheckoutSession } });
+  const ok = await call(f, { action: 'checkout', body: { quantity: 2, amount: '0.01', minutes: 9999 }, extra: { createCheckoutSession } });
   assert.equal(ok.code, 200);
   assert.equal(ok.data.url, 'https://checkout.bachs.io/chk_new');
-  assert.equal(sent.pack.amount, '9.00');
-  assert.equal(sent.pack.minutes, 60);
+  assert.equal(sent.pack.amount, '60.00');
+  assert.equal(sent.pack.minutes, 600);
   assert.equal(sent.successUrl, 'https://app.example/pay-return.html');
   assert.equal(sent.cancelUrl, 'https://app.example/pay-return.html?pay=cancel');
   const row = f.db.tables.minute_purchases[0];
-  assert.equal(row.minutes, 60);
-  assert.equal(row.amount, 9);
+  assert.equal(row.minutes, 600);
+  assert.equal(row.amount, 60);
   assert.equal(row.user_id, 'user-1');
   assert.equal(row.checkout_id, 'chk_new');
+});
+
+test('price: unit x quantity, configurable, no float drift', () => {
+  assert.deepEqual(priceFor(1, {}), { id: 'x1', quantity: 1, minutes: 300, amount: '30.00', currency: 'USD' });
+  assert.equal(priceFor(10, {}).amount, '300.00');
+  assert.equal(priceFor(11, {}), null);
+  const cfg = { BACHS_UNIT_MINUTES: '60', BACHS_UNIT_AMOUNT: '9.99', BACHS_MAX_QTY: '3', BACHS_CURRENCY: 'ngn' };
+  assert.deepEqual(priceFor(3, cfg), { id: 'x3', quantity: 3, minutes: 180, amount: '29.97', currency: 'NGN' });
+  assert.equal(priceFor(4, cfg), null);
+  assert.equal(getUnit({ BACHS_UNIT_AMOUNT: 'abc' }).amount, '30.00'); // bad config falls back, never charges 0
 });
 
 test('checkout: a second tap reuses the open checkout instead of creating another', async () => {
   const f = fixture();
   let created = 0;
   const createCheckoutSession = async () => { created += 1; return { checkout_id: `chk_${created}`, checkout_url: `https://checkout.bachs.io/chk_${created}` }; };
-  const a = await call(f, { action: 'checkout', body: { packId: 'm30' }, extra: { createCheckoutSession } });
-  const b = await call(f, { action: 'checkout', body: { packId: 'm30' }, extra: { createCheckoutSession } });
+  const a = await call(f, { action: 'checkout', body: { quantity: 1 }, extra: { createCheckoutSession } });
+  const b = await call(f, { action: 'checkout', body: { quantity: 1 }, extra: { createCheckoutSession } });
   assert.equal(created, 1);
   assert.equal(a.data.url, b.data.url);
   assert.equal(f.db.tables.minute_purchases.length, 1);
@@ -114,7 +127,7 @@ test('checkout: a second tap reuses the open checkout instead of creating anothe
 test('checkout: a Bachs failure cancels the purchase and returns a plain error', async () => {
   const f = fixture();
   const createCheckoutSession = async () => { throw new Error('boom'); };
-  const r = await call(f, { action: 'checkout', body: { packId: 'm30' }, extra: { createCheckoutSession } });
+  const r = await call(f, { action: 'checkout', body: { quantity: 1 }, extra: { createCheckoutSession } });
   assert.equal(r.code, 502);
   assert.equal(f.db.tables.minute_purchases[0].status, 'cancelled');
   assert.ok(!/boom/.test(JSON.stringify(r.data)));

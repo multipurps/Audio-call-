@@ -384,8 +384,14 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
   overflow:hidden; box-sizing:border-box; transition:box-shadow 0.2s;
 }
 
-.tabAvatarRing img{width:100%; height:100%; object-fit:cover;}
+.tabAvatarRing{position:relative;}
+.tabAvatarRing img{display:none; position:absolute; inset:0; width:100%; height:100%; object-fit:cover;}
 .tabAvatarRing svg{width:16px; height:16px;}
+/* Profile tab, active: a ring around the circle, showing the profile picture when there is one */
+.tabBtn.active .tabAvatarRing{width:28px; height:28px; box-shadow:0 0 0 2px var(--coffee), 0 0 0 4px var(--accent); background:rgba(255,255,255,0.08);}
+.tabBtn.active .tabAvatarRing.hasPhoto img{display:block;}
+.tabBtn.active .tabAvatarRing.hasPhoto svg{visibility:hidden;}
+.notifEmpty{padding:28px 4px; font-size:15px; color:var(--dim);}
 
 /* ---------- home composer bar: floats free above the tab nav ---------- */
 #homeInputBar{
@@ -970,6 +976,7 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .dashLogo{width:44px; height:44px; border-radius:13px; object-fit:cover; flex:none;}
 .dashName{font-size:28px; font-weight:700; letter-spacing:-0.02em; line-height:1.1;}
 .dashTag{font-size:13px; color:var(--dim); margin-top:3px;}
+.dashIconBtn .ic{width:26px; height:26px;}
 .dashIconBtn{width:44px; height:44px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; color:var(--icon-color); background:var(--glass-bg); border:1px solid var(--glass-border);}
 
 .dashCard{background:var(--glass-bg); border:1px solid var(--glass-border); border-radius:24px;}
@@ -986,10 +993,10 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 
 .dashHeading{font-size:20px; font-weight:600; letter-spacing:-0.01em; margin:28px 0 12px 2px;}
 .dashActions{display:grid; grid-template-columns:repeat(4, 1fr) 0.9fr; gap:10px;}
-.dashAction{display:flex; flex-direction:column; align-items:center; justify-content:flex-start; gap:10px; padding:16px 4px 12px; min-height:92px; border-radius:20px; color:#fff; background:var(--glass-bg); border:1px solid var(--glass-border);}
-.dashAction .ic{width:27px; height:27px; color:var(--accent);}
+.dashAction{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; padding:10px 3px 9px; min-height:74px; border-radius:18px; color:#fff; background:var(--glass-bg); border:1px solid var(--glass-border);}
+.dashAction .ic{width:24px; height:24px; color:var(--accent);}
 .dashActionMore .ic{color:var(--dim);}
-.dashAction span{font-size:13px; font-weight:500; line-height:1.2; text-align:center; overflow-wrap:break-word; max-width:100%;}
+.dashAction span{font-size:12px; font-weight:500; line-height:1.15; text-align:center; overflow-wrap:break-word; max-width:100%;}
 
 .dashPeople{margin-top:16px; padding:16px 18px 18px;}
 .dashSectionHead{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
@@ -1004,12 +1011,34 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .dashPersonSub{font-size:12px; color:var(--dim); text-align:center; line-height:1.25;}
 .dashEmpty{grid-column:1 / -1; font-size:14px; color:var(--dim);}
 
-/* Add time sheet */
-.addTimeTitle{font-size:24px; font-weight:700; margin:6px 0 4px;}
-.addTimeBalance{font-size:14px; color:var(--dim); margin-bottom: 8px;}
-.addTimePack{display:flex; align-items:center; justify-content:space-between; width:100%; margin-top:10px; padding:16px 18px; border-radius:18px; color:#fff; font-size:17px; font-weight:600; text-align:left; background:var(--glass-bg); border:1px solid var(--glass-border);}
-.addTimePack:active{opacity:.7;}
-.addTimePack .price{color:var(--dim); font-weight:500;}
-.addTimeOpen{display:block; margin-top:14px; padding:14px; border-radius:14px; text-align:center; font-size:16px; font-weight:600; color:#fff; text-decoration:none; background:var(--accent-grad);}
-.addTimeStatus{margin:12px 2px 0; min-height:18px;}
+.dashBehalf{margin-top:16px; padding:16px 18px 18px;}
+.dashBehalf .dashSectionHead{margin-bottom:10px;}
+.dashBehalfList .dashEmpty{padding:2px 0;}
+
+/* Add time: its own full page, fixed dark/peach look (not theme-tinted) */
+.addTimeScreen{position:absolute; inset:0; z-index:120; display:flex; flex-direction:column; align-items:center; text-align:center; background:#0b0b0b; color:#f5dcd6; padding:max(env(safe-area-inset-top),56px) 24px max(env(safe-area-inset-bottom),22px); overflow-y:auto;}
+.addTimeScreen.hidden{display:none;}
+.addTimeClose{position:absolute; top:max(env(safe-area-inset-top),56px); left:20px; width:44px; height:44px; display:flex; align-items:center; justify-content:center; color:#a89a96;}
+.addTimeClose .ic{width:30px; height:30px;}
+.addTimeLogo{width:74px; height:74px; border-radius:50%; overflow:hidden; background:#fde8df; flex:none;}
+.addTimeLogo img{width:100%; height:100%; object-fit:cover; display:block;}
+.addTimeTitle{font-size:38px; font-weight:300; letter-spacing:-0.02em; margin-top:18px;}
+.addTimeLead{font-size:18px; font-weight:300; line-height:1.4; color:#9b8f8b; margin-top:12px; white-space:pre-line;}
+.addTimeCenter{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%; min-height:260px;}
+.addTimeBig{font-size:clamp(54px, 19vw, 82px); font-weight:300; letter-spacing:-0.03em; line-height:1.05;}
+.addTimeOf{font-size:21px; font-weight:300; color:#9b8f8b; margin-top:8px;}
+.addTimeStepper{display:flex; align-items:center; justify-content:space-between; width:min(300px, 80vw); height:82px; margin-top:44px; padding:0 22px; border-radius:999px; background:#232323;}
+.addTimeStepper button{width:48px; height:48px; display:flex; align-items:center; justify-content:center; color:#b08a9c;}
+.addTimeStepper button:disabled{color:#5a5256; opacity:1;}
+.addTimeStepper .ic{width:26px; height:26px;}
+#addTimeQty{font-size:34px; font-weight:300;}
+.addTimeBottom{width:100%; flex:none; padding-top:18px;}
+.addTimeBuy{width:100%; height:82px; border-radius:999px; background:#2f2e33; color:#f5dcd6; font-size:22px; font-weight:400;}
+.addTimeBuy:active{opacity:.75;}
+.addTimeBuy:disabled{opacity:.5;}
+.addTimeOpen{display:block; margin-bottom:12px; padding:16px; border-radius:999px; text-align:center; font-size:18px; font-weight:500; color:#0b0b0b; text-decoration:none; background:#f5dcd6;}
+.addTimeStatus{min-height:20px; margin-top:12px; font-size:14px; color:#c9a79e;}
+.addTimeFine{font-size:14px; line-height:1.45; color:#8b807d; margin-top:8px;}
+.addTimeLinks{display:flex; align-items:center; justify-content:center; gap:10px; margin-top:6px; font-size:14px; color:#8b807d;}
+.addTimeLinks button{font-size:14px; color:#8b807d;}
 @media(prefers-reduced-motion:reduce){.dashAddBtn, .dashAction, .dashPerson{transition:none;}}

@@ -1,12 +1,13 @@
 # Add time: paying for call minutes with Bachs
 
 Home shows the balance (`monthly_minute_limit + bonus_minutes - call_minutes_used`)
-and an **Add time** button. Tapping it lists the minute packs; choosing one opens
-the Bachs hosted checkout. Card and bank details never touch Emysa.
+and an **Add time** button. It opens a full page: a 1x-10x stepper over one unit of
+call time (default 5 hours for $30) and a **Purchase** button that opens the Bachs
+hosted checkout. Card and bank details never touch Emysa.
 
 ## How a payment flows
 
-1. The app sends only a `packId` to `POST /api/referrals?action=checkout`.
+1. The app sends only a `quantity` to `POST /api/referrals?action=checkout`.
    The server owns the price list (`lib/billing.js`), writes a `pending` row in
    `minute_purchases` and asks Bachs for a checkout session.
 2. The app opens the checkout in a separate window, so the installed PWA is never
@@ -33,8 +34,8 @@ Everything runs inside `api/referrals.js` (multiplexed by `?action=`) because
    - `BACHS_API_KEY` — secret key. `sk_sandbox_...` automatically uses the sandbox API.
    - `BACHS_WEBHOOK_SECRET` — the signing secret of your webhook endpoint.
    - `PUBLIC_APP_URL` — already set for Twilio (no trailing slash).
-   - optional `BACHS_CURRENCY` (default `USD`) and `BACHS_PACKS`, a JSON list such as
-     `[{"id":"m30","minutes":30,"amount":"5.00"},{"id":"m60","minutes":60,"amount":"9.00"}]`.
+   - optional: `BACHS_CURRENCY` (default `USD`), `BACHS_UNIT_MINUTES` (default `300`),
+     `BACHS_UNIT_AMOUNT` (default `30.00`) and `BACHS_MAX_QTY` (default `10`).
      Bachs minimums apply per currency (for example 1000 for NGN), so set real
      prices here for the currency you charge in.
 3. In the Bachs dashboard add a webhook endpoint
@@ -45,5 +46,9 @@ Everything runs inside `api/referrals.js` (multiplexed by `?action=`) because
 
 ## Prices
 
-The default packs in `lib/billing.js` (30 / 60 / 120 minutes) are placeholders.
-Set the real prices before going live.
+The defaults (5 hours for $30 per unit) are placeholders copied from the design
+reference. Set your real price with the env vars above before going live.
+
+The page does not promise an expiry: purchased minutes are added to
+`bonus_minutes` and do not expire. If you want "valid for 30 days", expiry has to
+be built first (per-purchase tracking).

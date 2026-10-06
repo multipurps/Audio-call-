@@ -1,6 +1,6 @@
 import { getServiceClient, getAuthedUser } from '../lib/supabaseAdmin.js';
 import {
-  getPacks, remainingMinutes, createCheckoutSession, getCheckout,
+  getUnit, priceFor, remainingMinutes, createCheckoutSession, getCheckout,
   verifyWebhookSignature, checkoutIdFromEvent, eventType, sameAmount,
 } from '../lib/billing.js';
 import { randomUUID } from 'node:crypto';
@@ -11,8 +11,8 @@ import { randomUUID } from 'node:crypto';
 // instead of getting its own function. Actions:
 //   (default)        referral code + count
 //   redeem           apply a referral code
-//   billing          balance + packs for the Home screen
-//   checkout         create a Bachs hosted checkout for a pack
+//   billing          balance + price of one unit for the Home screen
+//   checkout         create a Bachs hosted checkout for N units of time
 //   billing-verify   re-check this user's pending purchases with Bachs
 //   webhook          signed Bachs events (no user session; also at /api/bachs-webhook)
 //
@@ -120,14 +120,14 @@ async function balanceFor(supabase, userId) {
 }
 
 async function billingStatus(req, res, supabase, userId, deps) {
-  const packs = getPacks(deps.env || process.env);
+  const unit = getUnit(deps.env || process.env);
   const balance = await balanceFor(supabase, userId);
   const { data: pending } = await supabase
     .from('minute_purchases').select('id').eq('user_id', userId).eq('status', 'pending').limit(1);
   return res.status(200).json({
     ...balance,
     payments: Boolean((deps.env || process.env).BACHS_API_KEY),
-    packs,
+    unit,
     pending: Boolean(pending?.length),
   });
 }
@@ -139,8 +139,8 @@ async function startCheckout(req, res, supabase, user, deps) {
   const appUrl = String(env.PUBLIC_APP_URL || '').replace(/\/+$/, '');
   if (!appUrl) return res.status(503).json({ error: 'Payments are not set up yet.' });
 
-  const pack = getPacks(env).find((p) => p.id === req.body?.packId);
-  if (!pack) return res.status(400).json({ error: 'Choose a time pack.' });
+  const pack = priceFor(req.body?.quantity, env);
+  if (!pack) return res.status(400).json({ error: 'Choose how much time to add.' });
 
   // A double tap, or coming back to the sheet, reuses the open checkout
   // instead of creating a second one.

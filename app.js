@@ -275,6 +275,7 @@ async function enterApp(session) {
 
   redeemPendingReferral();
   loadHome(true);
+  loadNavAvatar();
   resumePaymentCheck();
 }
 
@@ -297,8 +298,24 @@ function createSafeAvatarImg(url) {
   return img;
 }
 
+// The Profile tab shows the profile picture inside a ring while it is active.
+function setNavAvatar(url) {
+  const ring = document.querySelector('.tabBtn[data-tab="profile"] .tabAvatarRing');
+  if (!ring) return;
+  ring.querySelector('img')?.remove();
+  ring.classList.toggle('hasPhoto', Boolean(url));
+  if (url) ring.appendChild(createSafeAvatarImg(url));
+}
+
+async function loadNavAvatar() {
+  if (!currentUser) return;
+  const { data } = await supabase.from('profiles').select('avatar_url').eq('user_id', currentUser.id).maybeSingle();
+  renderAvatar(data?.avatar_url || null);
+}
+
 function renderAvatar(url) {
   userAvatarUrl = url || null;
+  setNavAvatar(url);
   const el = $('profileAvatarCircle');
   const initial = ($('profileEmailDisplay').textContent || currentUser?.email || '?')[0].toUpperCase();
   el.textContent = '';
@@ -3213,7 +3230,7 @@ const HOME_ACTIONS = {
   more: () => $('moreDialog').showModal(),
 };
 document.querySelectorAll('#dashActions .dashAction').forEach((btn) => btn.addEventListener('click', () => HOME_ACTIONS[btn.dataset.action]?.()));
-$('dashSettingsBtn').addEventListener('click', () => showTab('profile'));
+$('dashNotifBtn').addEventListener('click', () => openSheet('sheet-notifications'));
 $('dashPeopleAll').addEventListener('click', () => showTab('contacts'));
 document.querySelectorAll('[data-more]').forEach((btn) => btn.addEventListener('click', () => {
   $('moreDialog').close();
@@ -3230,56 +3247,69 @@ document.querySelectorAll('[data-more]').forEach((btn) => btn.addEventListener('
 // can add minutes by itself.
 const PAY_FLAG = 'emysa_pay_started';
 const PAY_FLAG_MAX_AGE_MS = 2 * 60 * 60 * 1000;
-const formatPrice = (amount, currency) => {
-  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(Number(amount)); }
-  catch { return `${amount} ${currency}`; }
-};
 const payPending = () => {
   const at = Number(localStorage.getItem(PAY_FLAG) || 0);
   if (at && Date.now() - at > PAY_FLAG_MAX_AGE_MS) { localStorage.removeItem(PAY_FLAG); return false; }
   return Boolean(at);
 };
 
-function renderAddTimePacks() {
-  const box = $('addTimePacks');
-  box.textContent = '';
-  $('addTimeBalance').textContent = homeBalance ? `${formatMinutes(homeBalance.remaining)} remaining` : '';
-  if (!homeBalance?.payments || !homeBalance.packs?.length) {
-    $('addTimeStatus').textContent = homeBalance ? 'Adding time is not available yet.' : 'Could not load options. Check your connection and try again.';
+let addTimeQty = 1;
+
+// "5 hours" / "5 call hours"; odd lengths fall back to minutes.
+function callTimeLabels(minutes) {
+  if (minutes % 60 === 0) {
+    const h = minutes / 60;
+    return { big: `${h} ${h === 1 ? 'hour' : 'hours'}`, buy: `${h} call ${h === 1 ? 'hour' : 'hours'}` };
+  }
+  return { big: `${minutes} minutes`, buy: `${minutes} call minutes` };
+}
+function formatPlainPrice(amount, currency) {
+  const whole = Number.isInteger(Number(amount));
+  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency, minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 }).format(Number(amount)); }
+  catch { return `${amount} ${currency}`; }
+}
+
+function renderAddTime() {
+  const unit = homeBalance?.unit;
+  const ready = Boolean(homeBalance?.payments && unit);
+  const out = homeBalance && homeBalance.remaining < 1;
+  $('addTimeLead').textContent = out ? "You're out of call time.\nTop up to keep Emysa making calls for you." : 'Top up to keep Emysa making calls for you.';
+  $('addTimeQty').textContent = `${addTimeQty}×`;
+  $('addTimeMinus').disabled = addTimeQty <= 1;
+  $('addTimePlus').disabled = !ready || addTimeQty >= unit.maxQty;
+  if (!ready) {
+    $('addTimeBig').textContent = '–';
+    $('addTimeBuy').textContent = 'Purchase';
+    $('addTimeBuy').disabled = true;
+    $('addTimeStatus').textContent = homeBalance ? 'Adding time is not available yet.' : 'Could not load. Check your connection and try again.';
     return;
   }
-  for (const pack of homeBalance.packs) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'addTimePack';
-    const label = document.createElement('span');
-    label.textContent = formatMinutes(pack.minutes);
-    const price = document.createElement('span');
-    price.className = 'price';
-    price.textContent = formatPrice(pack.amount, pack.currency);
-    btn.append(label, price);
-    btn.addEventListener('click', () => startCheckout(pack, btn));
-    box.appendChild(btn);
-  }
+  const labels = callTimeLabels(unit.minutes * addTimeQty);
+  const total = (Math.round(Number(unit.amount) * 100) * addTimeQty) / 100;
+  $('addTimeBig').textContent = labels.big;
+  $('addTimeBuy').textContent = `Purchase ${labels.buy} · ${formatPlainPrice(total, unit.currency)}`;
+  $('addTimeBuy').disabled = false;
 }
 
 async function openAddTime() {
+  addTimeQty = 1;
   $('addTimeStatus').textContent = '';
   $('addTimeOpen').classList.add('hidden');
-  if (!homeBalance) await loadBalance();
-  renderAddTimePacks();
-  if (!$('addTimeDialog').open) $('addTimeDialog').showModal();
+  $('addTimeScreen').classList.remove('hidden');
+  renderAddTime();
+  if (!homeBalance?.unit) { await loadBalance(); renderAddTime(); }
 }
+function closeAddTime() { $('addTimeScreen').classList.add('hidden'); }
 
-async function startCheckout(pack, btn) {
-  const buttons = [...document.querySelectorAll('#addTimePacks .addTimePack')];
-  buttons.forEach((b) => { b.disabled = true; });
+async function startCheckout() {
+  const buy = $('addTimeBuy');
+  buy.disabled = true;
   $('addTimeStatus').textContent = 'Opening secure payment…';
   try {
     const resp = await authedFetch('/api/referrals?action=checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ packId: pack.id }),
+      body: JSON.stringify({ quantity: addTimeQty }),
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || !data.url) throw new Error(data.error || 'Could not open payment. Try again.');
@@ -3289,7 +3319,7 @@ async function startCheckout(pack, btn) {
     const opened = window.open(data.url, '_blank');
     if (opened) {
       try { opened.opener = null; } catch {}
-      $('addTimeDialog').close();
+      $('addTimeStatus').textContent = '';
     } else {
       // The browser blocked the window (the request finished after the tap).
       // A real tap on a link always works, including in an installed PWA.
@@ -3301,9 +3331,16 @@ async function startCheckout(pack, btn) {
   } catch (err) {
     $('addTimeStatus').textContent = err.message || 'Could not open payment. Try again.';
   } finally {
-    buttons.forEach((b) => { b.disabled = false; });
+    buy.disabled = false;
   }
 }
+
+$('addTimeMinus').addEventListener('click', () => { if (addTimeQty > 1) { addTimeQty -= 1; renderAddTime(); } });
+$('addTimePlus').addEventListener('click', () => { if (homeBalance?.unit && addTimeQty < homeBalance.unit.maxQty) { addTimeQty += 1; renderAddTime(); } });
+$('addTimeBuy').addEventListener('click', startCheckout);
+$('addTimeClose').addEventListener('click', closeAddTime);
+$('addTimeTerms').addEventListener('click', () => openSheet('sheet-terms'));
+$('addTimePrivacy').addEventListener('click', () => openSheet('sheet-privacy'));
 
 let payWatching = false;
 async function verifyPayment() {
@@ -3311,11 +3348,11 @@ async function verifyPayment() {
   if (!resp?.ok) return null;
   const data = await resp.json();
   const before = homeBalance?.remaining;
-  homeBalance = { ...(homeBalance || {}), ...data, payments: true, packs: homeBalance?.packs || [] };
+  homeBalance = { ...(homeBalance || {}), ...data, payments: true };
   renderBalance();
   if (before != null && data.remaining > before) {
     showToast(`${formatMinutes(data.remaining - before)} added`);
-    if ($('addTimeDialog').open) $('addTimeDialog').close();
+    closeAddTime();
   }
   if (!data.pending) localStorage.removeItem(PAY_FLAG);
   return data;
