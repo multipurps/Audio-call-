@@ -178,7 +178,7 @@ async function startCheckout(req, res, supabase, user, deps) {
     return res.status(200).json({ url });
   } catch (err) {
     await supabase.from('minute_purchases').update({ status: 'cancelled' }).eq('id', purchase.id);
-    console.error('bachs checkout failed:', err.message);
+    console.error('bachs checkout failed:', err.message, err.status || '', err.detail || '');
     return res.status(502).json({ error: 'Could not open checkout. Try again in a moment.' });
   }
 }
