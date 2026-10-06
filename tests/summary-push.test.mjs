@@ -45,3 +45,15 @@ test('skips quietly when VAPID env is missing or no subscriptions exist', async 
   const sender2 = { setVapidDetails() {}, sendNotification: async () => {} };
   assert.equal((await sendCallSummaryPush(fakeSupabase([]), { userId: 'u', callId: 'c', summary: 's', env, sender: sender2 })).status, 'no-subscriptions');
 });
+
+test('a failed send logs the push service reason and counts as failed', async () => {
+  const lines = [];
+  const orig = console.warn;
+  console.warn = (...a) => lines.push(a.join(' '));
+  try {
+    const sender = { setVapidDetails() {}, sendNotification: async () => { const e = new Error('forbidden'); e.statusCode = 403; e.body = 'VapidPkHashMismatch'; throw e; } };
+    const r = await sendCallSummaryPush(fakeSupabase([{ id: 1, endpoint: 'e', p256dh: 'a', auth: 'b' }]), { userId: 'u', callId: 'c9', summary: 's', env, sender });
+    assert.equal(r.failed, 1);
+  } finally { console.warn = orig; }
+  assert.ok(lines.some((l) => /call=c9 status=403 VapidPkHashMismatch/.test(l)));
+});

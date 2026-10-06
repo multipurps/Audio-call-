@@ -35,6 +35,7 @@ from typing import Any
 from loguru import logger
 
 from app.config import Settings
+from app.conversation_policy import build_structured_live_prompt
 from app.expressive_context import build_personality_context
 from app.pipeline import DEFAULT_SYSTEM_PROMPT
 
@@ -44,7 +45,14 @@ END_CALL_TOOL = "end_call"
 # Prompt: derived from the classic prompt so the persona cannot drift apart.
 # --------------------------------------------------------------------------
 
-_DROP_PREFIXES = ("Sounds, used sparingly:",)
+_DROP_PREFIXES = (
+    "Sounds, used sparingly:",
+    # Replaced by the conversation policy (app/conversation_policy.py): the "react
+    # first, often the whole turn is just a reaction" guidance produced the
+    # automatic acknowledgements this policy exists to stop.
+    "How real people talk",
+    "Never say things an assistant says.",
+)
 
 _LIVE_PRIVATE_NOTES_OLD = 'a system message that starts "[Private note"'
 _LIVE_PRIVATE_NOTES_NEW = 'private context that starts "[Private note"'
@@ -69,8 +77,10 @@ _LIVE_OPENING_AND_ENDING = (
 )
 
 _LIVE_POLICIES = f"""\
-Backchannel policy: Use light, occasional backchannels ("mm", "yeah") while they are \
-telling you something. Never talk over the point they are making.
+Backchannel policy: Mostly stay quiet while they are telling you something. A very short \
+sound is fine only when it is a real reaction to what they just said, never as a habit, \
+never twice in a row, and never instead of an answer. Never talk over the point they are \
+making.
 
 Interruption policy: Stop speaking when they interrupt. Listen to what they say, then \
 follow them.
@@ -105,8 +115,7 @@ def _live_persona() -> str:
             seen_spoken = True
             continue
         if head.startswith("Opening and ending:"):
-            out.append(_LIVE_OPENING_AND_ENDING)
-            seen_opening = True
+            seen_opening = True  # owned by the OPENING STYLE section
             continue
         if _LIVE_PRIVATE_NOTES_OLD in para:
             para = para.replace(_LIVE_PRIVATE_NOTES_OLD, _LIVE_PRIVATE_NOTES_NEW)
@@ -121,17 +130,25 @@ def _live_persona() -> str:
     return "\n\n".join(out)
 
 
-def build_live_system_prompt(settings: Settings, extra_context: str | None = None) -> str:
-    """Instructions for a GPT-Live session. Fixed for the session's lifetime."""
+def build_live_system_prompt(settings: Settings, extra_context: str | None = None, call_context: Any = None) -> str:
+    """Instructions for a GPT-Live session. Fixed for the session's lifetime.
+
+    Assembled in the fixed section order of app/conversation_policy.py unless an
+    operator supplies the whole prompt (which then owns the persona outright).
+    """
     if settings.system_prompt:
-        # An operator-supplied prompt owns the persona outright (same rule as classic).
-        prompt = settings.system_prompt
-    else:
-        prompt = f"{_live_persona()}\n\n{build_personality_context()}"
-    prompt = f"{prompt}\n\n{_LIVE_POLICIES}"
-    if extra_context:
-        prompt = f"{prompt}\n\nContext for this call:\n{extra_context}"
-    return prompt
+        prompt = f"{settings.system_prompt}\n\n{_LIVE_POLICIES}"
+        if extra_context:
+            prompt = f"{prompt}\n\nContext for this call:\n{extra_context}"
+        return prompt
+    return build_structured_live_prompt(
+        persona=_live_persona(),
+        personality=build_personality_context(),
+        policies=_LIVE_POLICIES,
+        end_call_tool=END_CALL_TOOL,
+        call_context=call_context,
+        extra_context=extra_context,
+    )
 
 
 BACKEND_INSTRUCTIONS = (

@@ -61,6 +61,7 @@ export default async function handler(req, res) {
     case 'summarizeCall': return summarizeCall(req, res, supabase, userId);
     case 'deleteSession': return deleteSession(req, res, supabase, userId);
     case 'savePushSubscription': return savePushSubscription(req, res, supabase, userId);
+    case 'pushKey': return res.status(200).json({ publicKey: process.env.VAPID_PUBLIC_KEY || null });
     default: return res.status(400).json({ error: 'Unknown or missing action' });
   }
 }

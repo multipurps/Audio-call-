@@ -927,7 +927,7 @@ class CallConversation(_BaseConversation):
                 settings=self._settings,
                 transport=_TransportShim(BridgeInput(), self._output),
                 context=self._context,
-                system_instruction=build_live_system_prompt(self._settings, extra_context),
+                system_instruction=build_live_system_prompt(self._settings, extra_context, self.call_context),
                 transcript=self.transcript,
                 state=self._live_state,
                 on_end_call=self._schedule_assistant_hangup,

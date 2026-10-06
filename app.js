@@ -194,24 +194,66 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
 }
 
-async function ensureNotificationsEnabled() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+// The server tells the app which VAPID public key it signs with, so the
+// subscription can never be made for a key the server does not have.
+async function fetchServerPushKey() {
   try {
+    const resp = await authedFetch('/api/assistant?action=pushKey');
+    const data = await resp.json().catch(() => ({}));
+    return resp.ok && data?.publicKey ? String(data.publicKey) : null;
+  } catch {
+    return null;
+  }
+}
+
+function subscriptionUsesKey(sub, key) {
+  try {
+    const have = sub?.options?.applicationServerKey;
+    if (!have) return true; // cannot tell; keep it
+    const a = new Uint8Array(have);
+    const b = urlBase64ToUint8Array(key);
+    return a.length === b.length && a.every((v, i) => v === b[i]);
+  } catch {
+    return true;
+  }
+}
+
+const NEEDS_TAP_FOR_PERMISSION = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+// Makes sure THIS device has a push subscription that matches the server's key
+// and is saved under the signed-in account. Safe to call on every app open:
+// once permission is granted it never prompts, it only repairs what is missing.
+// iOS only allows the permission prompt from a tap, so pass fromTap from a
+// button handler. Returns true when the device is registered.
+async function ensureNotificationsEnabled({ fromTap = false } = {}) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return false;
+  try {
+    if (Notification.permission === 'denied') return false;
+    if (Notification.permission !== 'granted') {
+      if (!fromTap && NEEDS_TAP_FOR_PERMISSION) return false;
+      if ((await Notification.requestPermission()) !== 'granted') return false;
+    }
     const reg = await navigator.serviceWorker.ready;
-    if (await reg.pushManager.getSubscription()) return;
-    if (Notification.permission === 'denied') return;
-    if ((await Notification.requestPermission()) !== 'granted') return;
-    const sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-    });
-    await fetch('/api/assistant?action=savePushSubscription', {
+    const key = (await fetchServerPushKey()) || VAPID_PUBLIC_KEY;
+    let sub = await reg.pushManager.getSubscription();
+    if (sub && !subscriptionUsesKey(sub, key)) {
+      await sub.unsubscribe().catch(() => {});
+      sub = null;
+    }
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) });
+    }
+    // Always save: the row is keyed by endpoint, so this also moves a device that
+    // was subscribed under another account over to the current one.
+    const resp = await authedFetch('/api/assistant?action=savePushSubscription', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentSession?.access_token || ''}` },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ subscription: sub.toJSON() }),
     });
+    return resp.ok;
   } catch (err) {
     console.error('ensureNotificationsEnabled failed:', err);
+    return false;
   }
 }
 
@@ -3602,16 +3644,17 @@ async function refreshNotificationsToggle() {
 $('notificationsToggle').addEventListener('click', async () => {
   haptic();
   if (!('Notification' in window)) return;
-  if (Notification.permission === 'granted') {
-    $('notificationsStatus').textContent = 'To turn notifications off, disable them for this app in your browser or OS settings.';
-    return;
-  }
   if (Notification.permission === 'denied') {
     $('notificationsStatus').textContent = 'Blocked at the browser/OS level — enable in system settings to turn this back on.';
     return;
   }
-  await ensureNotificationsEnabled();
+  const wasGranted = Notification.permission === 'granted';
+  const ok = await ensureNotificationsEnabled({ fromTap: true });
   await refreshNotificationsToggle();
+  if (ok) $('notificationsStatus').textContent = wasGranted
+    ? 'Notifications are on for this device. To turn them off, disable them for this app in your phone settings.'
+    : 'Notifications are on for this device.';
+  else if (Notification.permission === 'granted') $('notificationsStatus').textContent = 'Allowed, but this device could not be registered for notifications. Try again in a moment.';
 });
 
 setToggle($('hapticToggle'), localStorage.getItem(HAPTICS_KEY) !== '0');
@@ -3927,8 +3970,9 @@ function refreshPermissionsSheet() {
 }
 $('permissionsNotifBtn').addEventListener('click', async () => {
   if (!('Notification' in window)) return;
-  await Notification.requestPermission();
+  await ensureNotificationsEnabled({ fromTap: true });
   refreshPermissionsSheet();
+  refreshNotificationsToggle();
 });
 
 function mailtoSupport(subject, body) {
