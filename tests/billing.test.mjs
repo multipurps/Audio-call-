@@ -76,7 +76,7 @@ test('billing status returns balance and the server price list', async () => {
   assert.equal(r.data.remaining, 48);
   assert.equal(r.data.payments, true);
   assert.deepEqual(r.data.unit, getUnit(env));
-  assert.deepEqual(r.data.unit, { minutes: 300, amount: '30.00', maxQty: 10, currency: 'USD' });
+  assert.deepEqual(r.data.unit, { minutes: 300, amount: '30.00', maxQty: 10, prices: null, currency: 'USD' });
 });
 
 test('checkout: server decides the price from the quantity; bad quantities and missing config are refused', async () => {
@@ -101,6 +101,17 @@ test('checkout: server decides the price from the quantity; bad quantities and m
   assert.equal(row.amount, 60);
   assert.equal(row.user_id, 'user-1');
   assert.equal(row.checkout_id, 'chk_new');
+});
+
+test('price table: Emysa NGN tiers, bulk discounts, capped at the last tier', () => {
+  const cfg = { BACHS_CURRENCY: 'NGN', BACHS_UNIT_MINUTES: '60', BACHS_PRICES: '15000,28000,43000,53000,63000' };
+  const got = [1, 2, 3, 4, 5].map((q) => priceFor(q, cfg));
+  assert.deepEqual(got.map((p) => p.amount), ['15000.00', '28000.00', '43000.00', '53000.00', '63000.00']);
+  assert.deepEqual(got.map((p) => p.minutes), [60, 120, 180, 240, 300]);
+  assert.equal(got[0].currency, 'NGN');
+  assert.equal(priceFor(6, cfg), null);
+  assert.equal(getUnit(cfg).maxQty, 5);
+  assert.equal(getUnit({ BACHS_PRICES: '10,abc' }).prices, null); // bad table falls back, never charges 0
 });
 
 test('price: unit x quantity, configurable, no float drift', () => {

@@ -35,7 +35,9 @@ Everything runs inside `api/referrals.js` (multiplexed by `?action=`) because
    - `BACHS_WEBHOOK_SECRET` — the signing secret of your webhook endpoint.
    - `PUBLIC_APP_URL` — already set for Twilio (no trailing slash).
    - optional: `BACHS_CURRENCY` (default `USD`), `BACHS_UNIT_MINUTES` (default `300`),
-     `BACHS_UNIT_AMOUNT` (default `30.00`) and `BACHS_MAX_QTY` (default `10`).
+     `BACHS_UNIT_AMOUNT` (default `30.00`) and `BACHS_MAX_QTY` (default `10`) for linear
+     pricing, or `BACHS_PRICES` (comma list, entry N = total price of N units, for example
+     `15000,28000,43000,53000,63000`) for tiered pricing; it also sets the max quantity.
      Bachs minimums apply per currency (for example 1000 for NGN), so set real
      prices here for the currency you charge in.
 3. In the Bachs dashboard add a webhook endpoint

@@ -3285,7 +3285,7 @@ function renderAddTime() {
     return;
   }
   const labels = callTimeLabels(unit.minutes * addTimeQty);
-  const total = (Math.round(Number(unit.amount) * 100) * addTimeQty) / 100;
+  const total = unit.prices ? Number(unit.prices[addTimeQty - 1]) : (Math.round(Number(unit.amount) * 100) * addTimeQty) / 100;
   $('addTimeBig').textContent = labels.big;
   $('addTimeBuy').textContent = `Purchase ${labels.buy} · ${formatPlainPrice(total, unit.currency)}`;
   $('addTimeBuy').disabled = false;
