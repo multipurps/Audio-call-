@@ -1,8 +1,11 @@
-import { confirmCallPlan } from '../lib/callPlans.js';
+import { confirmCallPlan, saveCallPlan } from '../lib/callPlans.js';
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { endCallRow } from '../lib/callHangup.js';
 import { createHmac, randomUUID } from 'node:crypto';
 import { resolveVoiceChoice } from '../lib/voiceChoice.js';
+import { createChatCompletion, hasConfiguredLlm } from '../lib/llmClient.js';
+import { resolvePersonSession } from '../lib/personSession.js';
+import { normalizePhone } from '../lib/phoneNumbers.js';
 import { callSessionId } from '../lib/callNote.js';
 import { maybeGenerateCallSummary, waitForCallSummary } from '../lib/callSession.js';
 import {
@@ -27,6 +30,7 @@ export default async function handler(req, res) {
     case 'get': return getCall(req, res, supabase, userId);
     case 'monitor-token': return monitorToken(req, res, supabase, userId);
     case 'app-call-start': return appCallStart(req, res, supabase, userId);
+    case 'app-call-brief': return appCallBrief(req, res, supabase, userId);
     case 'summarize': return summarizeCall(req, res, supabase, userId);
     // Phone line (Twilio): bring your own number, or rent one.
     case 'line-get': case 'line-verify-start': case 'line-verify-status':
@@ -45,6 +49,86 @@ export default async function handler(req, res) {
 // The same token shape is verified by pipecat-service/app/monitor.py:
 // HMAC-SHA256(secret, "monitor:{sessionId}:{userId}:{exp}") as
 // "{exp}.{userId}.{hexsig}".
+// The in-app call is the user briefing their own assistant by voice, so they do
+// not have to type a long brief. Emysa takes it down; when the call ends the app
+// turns it into a call plan the user confirms (see appCallBrief).
+function briefingInstructions(contactNames) {
+  const contacts = contactNames.length ? ` Contacts you can call for them: ${contactNames.join(', ')}.` : '';
+  return 'This is a live voice conversation directly with the person you work for, inside their app. You are Emysa, their assistant. '
+    + 'They are briefing you so you can make a call on their behalf, because they cannot type it all or will not be available. '
+    + 'Listen and take it down: who to call, what to say or achieve, the key facts, names and numbers, the tone to use, and whether the call should happen now or at a specific time. '
+    + 'If something essential is missing (especially who to call), ask one short question. When it is clear, read back a short brief and ask them to confirm. '
+    + 'Tell them you will prepare the call for them to confirm; never say a call has been placed. Keep every reply short and natural. '
+    + 'There is nobody else on this call to speak to or to represent.' + contacts;
+}
+
+function matchContact(contacts, name) {
+  const wanted = String(name || '').trim().toLowerCase();
+  if (!wanted) return null;
+  const exact = contacts.filter((c) => String(c.name || '').trim().toLowerCase() === wanted);
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) return null;
+  const partial = contacts.filter((c) => {
+    const n = String(c.name || '').trim().toLowerCase();
+    return n && (n.includes(wanted) || wanted.includes(n));
+  });
+  return partial.length === 1 ? partial[0] : null;
+}
+
+// Turns a finished briefing call into a PENDING call plan in the person's chat
+// with that contact. Nothing is dialed: the user still taps Call Now, the same
+// confirmation every call needs. Idempotent per briefing.
+async function appCallBrief(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const callId = req.body?.callId;
+  if (typeof callId !== 'string' || !/^[0-9a-f-]{36}$/i.test(callId)) return res.status(400).json({ error: 'callId required' });
+  const { data: call } = await supabase.from('calls').select('id, user_id, platform, transcript, summary_json').eq('id', callId).eq('user_id', userId).maybeSingle();
+  if (!call || call.platform !== 'app') return res.status(404).json({ error: 'Call not found' });
+  if (call.summary_json?.briefPlanId) return res.status(200).json({ status: 'already-prepared', sessionId: call.summary_json.briefSessionId || null });
+
+  const turns = (Array.isArray(call.transcript) ? call.transcript : [])
+    .map((t) => ({ who: (t?.speaker === 'user' || t?.role === 'user') ? 'User' : 'Emysa', text: String(t?.content || t?.text || '').trim() }))
+    .filter((t) => t.text);
+  if (!turns.some((t) => t.who === 'User')) return res.status(200).json({ status: 'nothing-to-do' });
+  if (!hasConfiguredLlm(process.env)) return res.status(503).json({ error: 'The assistant is not configured yet. No call was prepared.' });
+
+  const llm = await createChatCompletion({
+    temperature: 0.1,
+    max_tokens: 700,
+    messages: [
+      { role: 'system', content: 'You read a voice conversation in which a user briefs their assistant Emysa to make a phone call for them. Return ONLY JSON: {"ready": boolean, "contactName": string|null, "instructions": string, "summary": string, "when": string|null}. "ready" is true only if the user clearly wants a call made and named who to call. "contactName" is exactly who they said to call. "instructions" is everything Emysa must say or achieve on that call, written as direct instructions with every fact, name, number and the tone, nothing invented. "summary" is one or two short first-person sentences ("I will ...") describing the call. "when" is the time the user asked for, in their words, or null for now.' },
+      { role: 'user', content: turns.map((t) => `${t.who}: ${t.text}`).join('\n').slice(0, 12000) },
+    ],
+  });
+  if (!llm.ok) return res.status(502).json({ error: 'Could not read the briefing. No call was prepared.' });
+  let brief = null;
+  try {
+    const raw = llm.data?.choices?.[0]?.message?.content || '';
+    brief = JSON.parse(raw.replace(/^```(?:json)?|```$/gim, '').trim());
+  } catch { brief = null; }
+  if (!brief || brief.ready !== true || !String(brief.instructions || '').trim()) return res.status(200).json({ status: 'no-call-requested' });
+
+  const { data: contacts } = await supabase.from('contacts').select('id, name, phone_number').eq('user_id', userId);
+  const contact = matchContact(contacts || [], brief.contactName);
+  if (!contact) return res.status(200).json({ status: 'needs-contact', contactName: brief.contactName || null });
+
+  try {
+    const label = contact.name;
+    const person = await resolvePersonSession(supabase, userId, { sessionId: null, toNumber: normalizePhone(contact.phone_number), contactNumber: null, contactId: contact.id, label });
+    const when = typeof brief.when === 'string' && brief.when.trim() ? brief.when.trim().slice(0, 120) : null;
+    const instructions = String(brief.instructions).trim().slice(0, 3500);
+    const objective = `You are speaking on the user's behalf, in the first person, following the brief below.\n${instructions}`;
+    const summary = `${label}: ${String(brief.summary || instructions).trim().slice(0, 400)}${when ? ` (You asked for this ${when}. Scheduled calls are not available yet, so tap Call Now when you are ready.)` : ''}`;
+    const reply = await saveCallPlan(supabase, userId, { sessionId: person.sessionId, toNumber: contact.phone_number, contactId: contact.id, objective, script: instructions, summary, label });
+    await supabase.from('calls').update({ summary_json: { briefPlanId: reply.call_plan?.id || null, briefSessionId: person.sessionId } }).eq('id', callId).eq('user_id', userId);
+    console.log(`appCallBrief: plan prepared call=${callId} plan=${reply.call_plan?.id}`);
+    return res.status(200).json({ status: 'prepared', sessionId: person.sessionId, contactName: label, when });
+  } catch (err) {
+    console.error('appCallBrief: could not save the plan', err?.message);
+    return res.status(500).json({ error: 'Could not prepare the call. Nothing was dialed.' });
+  }
+}
+
 // The in-app Emysa call: a live GPT-Live session (mic open the whole call, the
 // model's voice streamed back), the same conversation WhatsApp calls run. The
 // service picks the engine and voice from the user's saved choice: GPT-Live
@@ -70,6 +154,9 @@ async function appCallStart(req, res, supabase, userId) {
     chatSessionId = chat?.id || null;
   }
 
+  const { data: contactRows } = await supabase.from('contacts').select('name').eq('user_id', userId).limit(60);
+  const contactNames = (contactRows || []).map((c) => String(c.name || '').trim()).filter(Boolean);
+
   const choice = await resolveVoiceChoice(supabase, userId);
   const platformCallId = randomUUID();
   const sessionId = `call-${platformCallId}`;
@@ -79,7 +166,7 @@ async function appCallStart(req, res, supabase, userId) {
     platform_call_id: platformCallId,
     to_number: 'Emysa',
     objective: 'Have a live voice conversation with the user.',
-    instructions: 'This is a live voice conversation directly with the person you work for, inside their app. You are Emysa, their assistant. Speak to them directly, naturally and briefly, as you would on a call with someone you know well. There is nobody else on this call to speak to or to represent.',
+    instructions: briefingInstructions(contactNames),
     status: 'in_progress',
     answered_at: new Date().toISOString(),
     session_id: chatSessionId,

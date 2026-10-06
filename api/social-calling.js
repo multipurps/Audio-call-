@@ -317,7 +317,10 @@ async function relayCallStatus(req, res, supabase) {
   // the message can carry the real summary instead of a generic "finished".
   let summaryResult = { status: 'noop' };
   let storedReason = null;
-  if (call && isTerminal) {
+  // An in-app call with Emysa is the user briefing their own assistant, not a
+  // conversation with someone else, so it never gets a summary or a chat report.
+  const isAppCall = call?.platform === 'app' || platform === 'app';
+  if (call && isTerminal && !isAppCall) {
     summaryResult = await maybeGenerateCallSummary(supabase, call.id);
     // Another trigger (the End button, the carrier callback) may already own
     // the generation. Wait for its result instead of posting the generic
@@ -339,7 +342,7 @@ async function relayCallStatus(req, res, supabase) {
     }
   }
 
-  if (effectiveSessionId && transitionedToTerminal && userId) {
+  if (effectiveSessionId && transitionedToTerminal && userId && !isAppCall) {
     const who = contactName || peerIdentifier || 'your contact';
     const channelName = PLATFORM_LABELS[platform] || 'Telegram';
     const mins = durationSeconds ? Math.max(1, Math.round(durationSeconds / 60)) : null;

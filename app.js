@@ -1130,6 +1130,9 @@ function stopAppCallSession({ hangUp = false } = {}) {
   appCall = null;
   if (!call) return;
   clearInterval(call.transcriptTimer);
+  // The call was a briefing: once the service has saved the transcript, turn it
+  // into a call plan in chat (which the user still has to confirm).
+  if (call.briefable && call.callId) setTimeout(() => submitAppCallBrief(call.callId), 1800);
   try { if (hangUp && call.ws?.readyState === WebSocket.OPEN) call.ws.send(JSON.stringify({ type: 'hangup' })); } catch {}
   const closeSoon = () => { try { call.ws?.close(); } catch {} };
   if (hangUp) setTimeout(closeSoon, 300); else closeSoon();
@@ -1144,6 +1147,29 @@ function finishAppCallUi(text, { close = false } = {}) {
   stopAppCallSession();
   setCallStatePill('connecting', text);
   if (close) setTimeout(() => { if (assistantCallOpen) endAssistantCall(); }, 1200);
+}
+
+// After a briefing call: ask the server to turn what the user said into a
+// pending call plan. Nothing is dialed; the plan waits in chat for Call Now.
+async function submitAppCallBrief(callId, attempt = 0) {
+  try {
+    const resp = await authedFetch('/api/calls?action=app-call-brief', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callId }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) { showToast(data?.error || 'Could not prepare the call from your briefing'); return; }
+    if (data.status === 'nothing-to-do' && attempt < 2) { setTimeout(() => submitAppCallBrief(callId, attempt + 1), 2500); return; }
+    if (data.status === 'prepared' && data.sessionId) {
+      showToast(`Call to ${data.contactName || 'your contact'} is ready. Review it and tap Call Now`);
+      await openChatSession(data.sessionId);
+    } else if (data.status === 'needs-contact') {
+      showToast(data.contactName ? `I could not tell which contact "${data.contactName}" is. Tell me who to call` : 'Tell me who to call');
+    }
+  } catch {
+    showToast('Could not prepare the call from your briefing');
+  }
 }
 
 async function startAppCallSession() {
@@ -1347,6 +1373,7 @@ async function startAppCallSession() {
       if (info.kind === 'ended') { call.ended = true; finishAppCallUi('Call ended', { close: true }); return; }
       if (msg.type === 'ready') {
         call.opened = true;
+        call.briefable = true;
         startMic();
         setCallStatePill('listening', 'Connected · Listening');
         call.transcriptTimer = setInterval(pollTranscript, 1200);

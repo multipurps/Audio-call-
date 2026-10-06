@@ -261,7 +261,7 @@ test('unauthenticated or malformed reports are rejected outright', async () => {
   assert.equal(row(f, 'call-a').status, 'ringing');
 });
 
-test('an in-app (platform app) call end gets its status, summary and chat follow-up like any call', async () => {
+test('an in-app (platform app) call end records its status but never a summary or chat report', async () => {
   const f = await setup();
   f.db.tables.calls.push({
     id: 'call-app', user_id: 'user-1', session_id: '11111111-1111-1111-1111-111111111111',
@@ -281,5 +281,6 @@ test('an in-app (platform app) call end gets its status, summary and chat follow
   const stored = row(f, 'call-app');
   assert.equal(stored.status, 'completed');
   assert.ok(stored.ended_at);
-  assert.equal(stored.summary_status, 'completed', 'the summary is generated for an in-app call');
+  assert.ok(!stored.summary_status && !stored.outcome_summary, 'no summary for an in-app call');
+  assert.equal(f.db.tables.assistant_messages.filter((m) => m.call_id === 'call-app').length, 0, 'no chat report for an in-app call');
 });
