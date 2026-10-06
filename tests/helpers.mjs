@@ -18,7 +18,20 @@ export function database(seed = {}) {
       upsert(value) { mode = 'upsert'; values = value; return q; },
       delete() { mode = 'delete'; return q; },
       eq(key, value) { filters.push((r) => r[key] === value); return q; },
-      neq(key, value) { filters.push((r) => r[key] !== value); return q; },
+      // SQL semantics: NULL <> 'x' is NULL, so PostgREST .neq() never matches NULL columns.
+      neq(key, value) { filters.push((r) => r[key] !== undefined && r[key] !== null && r[key] !== value); return q; },
+      // Minimal PostgREST .or(): supports `col.is.null`, `col.neq.x` and `col.eq.x` clauses.
+      or(expr) {
+        const clauses = String(expr).split(',').map((c) => c.split('.'));
+        filters.push((r) => clauses.some(([col, op, ...rest]) => {
+          const v = rest.join('.');
+          if (op === 'is' && v === 'null') return r[col] === null || r[col] === undefined;
+          if (op === 'neq') return r[col] !== undefined && r[col] !== null && String(r[col]) !== v;
+          if (op === 'eq') return String(r[col]) === v;
+          return false;
+        }));
+        return q;
+      },
       gt(key, value) { filters.push((r) => r[key] > value); return q; },
       is(key, value) {
         // Postgres `IS NULL` matches both NULL and absent columns; the
