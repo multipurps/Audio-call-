@@ -62,6 +62,8 @@ MAX_SUBSCRIBERS_PER_SESSION = 2
 #: dropped. ~3 s of 20 ms frames. A monitor is a live feed: late audio is
 #: worthless, so the queue sheds rather than grows.
 SUBSCRIBER_QUEUE_MAX_FRAMES = 150
+#: Most transcript turns replayed to a listener who joins mid-call.
+TRANSCRIPT_SNAPSHOT_MAX = 300
 
 
 class TokenError(ValueError):
@@ -130,16 +132,32 @@ def pack_monitor_frame(direction: int, sample_rate: int, pcm: bytes) -> bytes:
 class MonitorSubscriber:
     """One listening client. Bounded queue; drops oldest frames when slow."""
 
-    def __init__(self, session_id: str, *, max_frames: int = SUBSCRIBER_QUEUE_MAX_FRAMES) -> None:
+    def __init__(
+        self,
+        session_id: str,
+        *,
+        max_frames: int = SUBSCRIBER_QUEUE_MAX_FRAMES,
+        audio: bool = True,
+    ) -> None:
         self.session_id = session_id
-        self._queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        # audio=False is a captions-only listener: it receives transcript
+        # events but none of the (much heavier) audio frames.
+        self.audio = audio
+        self._queue: asyncio.Queue[bytes | dict[str, Any] | None] = asyncio.Queue()
         self._max_frames = max_frames
         self.frames_sent = 0
         self.frames_dropped = 0
         self.closed = False
 
-    def offer(self, frame: bytes) -> None:
+    def offer_event(self, event: dict[str, Any]) -> None:
+        """Queue a small JSON event (a transcript line). Never dropped for
+        queue depth: they are tiny and rare next to the audio frames."""
         if self.closed:
+            return
+        self._queue.put_nowait(event)
+
+    def offer(self, frame: bytes) -> None:
+        if self.closed or not self.audio:
             return
         if self._queue.qsize() >= self._max_frames:
             with contextlib.suppress(asyncio.QueueEmpty):
@@ -147,7 +165,7 @@ class MonitorSubscriber:
             self.frames_dropped += 1
         self._queue.put_nowait(frame)
 
-    async def get(self) -> bytes | None:
+    async def get(self) -> bytes | dict[str, Any] | None:
         """Next frame, or None when the subscriber should stop."""
         if self.closed and self._queue.empty():
             return None
@@ -171,11 +189,15 @@ class MonitorHub:
         self._rooms: dict[str, set[MonitorSubscriber]] = {}
         self._max_subscribers = max_subscribers
         self.total_published = 0
+        # Live transcript per call, kept even with no listener attached so a
+        # listener that joins mid-call can be caught up with a snapshot.
+        self._transcripts: dict[str, list[dict[str, Any]]] = {}
+        self._transcript_seq: dict[str, int] = {}
 
     def subscriber_count(self, session_id: str) -> int:
         return len(self._rooms.get(session_id, ()))
 
-    def subscribe(self, session_id: str) -> MonitorSubscriber | None:
+    def subscribe(self, session_id: str, *, audio: bool = True) -> MonitorSubscriber | None:
         """Attach a listener. None when the room is full (abuse guard)."""
         room = self._rooms.setdefault(session_id, set())
         # Reap dead subscribers so a browser tab that vanished without a
@@ -185,7 +207,7 @@ class MonitorHub:
                 room.discard(sub)
         if len(room) >= self._max_subscribers:
             return None
-        sub = MonitorSubscriber(session_id)
+        sub = MonitorSubscriber(session_id, audio=audio)
         room.add(sub)
         logger.info(
             "monitor subscriber attached",
@@ -212,8 +234,37 @@ class MonitorHub:
         for sub in list(room):
             sub.offer(frame)
 
+    def publish_transcript(self, session_id: str, entry: dict[str, Any]) -> None:
+        """One finished transcript turn: remember it and push it to every
+        listener immediately - no database round trip. Never raises."""
+        try:
+            seq = self._transcript_seq.get(session_id, 0) + 1
+            self._transcript_seq[session_id] = seq
+            event = {
+                "type": "transcript",
+                "seq": seq,
+                "speaker": entry.get("speaker"),
+                "content": entry.get("content"),
+                "at": entry.get("at"),
+            }
+            if entry.get("interrupted"):
+                event["interrupted"] = True
+            log = self._transcripts.setdefault(session_id, [])
+            log.append(event)
+            if len(log) > TRANSCRIPT_SNAPSHOT_MAX:
+                del log[: len(log) - TRANSCRIPT_SNAPSHOT_MAX]
+            for sub in list(self._rooms.get(session_id, ())):
+                sub.offer_event(event)
+        except Exception:  # noqa: BLE001 - the transcript feed is best-effort
+            logger.debug("transcript publish failed", exc_info=True)
+
+    def transcript_snapshot(self, session_id: str) -> list[dict[str, Any]]:
+        return list(self._transcripts.get(session_id, ()))
+
     def close_room(self, session_id: str) -> None:
         """The call ended: tell listeners and release the room."""
+        self._transcripts.pop(session_id, None)
+        self._transcript_seq.pop(session_id, None)
         room = self._rooms.pop(session_id, None)
         if not room:
             return
@@ -242,19 +293,27 @@ def reset_hub() -> MonitorHub:
     return _HUB
 
 
-async def run_monitor_socket(websocket: Any, *, hub: MonitorHub, session_id: str) -> dict[str, Any]:
+async def run_monitor_socket(
+    websocket: Any, *, hub: MonitorHub, session_id: str, audio: bool = True
+) -> dict[str, Any]:
     """Serve one monitor subscriber until the call ends or the socket drops.
 
     The websocket must already be authenticated and accepted. Returns stats
     for logging; never raises for a normal disconnect.
     """
     stats = {"frames": 0, "dropped": 0}
-    sub = hub.subscribe(session_id)
+    sub = hub.subscribe(session_id, audio=audio)
     if sub is None:
         with contextlib.suppress(Exception):
             await websocket.send_json({"type": "error", "reason": "too-many-listeners"})
             await websocket.close(code=1008)
         return stats
+
+    # Catch a mid-call listener up on what has been said so far.
+    snapshot = hub.transcript_snapshot(session_id)
+    if snapshot:
+        with contextlib.suppress(Exception):
+            await websocket.send_json({"type": "transcript_snapshot", "entries": snapshot})
 
     pump = asyncio.create_task(_pump(websocket, sub, stats), name=f"monitor-pump-{session_id}")
     reader = asyncio.create_task(_read(websocket), name=f"monitor-read-{session_id}")
@@ -281,6 +340,9 @@ async def _pump(websocket: Any, sub: MonitorSubscriber, stats: dict[str, Any]) -
                 await websocket.send_json({"type": "ended"})
                 await websocket.close(code=1000)
             return
+        if isinstance(frame, dict):
+            await websocket.send_json(frame)
+            continue
         await websocket.send_bytes(frame)
         stats["frames"] += 1
 

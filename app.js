@@ -2050,7 +2050,8 @@ const CALL_ENDED_LABELS = {
 function applyCallStatusUpdate(callRow) {
   if (!callRow) return;
   if (Array.isArray(callRow.transcript)) {
-    renderTranscript(callRow.transcript);
+    callDbTranscript = callRow.transcript;
+    renderBestTranscript();
   }
   if (callRow.created_at && !callPlacedAtMs) {
     callPlacedAtMs = new Date(callRow.created_at).getTime();
@@ -2141,6 +2142,7 @@ function openCallScreen(callId, toNumber, contactName) {
   $('callTitleText').textContent = contactName === 'Emysa (callback to you)' ? 'Emysa · your phone' : `Emysa & ${displayName}`;
 
   if (!isSameCall) {
+    resetLiveTranscript();
     renderTranscript([]);
     $('waveRow').classList.remove('speaking');
     callAiMuted = false;
@@ -2177,6 +2179,7 @@ function openCallScreen(callId, toNumber, contactName) {
   };
   pollCallState();
   activeCallPollInterval = setInterval(pollCallState, 3000);
+  startLiveCaptions(callId);
 
   $('callEndBtn').onclick = async () => {
     setCallStatePill('ended', 'Ending call…');
@@ -2324,9 +2327,13 @@ function startCallMonitor(url, callId, unlockedCtx) {
   // second, the queue fell behind, and the resync then started new audio on
   // top of buffers that were still playing - the "voice on voice" overlay.
   // Mixed by the browser instead, each side plays at its own real-time pace.
+  // `jitter` is each lane's own cushion (seconds) and adapts: Emysa's audio is
+  // paced evenly by the server so a small cushion is enough, but the caller's
+  // audio arrives off the phone network in uneven bursts and needs a deeper,
+  // self-growing one - otherwise every late burst leaves a gap (the skipping).
   const lanes = {
-    1: { nextTime: 0, sources: new Set(), gain: ctx.createGain(), pending: [], pendingSamples: 0, pendingRate: 16000, flushTimer: null }, // caller
-    2: { nextTime: 0, sources: new Set(), gain: ctx.createGain(), pending: [], pendingSamples: 0, pendingRate: 16000, flushTimer: null }, // Emysa
+    1: { nextTime: 0, jitter: 0.45, sources: new Set(), gain: ctx.createGain(), pending: [], pendingSamples: 0, pendingRate: 16000, flushTimer: null }, // caller
+    2: { nextTime: 0, jitter: 0.3, sources: new Set(), gain: ctx.createGain(), pending: [], pendingSamples: 0, pendingRate: 16000, flushTimer: null }, // Emysa
   };
   for (const lane of Object.values(lanes)) { lane.gain.gain.value = 1; lane.gain.connect(gain); }
 
@@ -2336,8 +2343,9 @@ function startCallMonitor(url, callId, unlockedCtx) {
   // the skipping. A late packet now just continues the timeline; only a lag of
   // more than ~1.5 s is trimmed, by dropping the oldest-queued audio's worth
   // of new input rather than stopping what is already playing.
-  const JITTER = 0.3;
-  const MAX_LAG = 1.5;
+  const MAX_JITTER = 0.9;   // deepest cushion a lane may grow to
+  const JITTER_STEP = 0.1;  // growth per mid-speech underrun
+  const MAX_LAG = 2.2;
   function flushLane(lane) {
     clearTimeout(lane.flushTimer);
     if (!lane.pendingSamples) return;
@@ -2354,7 +2362,18 @@ function startCallMonitor(url, callId, unlockedCtx) {
     source.buffer = audio;
     source.connect(lane.gain);
     const now = ctx.currentTime;
-    if (!lane.nextTime || lane.nextTime < now) lane.nextTime = now + (lane.nextTime ? 0.05 : JITTER);
+    if (!lane.nextTime) {
+      lane.nextTime = now + lane.jitter;
+    } else if (lane.nextTime < now) {
+      // Underrun: the queued audio ran out before the next chunk arrived.
+      // Restarting with a ~50 ms cushion (the old behaviour) guaranteed the
+      // very next late chunk would underrun too - a chain of tiny gaps. Re-prime
+      // with the full cushion, and if this happened mid-speech (short gap)
+      // deepen the cushion so the next burst is absorbed. A long gap is just
+      // the other person pausing, so it does not grow the cushion.
+      if (now - lane.nextTime < 1.0) lane.jitter = Math.min(MAX_JITTER, lane.jitter + JITTER_STEP);
+      lane.nextTime = now + lane.jitter;
+    }
     if (lane.nextTime > now + MAX_LAG) return; // far behind: skip this slice to catch up
     source.start(lane.nextTime);
     lane.nextTime += audio.duration;
@@ -2394,6 +2413,7 @@ function startCallMonitor(url, callId, unlockedCtx) {
     if (typeof event.data === 'string') {
       let msg = null;
       try { msg = JSON.parse(event.data); } catch {}
+      if (handleLiveTranscriptMessage(msg, callId)) return;
       if (msg?.type === 'ended') { stopCallMonitor(); setCallStatePill('connected', 'Call ended'); return; }
       const info = describeMonitorMessage(msg);
       if (msg?.type === 'ready') {
@@ -2450,6 +2470,7 @@ function closeCallScreen() {
   stopRingback();
   activeCallScreenId = null;
   stopCallMonitor();
+  stopLiveCaptions();
   clearInterval(callTimerInterval);
   clearInterval(activeCallPollInterval);
   activeCallPollInterval = null;
@@ -2458,6 +2479,104 @@ function closeCallScreen() {
   if (activeCallChannel) { supabase.removeChannel(activeCallChannel); activeCallChannel = null; }
   $('callScreen').classList.add('hidden');
   loadCalls();
+}
+
+// ---------- live transcript ----------
+// Turns arrive from the call service over a websocket the moment they are
+// said (no database round trip), and the database copy keeps arriving over
+// realtime + polling as the source of truth. Both feed one renderer, which
+// shows whichever has more turns so the screen never goes backwards.
+let callDbTranscript = [];
+let liveTranscript = new Map(); // seq -> entry, from the websocket(s)
+let liveCaptions = null;
+
+function resetLiveTranscript() {
+  callDbTranscript = [];
+  liveTranscript = new Map();
+}
+
+function renderBestTranscript() {
+  const live = [...liveTranscript.entries()].sort((a, b) => a[0] - b[0]).map(([, entry]) => entry);
+  renderTranscript(live.length > callDbTranscript.length ? live : callDbTranscript);
+}
+
+// Returns true when the message was a transcript message (handled).
+function handleLiveTranscriptMessage(msg, callId) {
+  if (!msg || activeCallScreenId !== callId) return false;
+  if (msg.type === 'transcript' && Number.isFinite(msg.seq)) {
+    liveTranscript.set(msg.seq, {
+      speaker: msg.speaker,
+      content: msg.content,
+      at: msg.at,
+      interrupted: msg.interrupted,
+    });
+    renderBestTranscript();
+    return true;
+  }
+  if (msg.type === 'transcript_snapshot' && Array.isArray(msg.entries)) {
+    for (const e of msg.entries) {
+      if (Number.isFinite(e?.seq)) liveTranscript.set(e.seq, { speaker: e.speaker, content: e.content, at: e.at, interrupted: e.interrupted });
+    }
+    renderBestTranscript();
+    return true;
+  }
+  return false;
+}
+
+function stopLiveCaptions() {
+  const lc = liveCaptions;
+  liveCaptions = null;
+  if (!lc) return;
+  lc.stopped = true;
+  clearTimeout(lc.timer);
+  try { lc.ws?.close(); } catch {}
+}
+
+// A text-only listener on the call service: live captions without needing to
+// tap "listen in", and without the audio stream. While the call is still
+// ringing there is nothing to attach to yet, so it retries until it connects
+// (or the screen closes).
+function startLiveCaptions(callId) {
+  stopLiveCaptions();
+  const lc = { callId, stopped: false, ws: null, timer: null, attempts: 0 };
+  liveCaptions = lc;
+  const retry = (ms) => {
+    if (lc.stopped || lc.attempts > 120) return;
+    lc.timer = setTimeout(connect, ms);
+  };
+  const connect = async () => {
+    if (lc.stopped || activeCallScreenId !== callId) return;
+    lc.attempts += 1;
+    let url = null;
+    try {
+      const resp = await authedFetch('/api/calls?action=monitor-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callId }),
+      });
+      const payload = await resp.json().catch(() => ({}));
+      if (resp.ok && payload?.url) url = payload.url;
+    } catch {}
+    if (lc.stopped || activeCallScreenId !== callId) return;
+    if (!url) { retry(3000); return; } // call not live yet (still ringing) or not available
+    let ws;
+    try {
+      ws = new WebSocket(url + (url.includes('?') ? '&' : '?') + 'audio=0');
+    } catch { retry(5000); return; }
+    lc.ws = ws;
+    let ended = false;
+    ws.onmessage = (event) => {
+      if (typeof event.data !== 'string') return;
+      let msg = null;
+      try { msg = JSON.parse(event.data); } catch { return; }
+      if (msg?.type === 'ended') { ended = true; return; }
+      if (msg?.type === 'error') { ended = true; return; } // auth/too-many-listeners: do not hammer it
+      handleLiveTranscriptMessage(msg, callId);
+    };
+    ws.onclose = () => { if (!ended) retry(2000); };
+    ws.onerror = () => { try { ws.close(); } catch {} };
+  };
+  connect();
 }
 
 function renderTranscript(history) {

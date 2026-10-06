@@ -993,8 +993,8 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 
 .dashHeading{font-size:20px; font-weight:600; letter-spacing:-0.01em; margin:28px 0 12px 2px;}
 .dashActions{display:grid; grid-template-columns:repeat(4, 1fr) 0.9fr; gap:10px;}
-.dashAction{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; padding:10px 3px 9px; min-height:74px; border-radius:18px; color:#fff; background:var(--glass-bg); border:1px solid var(--glass-border);}
-.dashAction .ic{width:24px; height:24px; color:var(--accent);}
+.dashAction{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:6px 3px; min-height:74px; color:#fff; background:none; border:0; border-radius:0; box-shadow:none;}
+.dashAction .ic{width:30px; height:30px; color:var(--accent);}
 .dashActionMore .ic{color:var(--dim);}
 .dashAction span{font-size:12px; font-weight:500; line-height:1.15; text-align:center; overflow-wrap:break-word; max-width:100%;}
 

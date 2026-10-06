@@ -157,7 +157,7 @@ def make_live_conversation(fake: FakeLive, monkeypatch, *, env_extra=None, voice
         return ctx
 
     monkeypatch.setattr(conv_mod, "resolve_call_context", _resolve)
-    monkeypatch.setattr(conv_mod, "TranscriptLog", lambda _c: transcript)
+    monkeypatch.setattr(conv_mod, "TranscriptLog", lambda _c, **_kw: transcript)
     env = {
         "ASSISTANT_BRIDGE_SECRET": "x" * 32,
         "OPENAI_API_KEY": "sk-test-key-value-123456",

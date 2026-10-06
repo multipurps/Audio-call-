@@ -755,7 +755,10 @@ class CallConversation(_BaseConversation):
         )
         extra_context: str | None = None
         if self.call_context is not None:
-            self.transcript = TranscriptLog(self.call_context)
+            self.transcript = TranscriptLog(
+                self.call_context,
+                on_entry=lambda entry: get_hub().publish_transcript(self._session_id, entry),
+            )
             extra_context = self.call_context.extra_context or None
 
         await self._resolve_call_voice_and_engine()

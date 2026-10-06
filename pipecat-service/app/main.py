@@ -284,8 +284,11 @@ async def _handle_monitor(session_id: str, websocket: WebSocket, state: ServiceS
         await websocket.send_json(
             {"type": "ready", "sessionId": session_id, "userId": user_id, "callLive": call_live}
         )
+        # ?audio=0 = captions-only listener (live transcript without the
+        # audio stream), so captions work even when not listening in.
+        want_audio = websocket.query_params.get("audio", "1") != "0"
         stats = await run_monitor_socket(
-            websocket, hub=get_hub(), session_id=session_id
+            websocket, hub=get_hub(), session_id=session_id, audio=want_audio
         )
         logger.info("monitor session ended", extra={"sessionId": session_id, **stats})
     except WebSocketDisconnect:

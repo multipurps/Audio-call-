@@ -32,6 +32,7 @@ import asyncio
 import contextlib
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -432,8 +433,18 @@ class TranscriptLog:
     final flush so nothing is lost when the call ends.
     """
 
-    def __init__(self, context: CallContext, *, debounce_secs: float = 0.75) -> None:
+    def __init__(
+        self,
+        context: CallContext,
+        *,
+        debounce_secs: float = 0.75,
+        on_entry: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         self._context = context
+        #: Called synchronously with each new turn the moment it is recorded,
+        #: so the app can show it live without waiting for the debounced DB
+        #: write. Must be cheap and must never raise into the call.
+        self._on_entry = on_entry
         self._debounce = debounce_secs
         self._entries: list[dict[str, Any]] = []
         self._task: asyncio.Task[None] | None = None
@@ -474,6 +485,11 @@ class TranscriptLog:
         if len(self._entries) > MAX_TRANSCRIPT_ENTRIES:
             del self._entries[: len(self._entries) - MAX_TRANSCRIPT_ENTRIES]
         self._dirty = True
+        if self._on_entry is not None:
+            try:
+                self._on_entry(dict(entry))
+            except Exception:  # noqa: BLE001 - a live feed must never break the call
+                pass
         self._schedule()
 
     def _schedule(self) -> None:

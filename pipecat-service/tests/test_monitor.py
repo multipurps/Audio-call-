@@ -249,3 +249,73 @@ class TestMonitorRoute:
             msg = ws.receive_json()
             assert msg["type"] == "ready"
             assert msg["callLive"] is False
+
+
+class TestLiveTranscript:
+    def test_transcript_turns_reach_listeners_immediately_in_order(self):
+        async def run():
+            hub = reset_hub()
+            ws = _FakeWebSocket()
+            task = asyncio.create_task(run_monitor_socket(ws, hub=hub, session_id="call-9"))
+            await asyncio.sleep(0.05)
+            hub.publish_transcript("call-9", {"speaker": "ai", "content": "Hello, how are you?", "at": "t1"})
+            hub.publish_transcript("call-9", {"speaker": "contact", "content": "Fine, thanks.", "at": "t2", "interrupted": True})
+            await asyncio.sleep(0.1)
+            hub.close_room("call-9")
+            await asyncio.wait_for(task, 2)
+            events = [d for kind, d in ws.sent if kind == "json" and d.get("type") == "transcript"]
+            assert [e["seq"] for e in events] == [1, 2]
+            assert events[0]["speaker"] == "ai" and events[0]["content"] == "Hello, how are you?"
+            assert events[1].get("interrupted") is True
+
+        asyncio.run(run())
+
+    def test_listener_joining_mid_call_gets_a_snapshot(self):
+        async def run():
+            hub = reset_hub()
+            hub.publish_transcript("call-9", {"speaker": "ai", "content": "Hi", "at": "t1"})
+            hub.publish_transcript("call-9", {"speaker": "contact", "content": "Hello", "at": "t2"})
+            ws = _FakeWebSocket()
+            task = asyncio.create_task(run_monitor_socket(ws, hub=hub, session_id="call-9"))
+            await asyncio.sleep(0.05)
+            hub.close_room("call-9")
+            await asyncio.wait_for(task, 2)
+            snap = next(d for kind, d in ws.sent if kind == "json" and d.get("type") == "transcript_snapshot")
+            assert [e["content"] for e in snap["entries"]] == ["Hi", "Hello"]
+
+        asyncio.run(run())
+
+    def test_captions_only_listener_gets_text_but_no_audio(self):
+        async def run():
+            hub = reset_hub()
+            ws = _FakeWebSocket()
+            task = asyncio.create_task(run_monitor_socket(ws, hub=hub, session_id="call-9", audio=False))
+            await asyncio.sleep(0.05)
+            hub.publish("call-9", 1, 16000, b"\x01\x02")
+            hub.publish_transcript("call-9", {"speaker": "ai", "content": "Hi", "at": "t1"})
+            await asyncio.sleep(0.1)
+            hub.close_room("call-9")
+            await asyncio.wait_for(task, 2)
+            assert not [1 for kind, _ in ws.sent if kind == "bytes"], "no audio for a captions-only listener"
+            assert any(d.get("type") == "transcript" for kind, d in ws.sent if kind == "json")
+
+        asyncio.run(run())
+
+    def test_transcript_log_hands_each_new_turn_to_on_entry_and_survives_a_bad_callback(self):
+        from app.call_context import TranscriptLog
+
+        seen = []
+        log = TranscriptLog(object(), on_entry=lambda e: seen.append(e))
+        log._schedule = lambda: None  # no DB in this test
+        log.note("ai", "Hello there")
+        log.note("contact", "Hi")
+        assert [e["content"] for e in seen] == ["Hello there", "Hi"]
+        assert [e["speaker"] for e in seen] == ["ai", "contact"]
+
+        def boom(_):
+            raise RuntimeError("feed down")
+
+        log2 = TranscriptLog(object(), on_entry=boom)
+        log2._schedule = lambda: None
+        log2.note("ai", "Still recorded")  # must not raise
+        assert log2.entries[0]["content"] == "Still recorded"
