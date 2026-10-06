@@ -2777,7 +2777,7 @@ function renderCallsList(calls) {
     // than the flat theme-accent color, which looked identical for every
     // row and didn't match the soft varied avatar look in the reference.
     const hue = hueForName(name);
-    const avatarStyle = `background:radial-gradient(circle at 32% 28%, hsl(${hue},45%,68%), hsl(${(hue + 25) % 360},30%,34%));`;
+    const avatarStyle = '';
     const avatarHtml = isKnown
       ? `<div class="recentAvatar" style="${avatarStyle}">${escapeHtml((name || '?')[0].toUpperCase())}</div>`
       : `<div class="recentAvatar" style="${avatarStyle}"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1c0-2.76-3.58-5-8-5z"/></svg></div>`;
@@ -3942,7 +3942,7 @@ $('deleteAccountBtn').addEventListener('click', () => {
 });
 
 // ---------- theme ----------
-const THEMES = { dark: '#0b0b0b', brave: '#1d5a55' };
+const THEMES = { dark: '#0b0b0b', brave: '#090c0c' };
 function applyTheme(name) {
   if (!THEMES[name]) name = 'dark';
   document.documentElement.setAttribute('data-theme', name);
