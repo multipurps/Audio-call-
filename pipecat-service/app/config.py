@@ -210,6 +210,9 @@ class Settings:
     #: auto | live | classic -- see CALL_ENGINES.
     call_engine: str = DEFAULT_CALL_ENGINE
     live_model: str = DEFAULT_LIVE_MODEL
+    #: Track the caller's interaction state during GPT-Live calls and steer the
+    #: model with private behaviour notes (CALLER_STATE_ENABLED, default on).
+    caller_state_enabled: bool = True
     live_voice: str = DEFAULT_LIVE_VOICE
     #: Where live_voice came from for THIS call: "user" (their saved Live voice) or
     #: "env-default" (they have not chosen one; ASSISTANT_LIVE_VOICE / built-in default).
@@ -499,6 +502,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         llm_reasoning_effort=(_env(env, "ASSISTANT_LLM_REASONING_EFFORT") or "none").strip().lower(),
         call_engine=(_env(env, "ASSISTANT_CALL_ENGINE") or DEFAULT_CALL_ENGINE).strip().lower(),
         live_model=_env(env, "ASSISTANT_LIVE_MODEL", DEFAULT_LIVE_MODEL) or DEFAULT_LIVE_MODEL,
+        caller_state_enabled=_env_bool(env, "CALLER_STATE_ENABLED", True),
         live_voice=(_env(env, "ASSISTANT_LIVE_VOICE", DEFAULT_LIVE_VOICE) or DEFAULT_LIVE_VOICE).strip().lower(),
         live_base_url=_env(env, "ASSISTANT_LIVE_BASE_URL", DEFAULT_LIVE_BASE_URL) or DEFAULT_LIVE_BASE_URL,
         live_backend_model=_env(env, "ASSISTANT_LIVE_BACKEND_MODEL"),

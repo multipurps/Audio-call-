@@ -309,6 +309,19 @@ class CallContext:
         )
         return bool(rows[0].get("ai_muted")) if rows else False
 
+    async def save_interaction_trajectory(self, summary: dict[str, Any]) -> None:
+        """Store the caller's interaction-state trajectory on the call row."""
+        if self._rest is None or not summary:
+            return
+        try:
+            await self._rest.patch(
+                "calls",
+                match={"id": f"eq.{self.call_id}"},
+                body={"interaction_trajectory": summary},
+            )
+        except Exception as exc:  # noqa: BLE001 - never block call teardown
+            _log("WARNING", self.session_id, "interaction trajectory save failed", error=type(exc).__name__)
+
     async def save_transcript(self, entries: list[dict[str, Any]]) -> None:
         """Debounced full-array write of the transcript (idempotent)."""
         if self._rest is None:

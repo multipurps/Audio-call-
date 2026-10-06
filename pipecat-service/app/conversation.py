@@ -1259,6 +1259,18 @@ class CallConversation(_BaseConversation):
             with contextlib.suppress(Exception):
                 await self.transcript.close()
         context = self.call_context
+        monitor = getattr(self._live_state, "caller_state", None) if self._live_state is not None else None
+        if monitor is not None:
+            summary = monitor.summary()
+            clog(
+                "INFO", self._session_id, "caller state trajectory",
+                start=summary["starting_state"], lowest=summary["lowest_state"],
+                final=summary["final_state"], recovery=summary["recovery"],
+                transitions=summary["transitions"],
+            )
+            if context is not None and summary["observations"] > 0:
+                with contextlib.suppress(Exception):
+                    await context.save_interaction_trajectory(summary)
         if context is not None:
             active = self.call_active
             # Talk duration runs from the ACTUAL answer (call_active) — the

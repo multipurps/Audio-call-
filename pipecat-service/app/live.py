@@ -195,6 +195,9 @@ class LiveCallState:
         self.turn_latencies_ms: list[int] = []
         self.audible_frames: int = 0
         self.end_call_requests: int = 0
+        #: Caller interaction-state monitor (None when disabled). Its summary is
+        #: stored on the call row when the call ends.
+        self.caller_state: Any = None
 
     def ai_idle_secs(self, now: float | None = None) -> float:
         if self.ai_speaking_text:
@@ -349,6 +352,7 @@ def build_live_pipeline(
 ) -> tuple[Any, Any]:
     """Assemble the GPT-Live pipeline. Returns `(pipeline, llm)`."""
     from pipecat.frames.frames import (
+        InputAudioRawFrame,
         InterruptionFrame,
         LLMFullResponseEndFrame,
         LLMFullResponseStartFrame,
@@ -451,6 +455,41 @@ def build_live_pipeline(
                     self._buffer = []
             await self.push_frame(frame, direction)
 
+    class CallerStateProbe(FrameProcessor):
+        """Feeds caller audio + final caller transcripts to the state monitor.
+
+        Observes only: every frame is passed on untouched. It never generates
+        speech and never changes the pipeline; a state change becomes a private
+        note on the live session via the monitor.
+        """
+
+        def __init__(self, monitor: Any) -> None:
+            super().__init__(name="CallerStateProbe")
+            self._monitor = monitor
+
+        async def process_frame(self, frame: Any, direction: FrameDirection) -> None:
+            await super().process_frame(frame, direction)
+            if isinstance(frame, InputAudioRawFrame):
+                self._monitor.on_audio(frame.audio, frame.sample_rate, ai_speaking=st.ai_speaking_text)
+            elif isinstance(frame, TranscriptionFrame) and getattr(frame, "text", None):
+                self._monitor.on_caller_transcript(str(frame.text))
+            elif isinstance(frame, LLMFullResponseEndFrame):
+                self._monitor.on_ai_finished()
+            await self.push_frame(frame, direction)
+
+    monitor = None
+    if settings.caller_state_enabled:
+        from app.caller_state import CallerStateMonitor
+
+        async def _send_state_note(note: str) -> None:
+            await send_private_note(llm, note)
+
+        monitor = CallerStateMonitor(
+            send_note=_send_state_note,
+            log=lambda event, level="INFO", **kw: live_log(st.session_id, event, level, **kw),
+        )
+        st.caller_state = monitor
+
     aggregators = LLMContextAggregatorPair(
         context,
         # The model decides when the caller's turn starts and stops, and handles
@@ -464,6 +503,7 @@ def build_live_pipeline(
         [
             transport.input(),
             aggregators.user(),
+            *([CallerStateProbe(monitor)] if monitor is not None else []),
             LiveTranscriptNote("contact"),
             llm,
             LiveLatencyProbe(),
