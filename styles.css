@@ -1020,3 +1020,13 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .cmPreview pre{white-space:pre-wrap; margin-top:8px; padding:12px; border-radius:12px; font:12.5px/1.45 ui-monospace,Menlo,monospace; color:var(--text); background:var(--coffee-light);}
 .cmImports{margin-top:18px;}
 .cmImportRow{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 0; font-size:13px; color:var(--dim); border-top:1px solid var(--glass-border);}
+
+/* Phone glyph (#ic-phone) fills less of its box than the old icons: sized up so it reads the same. */
+.phoneIc{fill:currentColor;}
+.homeHeaderBtn svg.phoneIc{width:32px; height:32px;}
+.inputIconSvg.phoneIc{width:24px; height:24px; left:9px;}
+.callChannelIcon.phone svg.phoneIc{width:28px; height:28px;}
+.profileCard .cIcon svg.phoneIc{width:26px; height:26px;}
+.contactCallBtn svg.phoneIc{width:28px; height:28px;}
+.dialCallBtn svg.phoneIc{width:44px; height:44px;}
+.iosRowGlyph svg.phoneIc{width:32px; height:32px;}
