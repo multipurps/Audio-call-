@@ -56,9 +56,9 @@ export default async function handler(req, res) {
 
   try {
     switch (action) {
-      case 'telegram-start': return await telegramStart(req, res, userId);
-      case 'telegram-verify': return await telegramVerify(req, res, userId);
-      case 'telegram-disconnect': return await telegramDisconnect(req, res, userId);
+      case 'telegram-start': return await telegramStart(req, res, supabase, userId);
+      case 'telegram-verify': return await telegramVerify(req, res, supabase, userId);
+      case 'telegram-disconnect': return await telegramDisconnect(req, res, supabase, userId);
       case 'whatsapp-start': return await whatsappStart(req, res, supabase, userId);
       case 'whatsapp-start-phone': return await whatsappStartWithPhone(req, res, supabase, userId);
       case 'whatsapp-status': return await whatsappStatus(req, res, supabase, userId);
@@ -413,15 +413,42 @@ async function status(req, res, supabase, userId) {
   });
 }
 
-async function telegramStart(req, res, userId) {
+async function telegramStart(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { phone } = req.body || {};
   if (!phone || !phone.trim()) return res.status(400).json({ error: 'phone required (with country code, e.g. +234...)' });
   await mpRelayRequest(`/sessions/${userId}/start`, { method: 'POST', body: { phone: phone.trim() } });
+  // mp-relay only keeps MadelineProto's own session; this table is what the
+  // Connected accounts screen and call placement read, so it must be written here.
+  await saveTelegramAccount(supabase, userId, {
+    status: 'pending_otp', phone_last4: phone.replace(/\D/g, '').slice(-4) || null, last_error: null,
+  });
   return res.status(200).json({ status: 'pending_otp' });
 }
 
-async function telegramVerify(req, res, userId) {
+// Persist the linked state mp-relay never writes (it has no access to this table).
+async function saveTelegramAccount(supabase, userId, patch) {
+  const { error } = await supabase.from('telegram_accounts').upsert(
+    { user_id: userId, updated_at: new Date().toISOString(), ...patch },
+    { onConflict: 'user_id' },
+  );
+  if (error) {
+    const err = new Error(`Could not save Telegram connection: ${error.message}`);
+    err.statusCode = 500;
+    throw err;
+  }
+}
+
+async function markTelegramConnected(supabase, userId) {
+  let displayName = null;
+  try { // best effort: a missing name must never fail a login that already succeeded
+    const me = await mpRelayRequest(`/sessions/${userId}/status`);
+    displayName = me.firstName || (me.username ? `@${me.username}` : null);
+  } catch { /* keep null; UI falls back to "Telegram user" */ }
+  await saveTelegramAccount(supabase, userId, { status: 'connected', display_name: displayName, last_error: null });
+}
+
+async function telegramVerify(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { code, password } = req.body || {};
   // The frontend calls this endpoint twice in the 2FA case: first with just
@@ -431,16 +458,20 @@ async function telegramVerify(req, res, userId) {
   // that back to the single-endpoint shape the frontend already expects.
   if (password && password.trim()) {
     await mpRelayRequest(`/sessions/${userId}/2fa`, { method: 'POST', body: { password: password.trim() } });
+    await markTelegramConnected(supabase, userId);
     return res.status(200).json({ status: 'connected' });
   }
   if (!code || !code.trim()) return res.status(400).json({ error: 'code required' });
   const data = await mpRelayRequest(`/sessions/${userId}/verify`, { method: 'POST', body: { code: code.trim() } });
-  return res.status(200).json({ status: data.status === 'need_2fa' ? 'needs_password' : 'connected' });
+  if (data.status === 'need_2fa') return res.status(200).json({ status: 'needs_password' });
+  await markTelegramConnected(supabase, userId);
+  return res.status(200).json({ status: 'connected' });
 }
 
-async function telegramDisconnect(req, res, userId) {
+async function telegramDisconnect(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   await mpRelayRequest(`/sessions/${userId}`, { method: 'DELETE' });
+  await saveTelegramAccount(supabase, userId, { status: 'disconnected', display_name: null, last_error: null });
   return res.status(200).json({ status: 'disconnected' });
 }
 

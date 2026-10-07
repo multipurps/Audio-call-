@@ -1585,8 +1585,9 @@ async function startAssistantListening() {
 // ---------- Call channel: Emysa (voice) / WhatsApp / Telegram / Phone ----------
 const CALL_CHANNEL_KEY = 'emysa.callChannel';
 let selectedCallChannel = null; // null = not chosen: the server uses the only line the user has, or asks
-// Telegram never worked reliably, so it is hidden. Flip to true to bring it back.
-const TELEGRAM_ENABLED = false;
+// Telegram linking is back: login goes through mp-relay and the app now records the
+// connection itself (api/social-calling.js saveTelegramAccount).
+const TELEGRAM_ENABLED = true;
 try {
   const saved = localStorage.getItem(CALL_CHANNEL_KEY);
   if (saved === 'phone' || saved === 'whatsapp' || (saved === 'telegram' && TELEGRAM_ENABLED)) selectedCallChannel = saved;
