@@ -78,7 +78,7 @@ export async function loadApi(file, db, fetcher, extraEnv = {}) {
   const context = vm.createContext({ console, URLSearchParams, Buffer, Date, Map, Set, AbortSignal,
     FormData, Blob, setTimeout, clearTimeout,
     fetch: fetcher, process: { env: { OPENAI_API_KEY: 'test-only', TWILIO_ACCOUNT_SID: 'test-only',
-      TWILIO_AUTH_TOKEN: 'test-only', TWILIO_FROM_NUMBER: '+14155550000', PUBLIC_APP_URL: 'https://example.test', ...extraEnv } },
+      TWILIO_AUTH_TOKEN: 'test-only', TWILIO_FROM_NUMBER: '+14155550000', PUBLIC_APP_URL: 'https://example.test', SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key', ...extraEnv } },
   });
   const cache = new Map();
   const builtins = new Map();
@@ -126,8 +126,23 @@ export async function loadApi(file, db, fetcher, extraEnv = {}) {
 export function response() {
   return { code: 200, data: null, status(code) { this.code = code; return this; }, json(data) { this.data = data; return this; } };
 }
-export async function request(handler, action, body = {}, { method = 'POST', auth = true, query = {} } = {}) {
+async function requestOnce(handler, action, body, { method, auth, query }) {
   const res = response();
   await handler({ method, headers: { authorization: auth ? 'Bearer test' : '' }, query: { action, ...query }, body }, res);
   return res;
+}
+
+// Behaves like the app: a chat call request is answered with the natural reply and a
+// pendingCall token; the app shows the reply and then sends the token back, and only
+// that second request places the call. By default this helper does what the app does,
+// so tests describe the whole call. Pass completePending: false to stop after the reply
+// (the returned response is then phase one, and `.second` is never made).
+export async function request(handler, action, body = {}, { method = 'POST', auth = true, query = {}, completePending = true } = {}) {
+  const first = await requestOnce(handler, action, body, { method, auth, query });
+  if (completePending && action === 'send' && first.code === 200 && first.data?.pendingCall?.token) {
+    const second = await requestOnce(handler, action, { pendingCallToken: first.data.pendingCall.token, sessionId: first.data.sessionId }, { method, auth, query });
+    second.first = first;
+    return second;
+  }
+  return first;
 }

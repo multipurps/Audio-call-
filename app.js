@@ -769,6 +769,16 @@ async function sendChatMessage(text, onReply, source = 'text', channel = null) {
     if (onReply) { await onReply(errText, null); return; }
     throw new Error(errText);
   }
+  await handleChatResponse(data, isCall, onReply);
+  // A call request is answered in two steps: first the natural reply (rendered just
+  // above), and only then does the app ask the server to place the call. The call is
+  // never placed before the user has been told what is about to happen.
+  if (data.pendingCall?.token) await placePendingCall(data.pendingCall.token, revision, onReply);
+}
+
+// Shows what the server answered: switches chat if the person already has one, starts
+// tracking a live call, keeps the line picker in step, and renders the replies.
+async function handleChatResponse(data, isCall, onReply) {
   const switchedChat = data.sessionSwitched && data.sessionId && data.sessionId !== currentChatSessionId;
   if (data.sessionId) currentChatSessionId = data.sessionId;
   if (switchedChat && !isCall) {
@@ -807,6 +817,39 @@ async function sendChatMessage(text, onReply, source = 'text', channel = null) {
     if (replies.some((m) => m.call_plan)) $('preCallContext').classList.add('ready');
   }
   if (onReply) await onReply(replies.map((m) => m.content).join(' ') || '', data);
+}
+
+// Phase two of a call request. Waits a beat so the reply has visibly landed, then asks
+// the server to place the call it resolved in phase one. Runs even if the user has
+// navigated away (the request was theirs), but only draws into the chat they are in.
+async function placePendingCall(token, revision, onReply) {
+  await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 700)));
+  let data;
+  let ok = false;
+  try {
+    const resp = await authedFetch('/api/assistant?action=send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pendingCallToken: token, sessionId: currentChatSessionId }),
+    });
+    ok = resp.ok;
+    data = await resp.json().catch(() => ({ error: resp.status >= 500 ? `The server had a problem (error ${resp.status}).` : 'Unexpected response from the server.' }));
+  } catch {
+    data = { error: 'Could not reach the server to place the call. Check your connection and ask me again.' };
+  }
+  if (!ok) {
+    if (revision === chatRevision) {
+      appendChatBubble({ id: `local-err-${Date.now()}`, role: 'assistant', content: data?.error || 'I could not place the call.', created_at: new Date().toISOString() });
+      scrollHomeChatToBottom();
+    }
+    return;
+  }
+  if (revision !== chatRevision) {
+    // Still start tracking the live call so the header ring and call screen work.
+    if (data.callId && data.toNumber) trackActiveCall(data.callId, data.toNumber, data.contactName);
+    return;
+  }
+  await handleChatResponse(data, false, onReply);
 }
 
 async function sendBrief() {

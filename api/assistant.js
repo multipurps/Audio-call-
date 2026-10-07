@@ -5,6 +5,8 @@ const STT_LANGUAGES = new Set(['en', 'es', 'fr', 'pt', 'de', 'ha', 'yo', 'sw', '
 import { minutesLeft, NO_MINUTES_MESSAGE } from '../lib/billing.js';
 import { prepareCall, saveCallPlan, confirmCallPlan, attachCallPlans } from '../lib/callPlans.js';
 import { resolveVoiceChoice, stripSpeechMarkers } from '../lib/voiceChoice.js';
+import { resolveCallPlatform } from '../lib/callPlatform.js';
+import { signPendingCall, verifyPendingCall } from '../lib/pendingCall.js';
 import { liveVoiceSpeak } from '../lib/liveVoicePreview.js';
 import { formatEmotionStateBlock, extractAndStripControlTags, shouldEndCall, toFishTtsText } from '../lib/emotionEngine.js';
 import { createChatCompletion, hasConfiguredLlm } from '../lib/llmClient.js';
@@ -360,9 +362,23 @@ async function sendImage(req, res, supabase, userId) {
   return res.status(200).json({ messages: newMessages, sessionId, isNewSession });
 }
 
+// Pending-call tokens already used by this server instance (see sendMessage, phase two).
+const consumedPendingCalls = new Set();
+
 async function sendMessage(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { text, callerId, sessionId: incomingSessionId, source, channel, target } = req.body || {};
+  const body = req.body || {};
+  let { text, sessionId: incomingSessionId, source, channel, target } = body;
+  // Phase two of a call request: the reply has been delivered, now place the call
+  // the server itself resolved in phase one (see the pendingCall response below).
+  let pending = null;
+  if (body.pendingCallToken) {
+    pending = verifyPendingCall(body.pendingCallToken, userId);
+    if (!pending) return res.status(400).json({ error: 'That call request expired. Ask me again and I will place it.' });
+    ({ text, source, target } = pending);
+    channel = pending.uiChannel;
+    incomingSessionId = pending.sessionId;
+  }
   if (typeof text !== 'string' || !text.trim() || text.length > 4000) return res.status(400).json({ error: 'Text required (maximum 4000 characters)' });
   // Which line to call out on — 'phone' (Twilio), or 'whatsapp'/'telegram'
   // (the user's linked personal account). Selected from the dropdown under
@@ -395,15 +411,16 @@ async function sendMessage(req, res, supabase, userId) {
     isNewSession = true;
   }
 
-  const userMsg = await insertMessage(supabase, userId, sessionId, 'user', text.trim(), null, msgSource);
-  const newMessages = [userMsg];
+  // Phase two continues a turn whose user message was already saved in phase one.
+  const userMsg = pending ? null : await insertMessage(supabase, userId, sessionId, 'user', text.trim(), null, msgSource);
+  const newMessages = userMsg ? [userMsg] : [];
   let sessionSwitched = false;
   const respond = (extra = {}) => res.status(200).json({ messages: newMessages, sessionId, isNewSession, sessionSwitched, ...extra });
 
   // "End the call" typed/spoken in chat ends THIS conversation's live call.
   // Scoped by the chat session id, never by "the most recent call overall",
   // so it can't hang up a different person's call (same rule as retries).
-  if (isEndCallRequest(text)) {
+  if (!pending && isEndCallRequest(text)) {
     const { data: liveCall } = await supabase.from('calls').select('*')
       .eq('user_id', userId).eq('session_id', sessionId).in('status', LIVE_CALL_STATUSES)
       .order('created_at', { ascending: false }).limit(1).maybeSingle();
@@ -428,7 +445,7 @@ async function sendMessage(req, res, supabase, userId) {
   // While a call from THIS chat is live, a typed message is a note for Emysa
   // (new info to pass along). Scoped by chat session like "end the call".
   // Dial requests are left alone so "call Sam" still places a call.
-  if (msgSource !== 'call' && !/^\s*(call|dial|ring|phone)\b/i.test(text)) {
+  if (!pending && msgSource !== 'call' && !/^\s*(call|dial|ring|phone)\b/i.test(text)) {
     const { data: noteCall } = await supabase.from('calls').select('*')
       .eq('user_id', userId).eq('session_id', sessionId).in('status', LIVE_CALL_STATUSES)
       .order('created_at', { ascending: false }).limit(1).maybeSingle();
@@ -442,12 +459,18 @@ async function sendMessage(req, res, supabase, userId) {
     }
   }
 
-  if (!hasConfiguredLlm(process.env)) {
+  if (!pending && !hasConfiguredLlm(process.env)) {
     newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', "I'm not fully set up yet — the assistant's API key hasn't been added on the server.", null, msgSource));
     return respond();
   }
 
-  const [{ data: contacts }, { data: history }, turnContext] = await Promise.all([
+  let contacts;
+  let history = null;
+  let turnContext = null;
+  if (pending) {
+    ({ data: contacts } = await supabase.from('contacts').select('id,name,phone_number').eq('user_id', userId));
+  } else {
+  [{ data: contacts }, { data: history }, turnContext] = await Promise.all([
     supabase.from('contacts').select('id,name,phone_number').eq('user_id', userId),
     supabase
       .from('assistant_messages')
@@ -463,9 +486,12 @@ async function sendMessage(req, res, supabase, userId) {
       isVoiceCall: msgSource === 'call',
     }),
   ]);
+  }
   const recentHistory = (history || []).reverse();
-  const { emotionState, memoryBundle, commitTurn } = turnContext;
+  const { emotionState, memoryBundle, commitTurn } = turnContext || {};
 
+  let chatMessages = null;
+  if (!pending) {
   const { data: langProfile } = await supabase.from('profiles').select('language').eq('user_id', userId).maybeSingle();
   const userLanguage = LANGUAGE_NAMES[langProfile?.language] || 'English';
   const contactsList = (contacts || []).map((c) => `- ${c.name}`).join('\n') || '(no contacts saved yet)';
@@ -493,18 +519,23 @@ async function sendMessage(req, res, supabase, userId) {
     'Reply with ONLY a JSON object, no other text, matching this shape:',
     '{"action":"call"|"retry"|"reply","phoneNumber":string|null,"contactName":string|null,"objective":string|null,"channel":"phone"|"whatsapp"|"telegram"|null,"reply":string|null,"mood":string|null}',
     '- action "call": the user wants you to call someone new. If they gave you an actual phone number in their message, put the digits (with country code if given, e.g. "+15551234567") in phoneNumber. Otherwise, if they named someone from the saved contacts list, put your best guess at that name in contactName. objective is a short phrase describing what to say or ask on the call — if they also gave any tone or manner direction (stay calm, keep it light, let it flow naturally, be quick about it, etc.), include that in objective too, don\'t drop it. If they explicitly named which line to call on in this message (e.g. "on WhatsApp", "call him on Telegram", "use my phone line"), put that in channel - phone/whatsapp/telegram. If they did not name a line in THIS message, leave channel null; do not guess or reuse a line from earlier in the conversation, since the app\'s own line selector already carries that forward and takes over whenever this is null.',
-    '- action "retry": the user wants you to call the same person again (e.g. "call him again", "try it again").',
+    '- action "retry": the user wants you to call the same person again (e.g. "call him again", "try it again", "call her back"). Leave channel null unless they name a line in THIS message; the app keeps using the line this conversation already used.',
+    '- For both "call" and "retry", also put in reply ONE short, natural sentence in your own voice saying what you are about to do (for example agreeing to ask him something). Use the future tense and never say the call is placed, ringing or connected: it is placed right after the user has read your reply.',
     '- action "reply": anything else — general conversation, emotional support, questions about you or the app, small talk, or a call request with no number/contact given yet. Answer naturally, warmly, and helpfully in "reply". Only ask for a phone number or contact name if they\'ve actually expressed intent to make a call but haven\'t said who.',
     'Every single response, with no exceptions, must be that one JSON object and nothing else - never plain conversational text, never text before or after the JSON, even for casual chat or small talk. Put the conversational reply itself inside the "reply" field.',
   ].filter(Boolean).join('\n');
 
-  const chatMessages = [
+  chatMessages = [
     { role: 'system', content: systemPrompt },
     ...recentHistory.map((h) => ({ role: h.role === 'assistant' ? 'assistant' : 'user', content: h.content })),
   ];
 
+  }
+
   let intent;
-  try {
+  if (pending) {
+    intent = { ...pending.intent };
+  } else try {
     const llmResult = await createChatCompletion({
       messages: chatMessages,
       temperature: 0.35,
@@ -552,6 +583,10 @@ async function sendMessage(req, res, supabase, userId) {
     }
   }
 
+  // The natural reply the model wrote for a call request. It is what the user is told
+  // BEFORE any call is placed (see the pendingCall response further down).
+  const llmCallReply = ['call', 'retry'].includes(intent.action) && typeof intent.reply === 'string' ? intent.reply : null;
+
   // A platform named explicitly in this message (e.g. "call him on
   // WhatsApp") wins over the sticky line picker in the UI - naming it IS
   // choosing it, and should not be silently overridden by whatever the
@@ -563,7 +598,31 @@ async function sendMessage(req, res, supabase, userId) {
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
     intent = { action: 'call', contactName: contact.name, phoneNumber: null, objective: text.trim(), channel: uiChannel };
   }
-  let callChannel = (['phone', 'whatsapp', 'telegram'].includes(intent.channel) ? intent.channel : null) || uiChannel;
+  // Which line: a line named in this message wins; a repeat ("call him again") stays on
+  // the line this conversation already used; everything else uses the normal
+  // resolver below. See lib/callPlatform.js.
+  let priorCalls = [];
+  let priorPlans = [];
+  if (intent.action === 'retry') {
+    const [{ data: sessionCalls }, { data: sessionPlans }] = await Promise.all([
+      supabase.from('calls').select('contact_id,to_number,objective,platform,created_at')
+        .eq('user_id', userId).eq('session_id', sessionId).order('created_at', { ascending: false }).limit(10),
+      supabase.from('call_plans').select('to_number,contact_id,objective,created_at')
+        .eq('user_id', userId).eq('session_id', sessionId).order('created_at', { ascending: false }).limit(1),
+    ]);
+    priorCalls = sessionCalls || [];
+    priorPlans = sessionPlans || [];
+  }
+  const platformChoice = resolveCallPlatform({ action: intent.action, intentChannel: intent.channel, uiChannel, priorCalls, plans: priorPlans });
+  let callChannel = platformChoice.channel;
+  if (intent.action === 'call' || intent.action === 'retry') {
+    console.log(`[call-platform] action=${intent.action} channel=${callChannel || 'none'} source=${platformChoice.source}`);
+  }
+  if (platformChoice.unsupported) {
+    newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant',
+      `The last call in this chat was on ${platformChoice.unsupported}, and I can't start those from here. Tell me which line to use (Phone, WhatsApp or Telegram) and I'll call.`, null, msgSource));
+    return respond();
+  }
 
   if (intent.action === 'call' || intent.action === 'retry') {
     let contact = null;
@@ -605,14 +664,6 @@ async function sendMessage(req, res, supabase, userId) {
       // chat dialled B. A conversation that already identifies a contact
       // must never be redirected by another conversation's history, and a
       // conversation with nobody identifiable must ask, not guess.
-      const { data: sessionCalls } = await supabase
-        .from('calls')
-        .select('contact_id,to_number,objective,platform,created_at')
-        .eq('user_id', userId)
-        .eq('session_id', sessionId)
-        .order('created_at', { ascending: false })
-        .limit(10);
-      const priorCalls = sessionCalls || [];
       // The call to repeat: this conversation's most recent call on the
       // chosen line; failing that, its most recent call on any line (the
       // person is a property of the conversation, the line is not).
@@ -630,14 +681,7 @@ async function sendMessage(req, res, supabase, userId) {
       if (!retryToNumber) {
         // A phone call prepared through the plan flow is this conversation's
         // only trace of who to call.
-        const { data: plans } = await supabase
-          .from('call_plans')
-          .select('to_number,contact_id,objective')
-          .eq('user_id', userId)
-          .eq('session_id', sessionId)
-          .order('created_at', { ascending: false })
-          .limit(1);
-        const plan = plans?.[0] || null;
+        const plan = priorPlans[0] || null;
         if (plan?.contact_id && !contact) {
           const { data: c } = await supabase.from('contacts').select('*').eq('id', plan.contact_id).maybeSingle();
           contact = c;
@@ -756,6 +800,25 @@ async function sendMessage(req, res, supabase, userId) {
       if (person.sessionId && person.sessionId !== sessionId) {
         sessionId = person.sessionId;
         sessionSwitched = true;
+      }
+      if (pending) {
+        // Phase two is the only place a call is placed. A token works once per server
+        // instance, so a double tap or a retried request cannot dial twice. A call that
+        // is already ringing is caught by findDuplicateActiveCall above.
+        if (consumedPendingCalls.has(pending.nonce)) return respond({ channelUsed: callChannel, replayed: true });
+        consumedPendingCalls.add(pending.nonce);
+        if (consumedPendingCalls.size > 500) consumedPendingCalls.delete(consumedPendingCalls.values().next().value);
+      } else {
+        // Phase one: say what is about to happen, as written by the model, and let the
+        // app deliver it. The call itself is placed by the follow-up request.
+        const spoken = extractAndStripControlTags(llmCallReply || '').cleanText.trim().slice(0, 400);
+        const replyText = spoken || `Sure, I'll call ${label} on ${channelName} now.`;
+        const token = signPendingCall({
+          uid: userId, sessionId, text: text.trim(), source: msgSource, uiChannel, target: target || null,
+          intent: { action: intent.action, contactName: intent.contactName || null, phoneNumber: intent.phoneNumber || null, objective: intent.objective || null, channel: callChannel },
+        });
+        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', replyText, null, msgSource));
+        return respond({ pendingCall: { token, channel: callChannel, contactName: contact?.name || null, toNumber: digitsOnly }, channelUsed: callChannel });
       }
       const callRow = await createSocialRow();
       try {
