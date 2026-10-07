@@ -284,6 +284,10 @@ test('Telegram social calling uses mp-relay /calls, correlates live transcripts,
   const mpCalls = [];
   const fakeFetch = async (url, init = {}) => {
     mpCalls.push({ url, method: init.method || 'GET', body: init.body ? JSON.parse(init.body) : null });
+    if (url.endsWith('/sessions/user-1/status')) { // pre-dial check: mp-relay holds a logged-in session
+      const payload = { status: 'connected', firstName: 'Sam' };
+      return { ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) };
+    }
     if (url.endsWith('/calls') && (init.method || 'GET') === 'POST') {
       const payload = { callId: 'mp-tg-call-42', status: 'ringing' };
       return {
@@ -325,7 +329,8 @@ test('Telegram social calling uses mp-relay /calls, correlates live transcripts,
   assert.equal(placeRes.data.platformCallId, 'mp-tg-call-42');
   assert.equal(db.tables.calls.length, 1);
   assert.equal(db.tables.calls[0].platform, 'telegram');
-  assert.equal(mpCalls[0].url, 'https://mp-relay.example.test/calls');
+  assert.equal(mpCalls[0].url, 'https://mp-relay.example.test/sessions/user-1/status'); // verified before dialing
+  assert.equal(mpCalls[1].url, 'https://mp-relay.example.test/calls');
 
   // 2. Relay sends live transcript Entry while call is in-progress
   const callId = placeRes.data.callId;

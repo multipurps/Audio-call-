@@ -394,12 +394,18 @@ async function status(req, res, supabase, userId) {
     waLive = await resolveWhatsappStatus(wa, () => wacallsDetail(userId, wa.wacalls_session_id, { timeoutMs: 4000 }));
     if (waLive.update) await supabase.from('whatsapp_accounts').update(waLive.update).eq('user_id', userId);
   } catch { /* keep the saved state */ }
+  let tgStatus = tg?.status || 'disconnected';
+  let tgError = tg?.last_error || null;
+  if (tgStatus === 'connected' && await telegramLiveState(userId, 4000) === 'disconnected') {
+    tgStatus = 'disconnected';
+    tgError = 'Telegram needs to be reconnected';
+  }
   return res.status(200).json({
     telegram: {
-      status: tg?.status || 'disconnected',
+      status: tgStatus,
       displayName: tg?.display_name || null,
       phoneLast4: tg?.phone_last4 || null,
-      error: tg?.last_error || null,
+      error: tgError,
     },
     signal: {
       status: sg?.status === 'pending_qr' ? 'disconnected' : (sg?.status || 'disconnected'),
@@ -413,6 +419,20 @@ async function status(req, res, supabase, userId) {
     },
   });
 }
+
+// The saved row says "connected" but only mp-relay knows whether it holds a
+// logged-in Telegram session for this user (accounts linked through the retired
+// relay were never logged in there, so a call "placed" through them rang nothing
+// and reported nothing). Returns 'connected' | 'disconnected' | 'unknown'.
+// Only an explicit "disconnected" answer counts: a slow or asleep relay is 'unknown'.
+async function telegramLiveState(userId, timeoutMs) {
+  try {
+    const me = await mpRelayRequest(`/sessions/${userId}/status`, { timeoutMs });
+    return me.status === 'connected' ? 'connected' : me.status === 'disconnected' ? 'disconnected' : 'unknown';
+  } catch { return 'unknown'; }
+}
+
+const TELEGRAM_RECONNECT_MESSAGE = 'Telegram session expired - please reconnect Telegram and try again';
 
 async function telegramStart(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
@@ -748,6 +768,11 @@ async function placeCall(req, res, supabase, userId) {
   if (tgRow?.status !== 'connected') {
     const err = new Error('Telegram not connected for this user');
     err.statusCode = 400;
+    throw err;
+  }
+  if (await telegramLiveState(userId, 20_000) === 'disconnected') {
+    const err = new Error(TELEGRAM_RECONNECT_MESSAGE);
+    err.statusCode = 409;
     throw err;
   }
   const dbCall = await createCallRecord(supabase, userId, {
