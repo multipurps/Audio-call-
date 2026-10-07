@@ -4164,6 +4164,7 @@ async function loadVoicePrefs() {
   const custom = voicePrefs.customVoice?.ready && voicePrefs.useCustomVoice;
   voicePending = { type: custom ? 'custom' : 'standard', liveVoiceId: voicePrefs.liveVoiceId };
   renderVoiceSettings();
+  prefetchLivePreviews(voicePrefs.voices || []);
 }
 
 function showVoiceTab(which) {
@@ -4177,6 +4178,79 @@ $('voicePreviewRow').addEventListener('click', () => {
   haptic(); voicePending = { ...voicePending, type: 'custom' }; renderVoiceSettings();
 });
 
+// Preset voice previews are downloaded once, kept on this device (IndexedDB, falling back to
+// localStorage) and replayed from there. Bump the version to force a fresh download.
+const PREVIEW_STORE = 'emysa-voice-previews-v1';
+function previewDb() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) return reject(new Error('no indexedDB'));
+    const req = indexedDB.open(PREVIEW_STORE, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('clips');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function previewStoreGet(id) {
+  try {
+    const db = await previewDb();
+    const blob = await new Promise((resolve, reject) => {
+      const r = db.transaction('clips').objectStore('clips').get(id);
+      r.onsuccess = () => resolve(r.result || null);
+      r.onerror = () => reject(r.error);
+    });
+    if (blob) return blob;
+  } catch { /* fall through to localStorage */ }
+  try {
+    const b64 = localStorage.getItem(`${PREVIEW_STORE}:${id}`);
+    if (b64) return new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: 'audio/wav' });
+  } catch { /* ignore */ }
+  return null;
+}
+async function previewStorePut(id, blob, b64) {
+  try {
+    const db = await previewDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('clips', 'readwrite');
+      tx.objectStore('clips').put(blob, id);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    return;
+  } catch { /* fall back */ }
+  try { localStorage.setItem(`${PREVIEW_STORE}:${id}`, b64); } catch { /* storage full: stays in memory only */ }
+}
+const previewInflight = new Map();
+function livePreviewUrl(id) {
+  if (livePreviewCache.has(id)) return Promise.resolve(livePreviewCache.get(id));
+  if (previewInflight.has(id)) return previewInflight.get(id);
+  const job = (async () => {
+    let blob = await previewStoreGet(id);
+    if (!blob) {
+      const resp = await authedFetch(`/api/voice-clone?action=live-preview&voice=${encodeURIComponent(id)}`);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || 'Preview unavailable');
+      blob = new Blob([Uint8Array.from(atob(data.audioBase64), (c) => c.charCodeAt(0))], { type: data.mimeType || 'audio/wav' });
+      await previewStorePut(id, blob, data.audioBase64);
+    }
+    const url = URL.createObjectURL(blob);
+    livePreviewCache.set(id, url);
+    return url;
+  })().finally(() => previewInflight.delete(id));
+  previewInflight.set(id, job);
+  return job;
+}
+// Quietly fetch every preset preview that is not on this device yet, one at a time.
+let previewPrefetchRunning = false;
+async function prefetchLivePreviews(voices) {
+  if (previewPrefetchRunning) return;
+  previewPrefetchRunning = true;
+  try {
+    for (const v of voices) {
+      try { await livePreviewUrl(v.id); } catch { /* try the rest; a tap will retry this one */ }
+    }
+  } finally { previewPrefetchRunning = false; }
+}
+
 async function previewLiveVoice(id, btn) {
   const audio = $('liveVoiceAudio');
   const status = $('voiceApplyStatus');
@@ -4184,16 +4258,10 @@ async function previewLiveVoice(id, btn) {
   audio.pause();
   status.textContent = '';
   try {
-    if (!livePreviewCache.has(id)) {
-      btn.classList.add('loading');
-      const resp = await authedFetch(`/api/voice-clone?action=live-preview&voice=${encodeURIComponent(id)}`);
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(data.error || 'Preview unavailable');
-      const bytes = Uint8Array.from(atob(data.audioBase64), (c) => c.charCodeAt(0));
-      livePreviewCache.set(id, URL.createObjectURL(new Blob([bytes], { type: data.mimeType || 'audio/wav' })));
-    }
+    if (!livePreviewCache.has(id)) btn.classList.add('loading');
+    const url = await livePreviewUrl(id);
     audio.dataset.voice = id;
-    audio.src = livePreviewCache.get(id);
+    audio.src = url;
     audio.onplay = () => { btn.innerHTML = PAUSE_SVG; };
     audio.onpause = audio.onended = () => { btn.innerHTML = PLAY_SVG; };
     await audio.play();
