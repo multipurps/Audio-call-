@@ -128,6 +128,10 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 /* ---------- auth ---------- */
 #authScreen{position:absolute; inset:0; z-index:100; background:var(--coffee); overflow:hidden; display:flex; flex-direction:column; padding:0 24px;}
 #authScreen.hidden{display:none;}
+/* While the app is still checking whether you're signed in, show only the plain splash.
+   The wallpaper appears when a login/setup screen is actually shown (revealAuthScreen),
+   so signed-in users never see it flash on open. */
+#authScreen.booting .authBgLayer, #authScreen.booting .authBgVideo, #authScreen.booting .authBgOverlay{display:none;}
 .authLogo{width:72px; height:72px; border-radius:20px; margin:0 auto 14px; background:var(--glass-bg); backdrop-filter:blur(16px) saturate(160%); -webkit-backdrop-filter:blur(16px) saturate(160%); border:1px solid var(--glass-border); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:26px;}
 .authTitle{text-align:center; font-size:24px; font-weight:750; margin-bottom:6px;}
 .authTitleLg{font-size:28px; font-weight:800;}

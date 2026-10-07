@@ -122,6 +122,12 @@ document.querySelectorAll('.tabBtn').forEach((btn) => btn.addEventListener('clic
 
 // ---------- auth ----------
 const authScreen = $('authScreen');
+// The one way to show the auth/setup screen: also ends the plain-splash "booting" state
+// (see #authScreen.booting in styles.css) so the wallpaper only shows on real login screens.
+function revealAuthScreen() {
+  authScreen.classList.remove('booting');
+  authScreen.classList.remove('hidden');
+}
 const ONBOARD_KEY = 'emysa_seen_onboarding';
 
 function showAuthPanel(name) {
@@ -297,7 +303,7 @@ async function enterApp(session) {
   $('authBoot').style.display = 'none';
   document.querySelectorAll('.authPanel').forEach((p) => p.classList.remove('active'));
   if (!approved) {
-    authScreen.classList.remove('hidden');
+    revealAuthScreen();
     $('pendingBox').style.display = 'block';
     startPendingPoll();
     return;
@@ -388,7 +394,7 @@ supabase.auth.onAuthStateChange((_event, session) => {
     stopMessagePolling();
     $('authBoot').style.display = 'none';
     $('pendingBox').style.display = 'none';
-    authScreen.classList.remove('hidden');
+    revealAuthScreen();
     startAuthFlow();
   }
 });
@@ -401,14 +407,14 @@ supabase.auth.getSession()
     if (data.session?.user && !currentUser) enterApp(data.session);
     else if (!data.session && $('authBoot').style.display !== 'none') {
       $('authBoot').style.display = 'none';
-      authScreen.classList.remove('hidden');
+      revealAuthScreen();
       startAuthFlow();
     }
   })
   .catch((err) => {
     console.error('getSession failed:', err);
     $('authBoot').style.display = 'none';
-    authScreen.classList.remove('hidden');
+    revealAuthScreen();
     startAuthFlow();
   });
 
@@ -4648,7 +4654,7 @@ function showSetupPanel(id) {
   $('authBoot').style.display = 'none';
   $('pendingBox').style.display = 'none';
   document.querySelectorAll('.authPanel').forEach((p) => p.classList.toggle('active', p.id === id));
-  authScreen.classList.remove('hidden');
+  revealAuthScreen();
 }
 
 async function loadLineState() {
