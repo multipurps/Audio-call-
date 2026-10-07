@@ -437,3 +437,119 @@ def test_live_voice_catalog_is_the_documented_twelve():
         "quartz", "ripple", "vesper", "willow", "stone", "gleam", "meridian", "bossa", "tempo", "beacon", "delta", "cinder",
     ]
     assert normalise_live_voice(" Gleam ") == "gleam" and normalise_live_voice("marin") is None
+
+
+# ---------------------------------------------------------------- the assistant ends the call itself
+
+def _fast_wrapup(conv, **tracker_kw):
+    """Same supervisor, faster clock: goodbyes settle in 0.2s and the loop ticks every 50ms."""
+    from app.call_wrapup import FarewellTracker
+
+    conv._wrapup._tracker = FarewellTracker(settle_secs=0.2, lone_ai_secs=0.2, **tracker_kw)
+    conv._wrapup._tick = 0.05
+
+
+async def _wait_for_hangup(ctl, seconds=5.0):
+    for _ in range(int(seconds / 0.05)):
+        if any('"hangup"' in c for c in ctl):
+            return True
+        await asyncio.sleep(0.05)
+    return False
+
+
+async def test_exchanged_goodbyes_end_the_call_and_report_it_completed(fake, monkeypatch):
+    conv, out, ctl, transcript, ctx = make_live_conversation(fake, monkeypatch)
+    await conv.start()
+    try:
+        _fast_wrapup(conv)
+        await conv.note_call_active("relay-signal")
+        await asyncio.wait_for(fake.started.wait(), 5)
+        conv._wrapup.on_turn("contact", "okay thanks, bye")
+        conv._wrapup.on_turn("ai", "Take care, goodbye!")
+        assert await _wait_for_hangup(ctl), "the assistant never hung up after goodbyes"
+        assert any("assistant-ended-call" in c for c in ctl)
+        for _ in range(40):
+            if conv._stopped:
+                break
+            await asyncio.sleep(0.05)
+        assert conv._stopped
+        # Reported as a completed call, which is what triggers the summary in the app.
+        for _ in range(40):
+            if ctx.ended:
+                break
+            await asyncio.sleep(0.05)
+        assert ctx.ended and ctx.ended[0]["status"] == "completed"
+    finally:
+        await conv.stop("test")
+
+
+async def test_an_ordinary_conversation_is_never_hung_up_on(fake, monkeypatch):
+    conv, out, ctl, transcript, ctx = make_live_conversation(fake, monkeypatch)
+    await conv.start()
+    try:
+        _fast_wrapup(conv)
+        await conv.note_call_active("relay-signal")
+        await asyncio.wait_for(fake.started.wait(), 5)
+        conv._wrapup.on_turn("ai", "Hi, how are you?")
+        conv._wrapup.on_turn("contact", "I'm good, I'll call you later about the invoice")
+        await asyncio.sleep(1.0)
+        assert not any('"hangup"' in c for c in ctl)
+        assert not conv._stopped
+    finally:
+        await conv.stop("test")
+
+
+async def test_time_budget_is_read_from_the_brief_cued_and_enforced(fake, monkeypatch):
+    monkeypatch.setattr(FakeCallContext, "instructions", "Brief Ayo on the invoice and round it up within a minute.", raising=False)
+    monkeypatch.setattr(FakeCallContext, "objective", "Invoice briefing", raising=False)
+    conv, out, ctl, transcript, ctx = make_live_conversation(fake, monkeypatch)
+    await conv.start()
+    try:
+        assert conv._wrapup.budget_secs == 60
+        _fast_wrapup(conv)
+        await conv.note_call_active("relay-signal")
+        await asyncio.wait_for(fake.started.wait(), 5)
+
+        conv._wrapup._talk_seconds = lambda: 45  # inside the last 20 seconds
+        await conv._wrapup.check()
+        conv._wrapup._talk_seconds = lambda: 61
+        await conv._wrapup.check()
+        cues = [m for m in conv._context.get_messages() if m.get("role") == "developer" and "Time" in str(m.get("content"))]
+        assert len(cues) == 2, "the model is told twice: time is nearly up, then time is up"
+        assert "end_call" in str(cues[1]["content"])
+
+        conv._wrapup._talk_seconds = lambda: 80  # past the grace period: do not wait for the model
+        await conv._wrapup.check()
+        assert await _wait_for_hangup(ctl, 8.0)
+        assert conv._wrapup.hangup_requested == "budget-force"
+    finally:
+        await conv.stop("test")
+
+
+async def test_no_time_limit_in_the_brief_means_no_budget(fake, monkeypatch):
+    monkeypatch.setattr(FakeCallContext, "instructions", "Tell Ayo I will be there in 10 minutes.", raising=False)
+    conv, *_ = make_live_conversation(fake, monkeypatch)
+    await conv.start()
+    try:
+        assert conv._wrapup.budget_secs is None
+    finally:
+        await conv.stop("test")
+
+
+async def test_the_kill_switches_turn_both_behaviours_off(fake, monkeypatch):
+    monkeypatch.setattr(FakeCallContext, "instructions", "round it up within a minute", raising=False)
+    conv, out, ctl, transcript, ctx = make_live_conversation(
+        fake, monkeypatch, env_extra={"ASSISTANT_ENFORCE_TIME_BUDGET": "false", "ASSISTANT_FAREWELL_HANGUP": "false"}
+    )
+    await conv.start()
+    try:
+        assert conv._wrapup.budget_secs is None
+        _fast_wrapup(conv)
+        await conv.note_call_active("relay-signal")
+        await asyncio.wait_for(fake.started.wait(), 5)
+        conv._wrapup.on_turn("contact", "bye")
+        conv._wrapup.on_turn("ai", "Goodbye!")
+        await asyncio.sleep(0.8)
+        assert not any('"hangup"' in c for c in ctl)
+    finally:
+        await conv.stop("test")

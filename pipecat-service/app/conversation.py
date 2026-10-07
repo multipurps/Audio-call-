@@ -40,6 +40,7 @@ from typing import Any, Awaitable, Callable
 from loguru import logger
 
 from app.call_context import CallContext, TranscriptLog, fetch_voice_prefs, resolve_call_context
+from app.call_wrapup import WrapUpSupervisor, parse_time_budget
 from app.config import Settings, normalise_live_voice
 from app.monitor import DIRECTION_CALLER, DIRECTION_EMYSA, get_hub
 
@@ -422,7 +423,11 @@ class _BaseConversation:
             await self.call_context.set_in_progress()
         await self._speak_greeting()
         self._greeted = True
+        self._after_answer()
         return True
+
+    def _after_answer(self) -> None:
+        """Hook for subclasses, called once the call is answered and the greeting is under way."""
 
     async def _speak_greeting(self) -> None:  # pragma: no cover - abstract
         raise NotImplementedError
@@ -737,6 +742,9 @@ class CallConversation(_BaseConversation):
         #: Recipient-side mute ("Emysa muted"), polled from the call row.
         self._ai_muted = False
         self._mute_task: asyncio.Task[None] | None = None
+        #: Ends the call when it is over (time budget / goodbyes); see app/call_wrapup.py.
+        self._wrapup: WrapUpSupervisor | None = None
+        self._wrapup_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         # Resolve the app's `calls` row before the pipeline exists: it is
@@ -760,6 +768,7 @@ class CallConversation(_BaseConversation):
                 on_entry=lambda entry: get_hub().publish_transcript(self._session_id, entry),
             )
             extra_context = self.call_context.extra_context or None
+            self._arm_wrapup(self.call_context)
 
         await self._resolve_call_voice_and_engine()
 
@@ -1077,9 +1086,49 @@ class CallConversation(_BaseConversation):
             await asyncio.sleep(0.1)
         await asyncio.sleep(0.8)  # let the last audio reach the callee
 
-    async def _graceful_assistant_hangup(self) -> None:
+    def _arm_wrapup(self, context: Any) -> None:
+        """Read the user's time budget from the call's brief and attach the supervisor to the transcript."""
+        settings = self._settings
+        budget = None
+        if settings.enforce_time_budget:
+            budget = parse_time_budget(f"{getattr(context, 'instructions', '')}\n{getattr(context, 'objective', '')}")
+        self._wrapup = WrapUpSupervisor(
+            budget_secs=budget,
+            farewell_enabled=settings.farewell_hangup,
+            talk_seconds=self.talk_seconds,
+            inject_cue=self._inject_wrapup_cue,
+            hang_up=self._wrapup_hangup,
+            is_stopped=lambda: self._stopped,
+            log=lambda event, **kw: clog("INFO", self._session_id, event, **kw),
+        )
+        if self.transcript is not None:
+            self.transcript.on_turn = self._wrapup.on_turn
+        clog(
+            "INFO", self._session_id, "[CALL WRAPUP] armed",
+            budgetSecs=budget, farewellHangup=settings.farewell_hangup, engine=self.engine,
+        )
+
+    def _after_answer(self) -> None:
+        if self._wrapup is not None and self._wrapup_task is None and not self._stopped:
+            self._wrapup_task = asyncio.create_task(self._wrapup.run(), name=f"wrapup-{self._session_id}")
+
+    async def _inject_wrapup_cue(self, text: str) -> None:
+        """Tell the model, mid-call, that time is running out (it speaks the wrap-up itself)."""
+        if self._context is None or self._task is None or self._stopped:
+            return
+        role = "developer" if self.engine == "live" else "system"
+        self._context.add_message({"role": role, "content": text})
+        await self._task.queue_frame(LLMRunFrame())
+
+    async def _wrapup_hangup(self, reason: str, quick: bool) -> None:
+        await self._graceful_assistant_hangup(quick=quick)
+
+    async def _graceful_assistant_hangup(self, *, quick: bool = False) -> None:
         if self._live_state is not None:
-            await self._live_goodbye_wait()
+            if quick:
+                await asyncio.sleep(0.8)  # the goodbyes were already exchanged; let the last audio land
+            else:
+                await self._live_goodbye_wait()
             if self._stopped:
                 return
             clog("INFO", self._session_id, "assistant requested call termination")
@@ -1242,6 +1291,9 @@ class CallConversation(_BaseConversation):
         watchdog, self._watchdog = self._watchdog, None
         if watchdog is not None and watchdog is not asyncio.current_task():
             watchdog.cancel()
+        wrapup_task, self._wrapup_task = self._wrapup_task, None
+        if wrapup_task is not None and wrapup_task is not asyncio.current_task():
+            wrapup_task.cancel()
         mute_task, self._mute_task = self._mute_task, None
         if mute_task is not None:
             mute_task.cancel()

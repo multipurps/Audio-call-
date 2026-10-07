@@ -353,3 +353,25 @@ class TestEndReportToApp:
 def test_session_id_candidates_strip_call_prefix():
     assert cc._session_id_candidates("call-abc-123") == ["call-abc-123", "abc-123"]
     assert cc._session_id_candidates("abc-123") == ["abc-123"]
+
+
+class TestTranscriptTurnHook:
+    async def test_every_recorded_turn_reaches_the_listener(self):
+        seen = []
+        log = cc.TranscriptLog(make_context(rest=FakeRest({"calls": [{"transcript": []}]})))
+        log.on_turn = lambda speaker, text: seen.append((speaker, text))
+        log.note("contact", "okay thanks, bye")
+        log.note("ai", "Take care!")
+        assert seen == [("contact", "okay thanks, bye"), ("ai", "Take care!")]
+        await log.close()
+
+    async def test_a_failing_listener_never_breaks_transcript_capture(self):
+        log = cc.TranscriptLog(make_context(rest=FakeRest({"calls": [{"transcript": []}]})))
+
+        def boom(*_a):
+            raise RuntimeError("listener bug")
+
+        log.on_turn = boom
+        log.note("contact", "hello there")
+        assert [e["content"] for e in log.entries] == ["hello there"]
+        await log.close()

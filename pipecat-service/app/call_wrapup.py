@@ -46,14 +46,31 @@ _LEAD = (
 
 _PATTERNS = [
     # "within 2 minutes", "in a minute", "under 90 seconds", "keep it to five minutes"
-    re.compile(rf"\b{_LEAD}\s+(?:about |around |roughly )?{_NUM}\s*{_UNIT}\b", re.I),
-    # "a 2 minute call", "a two-minute chat", "a 30 second call"
-    re.compile(rf"\b{_NUM}[- ]{_UNIT.replace('seconds?', 'second').replace('minutes?', 'minute')}\s+(?:call|chat|conversation|brief|briefing)\b", re.I),
+    (re.compile(rf"\b{_LEAD}\s+(?:about |around |roughly )?{_NUM}\s*{_UNIT}\b", re.I), True),
+    # "a 2 minute call", "a two-minute chat", "a 30 second briefing"  (about the call by itself)
+    (re.compile(rf"\b{_NUM}[- ]{_UNIT.replace('seconds?', 'second').replace('minutes?', 'minute')}\s+(?:call|chat|conversation|brief|briefing)\b", re.I), False),
     # "5 minutes max", "a minute at most", "two minutes tops"
-    re.compile(rf"\b{_NUM}\s*{_UNIT}\s+(?:max|maximum|tops|at most|or less|at the most)\b", re.I),
+    (re.compile(rf"\b{_NUM}\s*{_UNIT}\s+(?:max|maximum|tops|at most|or less|at the most)\b", re.I), True),
 ]
 _HALF_MINUTE = re.compile(r"\b(?:within|in|under|inside)\s+(?:half a minute|30 seconds)\b", re.I)
 _COUPLE = re.compile(r"\b(?:within|in|under|inside|for|keep it to)\s+(?:a )?couple (?:of )?minutes\b", re.I)
+
+#: A duration only limits the CALL when the instruction is about its pace. "Tell him I'll be there in
+#: 10 minutes" mentions a duration too, and must never become a call limit that cuts the call off.
+_PACING = re.compile(
+    r"\b(?:round(?:ing)? (?:it |this )?up|wrap(?:ping)? (?:it |this )?up|finish|conclude|brief(?:ing)?|quick(?:ly)?|"
+    r"short|keep (?:it|this|the call|the chat)|no (?:more|longer) than|not (?:more|longer) than|at most|"
+    r"max(?:imum)?|tops|time ?limit|time ?box)\b",
+    re.I,
+)
+#: "...10 minutes late", "...2 minutes from now": a duration about something else.
+_NOT_A_LIMIT_AFTER = re.compile(r"^\s*(?:late|away|from now|ago|earlier|later|before|after|early)\b", re.I)
+
+
+def _about_the_call_pace(text: str, start: int, end: int) -> bool:
+    if _NOT_A_LIMIT_AFTER.match(text[end : end + 14]):
+        return False
+    return bool(_PACING.search(text[max(0, start - 90) : end + 10]))
 
 
 def _to_number(token: str) -> int | None:
@@ -67,23 +84,25 @@ def parse_time_budget(text: str | None) -> int | None:
     """Seconds the user allowed for the call, or None when they gave no limit.
 
     "brief him and round it up within a minute" -> 60, "keep it to 5 minutes" -> 300,
-    "under 90 seconds" -> 90. When several limits appear, the tightest wins.
+    "make it quick, under 90 seconds" -> 90. When several limits appear, the tightest wins.
+    Durations that are not about the call's pace ("I'll be there in 10 minutes") never count.
     """
     if not text:
         return None
     found: list[int] = []
-    if _HALF_MINUTE.search(text):
-        found.append(30)
-    if _COUPLE.search(text):
-        found.append(120)
-    for pattern in _PATTERNS:
+    for regex, fixed in ((_HALF_MINUTE, 30), (_COUPLE, 120)):
+        for match in regex.finditer(text):
+            if _about_the_call_pace(text, match.start(), match.end()):
+                found.append(fixed)
+    for pattern, needs_pacing_context in _PATTERNS:
         for match in pattern.finditer(text):
+            if needs_pacing_context and not _about_the_call_pace(text, match.start(), match.end()):
+                continue
             amount = _to_number(match.group(1))
             if amount is None:
                 continue
             unit = match.group(2).lower()
-            secs = amount * (60 if unit.startswith("min") else 1)
-            found.append(secs)
+            found.append(amount * (60 if unit.startswith("min") else 1))
     found = [s for s in found if MIN_BUDGET_SECS <= s <= MAX_BUDGET_SECS]
     return min(found) if found else None
 
@@ -216,3 +235,86 @@ def wrapup_cue(stage: str, budget_secs: int) -> str:
         "Wrap up right now: one brief closing sentence, say goodbye warmly, and then hand the "
         "backend the end_call action. Do not start any new topic."
     )
+
+
+# --------------------------------------------------------------------------- supervisor
+
+class WrapUpSupervisor:
+    """Watches one live call and ends it when it is over. All I/O is injected.
+
+    Reasons to end, each logged as ``[CALL WRAPUP] <event>`` (ids and outcomes only):
+
+    * ``budget-soft`` / ``budget-hard``: the model is cued to wrap up as the user's time budget runs out.
+    * ``budget-force``: ``FORCE_GRACE_SECS`` after the budget, hang up even if the model has not.
+    * ``goodbyes-exchanged`` / ``assistant-said-goodbye``: the conversation is clearly finished.
+
+    A hangup is requested at most once. After it, the conversation's normal stop path reports the call
+    as completed, which is what produces the summary.
+    """
+
+    def __init__(
+        self,
+        *,
+        budget_secs: int | None,
+        farewell_enabled: bool,
+        talk_seconds,
+        inject_cue,
+        hang_up,
+        is_stopped,
+        log,
+        now=None,
+        tick_secs: float = 1.0,
+        tracker: FarewellTracker | None = None,
+    ) -> None:
+        import time
+
+        self.budget_secs = budget_secs
+        self._plan = WrapUpPlan(budget_secs)
+        self._tracker = tracker or FarewellTracker()
+        self._farewell_enabled = farewell_enabled
+        self._talk_seconds = talk_seconds
+        self._inject_cue = inject_cue
+        self._hang_up = hang_up
+        self._is_stopped = is_stopped
+        self._log = log
+        self._now = now or time.monotonic
+        self._tick = tick_secs
+        self.hangup_requested: str | None = None
+
+    def on_turn(self, speaker: str, text: str) -> None:
+        """Feed every spoken turn (``speaker`` is "ai" or anything else for the other person)."""
+        self._tracker.on_turn("ai" if speaker == "ai" else "contact", text, self._now())
+
+    async def check(self) -> None:
+        """One decision step (the loop calls this every tick; tests call it directly)."""
+        if self.hangup_requested or self._is_stopped():
+            return
+        stage = self._plan.next_stage(self._talk_seconds())
+        if stage == "force":
+            await self._end("budget-force", quick=False)
+            return
+        if stage in ("soft", "hard"):
+            self._log(f"[CALL WRAPUP] budget-{stage}", budgetSecs=self.budget_secs, talkSecs=self._talk_seconds())
+            await self._inject_cue(wrapup_cue(stage, self.budget_secs or 0))
+            return
+        if self._farewell_enabled:
+            done, why = self._tracker.should_hang_up(self._now())
+            if done:
+                await self._end(why, quick=True)
+
+    async def _end(self, reason: str, *, quick: bool) -> None:
+        self.hangup_requested = reason
+        self._log("[CALL WRAPUP] hanging up", reason=reason, talkSecs=self._talk_seconds())
+        await self._hang_up(reason, quick)
+
+    async def run(self) -> None:
+        import asyncio
+
+        while not self._is_stopped() and not self.hangup_requested:
+            await asyncio.sleep(self._tick)
+            try:
+                await self.check()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - a supervisor bug must never take the call down
+                self._log("[CALL WRAPUP] check failed", error=type(exc).__name__)

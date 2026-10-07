@@ -17,20 +17,35 @@ from app.call_wrapup import (
     [
         ("brief him and round it up within a minute", 60),
         ("keep it to 5 minutes", 300),
-        ("under 90 seconds", 90),
+        ("make it quick, under 90 seconds", 90),
         ("a two-minute call", 120),
-        ("in a couple of minutes", 120),
-        ("within half a minute", 30),
-        ("within 2 minutes, then call back in 10 minutes", 120),  # tightest wins
+        ("wrap it up in a couple of minutes", 120),
+        ("round it up within half a minute", 30),
+        ("round up within 2 minutes, then call back in 10 minutes", 120),  # tightest wins
         ("no rush, take your time", None),
         ("call me back in 3 hours", None),
-        ("within 5 seconds", None),  # below the believable floor: never cut a call off after 5s
+        ("round it up within 5 seconds", None),  # below the believable floor: never cut a call off after 5s
         ("", None),
         (None, None),
     ],
 )
 def test_parse_time_budget(text, expected):
     assert parse_time_budget(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Tell him I'll be there in 10 minutes",
+        "call Ayo and say I'm no more than 10 minutes late",
+        "ask if the delivery can arrive within 2 days",
+        "under 90 seconds",  # a bare duration says nothing about the call's pace
+        "remind her the meeting starts in 5 minutes",
+    ],
+)
+def test_a_duration_that_is_not_about_the_call_never_becomes_a_limit(text):
+    # A wrong limit would cut a real call off, which is far worse than having no limit.
+    assert parse_time_budget(text) is None
 
 
 @pytest.mark.parametrize(
@@ -117,3 +132,113 @@ def test_cues_name_the_allowed_time_and_ask_for_the_end_call_action_when_time_is
     assert "90 seconds" in wrapup_cue("soft", 90)
     hard = wrapup_cue("hard", 120)
     assert "2 minutes" in hard and "end_call" in hard
+
+
+# --------------------------------------------------------------------------- supervisor
+
+import asyncio  # noqa: E402
+
+from app.call_wrapup import WrapUpSupervisor  # noqa: E402
+
+
+class Harness:
+    def __init__(self, budget=None, farewell=True):
+        self.t = 0.0
+        self.talk = 0
+        self.cues: list[str] = []
+        self.hangups: list[tuple[str, bool]] = []
+        self.logs: list[str] = []
+        self.stopped = False
+
+        async def inject(text):
+            self.cues.append(text)
+
+        async def hang_up(reason, quick):
+            self.hangups.append((reason, quick))
+
+        self.sup = WrapUpSupervisor(
+            budget_secs=budget,
+            farewell_enabled=farewell,
+            talk_seconds=lambda: self.talk,
+            inject_cue=inject,
+            hang_up=hang_up,
+            is_stopped=lambda: self.stopped,
+            log=lambda event, **kw: self.logs.append(event),
+            now=lambda: self.t,
+            tick_secs=0.001,
+        )
+
+
+async def test_budget_cues_then_forces_the_hangup():
+    h = Harness(budget=60)
+    h.talk = 30
+    await h.sup.check()
+    assert h.cues == [] and h.hangups == []
+    h.talk = 41
+    await h.sup.check()
+    assert len(h.cues) == 1 and "almost up" in h.cues[0]
+    h.talk = 60
+    await h.sup.check()
+    assert len(h.cues) == 2 and "Time is up" in h.cues[1] and "end_call" in h.cues[1]
+    assert h.hangups == []
+    h.talk = 75
+    await h.sup.check()
+    assert h.hangups == [("budget-force", False)]  # the model had its chance; the goodbye is allowed to finish
+
+
+async def test_goodbyes_hang_up_quickly_and_only_once():
+    h = Harness()
+    h.sup.on_turn("contact", "okay thanks, bye")
+    h.t = 1.0
+    h.sup.on_turn("ai", "Take care, goodbye!")
+    h.t = 2.0
+    await h.sup.check()
+    assert h.hangups == []
+    h.t = 5.0
+    await h.sup.check()
+    await h.sup.check()
+    assert h.hangups == [("goodbyes-exchanged", True)]
+    assert "[CALL WRAPUP] hanging up" in h.logs
+
+
+async def test_new_speech_after_goodbye_keeps_the_call_open():
+    h = Harness()
+    h.sup.on_turn("contact", "bye")
+    h.sup.on_turn("ai", "Goodbye!")
+    h.t = 2.0
+    h.sup.on_turn("contact", "wait, one more thing about the invoice")
+    h.t = 60.0
+    await h.sup.check()
+    assert h.hangups == []
+
+
+async def test_farewell_hangup_can_be_switched_off():
+    h = Harness(farewell=False)
+    h.sup.on_turn("contact", "bye")
+    h.sup.on_turn("ai", "Goodbye!")
+    h.t = 60.0
+    await h.sup.check()
+    assert h.hangups == []
+
+
+async def test_a_stopped_call_is_left_alone():
+    h = Harness(budget=60)
+    h.stopped = True
+    h.talk = 500
+    await h.sup.check()
+    assert h.cues == [] and h.hangups == []
+
+
+async def test_a_supervisor_bug_never_takes_the_call_down():
+    h = Harness(budget=60)
+    h.talk = 41
+
+    async def boom(_text):
+        raise RuntimeError("cue failed")
+
+    h.sup._inject_cue = boom
+    task = asyncio.create_task(h.sup.run())
+    await asyncio.sleep(0.05)
+    h.stopped = True
+    await asyncio.wait_for(task, 1)
+    assert "[CALL WRAPUP] check failed" in h.logs

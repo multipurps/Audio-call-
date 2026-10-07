@@ -482,6 +482,8 @@ class TranscriptLog:
         self._closed = False
         self.writes = 0
         self.write_failures = 0
+        #: Optional ``(speaker, text) -> None`` called for every recorded turn (the wrap-up supervisor).
+        self.on_turn: Any = None
 
     @property
     def entries(self) -> list[dict[str, Any]]:
@@ -512,6 +514,11 @@ class TranscriptLog:
         if interrupted:
             entry["interrupted"] = True
         self._entries.append(entry)
+        if self.on_turn is not None:
+            try:
+                self.on_turn(speaker, clean)
+            except Exception:  # noqa: BLE001 - a listener must never break transcript capture
+                pass
         if len(self._entries) > MAX_TRANSCRIPT_ENTRIES:
             del self._entries[: len(self._entries) - MAX_TRANSCRIPT_ENTRIES]
         self._dirty = True

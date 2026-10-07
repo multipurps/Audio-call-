@@ -260,6 +260,10 @@ class Settings:
     #: the phone is still ringing. Turn this on only for a legacy relay that
     #: cannot signal the answer.
     answer_on_first_audio: bool = False
+    #: Cue the model and hang up when the user's time budget ("round it up within a minute") runs out.
+    enforce_time_budget: bool = True
+    #: Hang up when both sides have said goodbye and the line has gone quiet.
+    farewell_hangup: bool = True
 
     # -- optional persistent memory (explicitly feature-flagged) ----------
     #: Off by default. The brief calls for persistent user memory to sit
@@ -527,6 +531,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         max_call_seconds=_env_float(env, "ASSISTANT_MAX_CALL_SECONDS", 1800.0, minimum=10.0),
         max_silent_turns=_env_int(env, "ASSISTANT_MAX_SILENT_TURNS", 3),
         answer_on_first_audio=_env_bool(env, "ASSISTANT_ANSWER_ON_FIRST_AUDIO", False),
+        enforce_time_budget=_env_bool(env, "ASSISTANT_ENFORCE_TIME_BUDGET", True),
+        farewell_hangup=_env_bool(env, "ASSISTANT_FAREWELL_HANGUP", True),
         enable_persistent_memory=_env_bool(
             env, "ASSISTANT_ENABLE_PERSISTENT_MEMORY", False
         ),
