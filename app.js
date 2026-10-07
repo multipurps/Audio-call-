@@ -3647,7 +3647,7 @@ async function cmApi(action, { method = 'GET', query = {}, body } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(data.error || 'Something went wrong. Try again.');
+  if (!resp.ok) throw new Error(data.error || `Something went wrong (HTTP ${resp.status}). Try again.`);
   return data;
 }
 const cmSay = (text) => { $('cmStatus').textContent = text || ''; };
@@ -3666,17 +3666,27 @@ function openContactMemory(contact) {
 
 async function cmRefresh() {
   if (!cmContact) return;
-  try {
-    const [{ memories }, { imports }, ctx] = await Promise.all([
-      cmApi('cm-list', { query: { contactId: cmContact.id } }),
-      cmApi('import-list', { query: { contactId: cmContact.id } }),
-      cmApi('contact-context', { query: { contactId: cmContact.id } }),
-    ]);
-    cmMemories = memories;
-    cmRenderList();
-    cmRenderImports(imports);
-    $('cmPreviewText').textContent = ctx.promptBlock || 'Nothing approved yet.';
-  } catch (err) { cmSay(err.message); }
+  const id = cmContact.id;
+  // Load each part on its own so one failing call cannot blank the whole
+  // screen, and never show an error just for opening it.
+  const [mem, imp, ctx] = await Promise.allSettled([
+    cmApi('cm-list', { query: { contactId: id } }),
+    cmApi('import-list', { query: { contactId: id } }),
+    cmApi('contact-context', { query: { contactId: id } }),
+  ]);
+  if (!cmContact || cmContact.id !== id) return;
+  cmMemories = mem.status === 'fulfilled' ? (mem.value.memories || []) : [];
+  cmRenderList();
+  if (mem.status === 'rejected') {
+    const note = document.createElement('div');
+    note.className = 'cmEmpty';
+    note.textContent = `Could not load saved memories (${mem.reason.message}) `;
+    note.appendChild(cmButton('Retry', 'cmRetry', cmRefresh));
+    $('cmList').textContent = '';
+    $('cmList').appendChild(note);
+  }
+  if (imp.status === 'fulfilled') cmRenderImports(imp.value.imports || []);
+  $('cmPreviewText').textContent = (ctx.status === 'fulfilled' && ctx.value.promptBlock) || 'Nothing approved yet.';
 }
 
 function cmRenderList() {
