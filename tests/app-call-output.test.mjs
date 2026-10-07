@@ -189,7 +189,7 @@ test('mic restart is requested only when the OS ended the track', () => {
 test('app.js live-call path never plays through ctx.destination and primes the session before getUserMedia', () => {
   const src = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   const start = src.indexOf('async function startAppCallSession()');
-  const end = src.indexOf('async function startAssistantListening()');
+  const end = src.indexOf('// ---------- Call channel: Emysa (voice) / WhatsApp / Telegram / Phone ----------');
   assert.ok(start > 0 && end > start);
   const fn = src.slice(start, end);
   assert.equal(/ctx\.destination/.test(fn.replace(/\/\/.*$/gm, '')), false, 'no ctx.destination in the live call path');

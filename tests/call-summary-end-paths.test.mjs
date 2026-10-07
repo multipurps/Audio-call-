@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { database, loadApi, request } from './helpers.mjs';
-import { parseSummaryReply, transcriptForPrompt } from '../lib/callSession.js';
+import { parseSummaryReply, transcriptForPrompt, formatSummaryForChat } from '../lib/callSession.js';
 
 const SECRET = 'relay-secret-test';
 const ENV = { RELAY_CALLBACK_SECRET: SECRET, OPENAI_API_KEY: 'test-only' };
@@ -23,7 +23,9 @@ function turns(n = 6) {
   return list;
 }
 
-function fixture({ platform = 'app', llm } = {}) {
+const BUBBLE = formatSummaryForChat(SUMMARY.summary, SUMMARY);
+
+function fixture({ platform = 'whatsapp', llm } = {}) {
   const db = database({
     chat_sessions: [{ id: CHAT, user_id: 'user-1', title: 'chat' }],
     assistant_messages: [],
@@ -70,7 +72,8 @@ test('End button: the full-call summary is stored on the call AND posted into th
   assert.equal(call(f).outcome_summary, SUMMARY.summary);
   const msgs = chatMessages(f);
   assert.equal(msgs.length, 1, 'exactly one chat message');
-  assert.equal(msgs[0].content, SUMMARY.summary);
+  assert.equal(msgs[0].content, BUBBLE);
+  assert.match(msgs[0].content, /Agreed to move lunch to 1pm/);
   assert.equal(msgs[0].session_id, CHAT);
 
   const prompt = f.llmBodies[0].messages[1].content;
@@ -84,23 +87,34 @@ test('the other side hangs up: summary stored and posted once', async () => {
   assert.equal(res.code, 200, JSON.stringify(res.data));
   assert.equal(call(f).outcome_summary, SUMMARY.summary);
   assert.equal(chatMessages(f).length, 1);
-  assert.equal(chatMessages(f)[0].content, SUMMARY.summary);
+  assert.equal(chatMessages(f)[0].content, BUBBLE);
 });
 
 test('the assistant ends the call (service end report): summary stored and posted once', async () => {
-  const f = fixture({ platform: 'app' });
-  const res = await relayReport(f, { callId: 'call-1', userId: 'user-1', sessionId: 'call-pc-1', platform: 'app', status: 'completed', durationSeconds: 75 });
+  const f = fixture({ platform: 'whatsapp' });
+  // This is exactly the body pipecat's report_end posts after the assistant hangs up.
+  const res = await relayReport(f, { callId: 'call-1', userId: 'user-1', sessionId: 'call-pc-1', platform: 'whatsapp', status: 'completed', durationSeconds: 75, contactName: 'Ayo' });
   assert.equal(res.code, 200, JSON.stringify(res.data));
   assert.equal(call(f).summary_status, 'completed');
   assert.equal(chatMessages(f).length, 1);
-  assert.equal(chatMessages(f)[0].content, SUMMARY.summary);
+  assert.equal(chatMessages(f)[0].content, BUBBLE);
+});
+
+test('an in-app Emysa call is a briefing: ending it never produces a summary or a chat post', async () => {
+  const f = fixture({ platform: 'app' });
+  const { default: handler } = await loadApi('api/calls.js', f.db, f.fetcher, ENV);
+  const res = await request(handler, 'hangup', { callId: 'call-1' });
+  assert.equal(res.code, 200, JSON.stringify(res.data));
+  assert.equal(call(f).status, 'completed');
+  assert.equal(f.llmBodies.length, 0, 'no summary model call for an in-app briefing');
+  assert.equal(chatMessages(f).length, 0);
 });
 
 test('End button followed by the service end report never duplicates the summary or the model call', async () => {
   const f = fixture();
   const { default: calls } = await loadApi('api/calls.js', f.db, f.fetcher, ENV);
   await request(calls, 'hangup', { callId: 'call-1' });
-  await relayReport(f, { callId: 'call-1', userId: 'user-1', sessionId: 'call-pc-1', platform: 'app', status: 'completed', durationSeconds: 90 });
+  await relayReport(f, { callId: 'call-1', userId: 'user-1', sessionId: 'call-pc-1', platform: 'whatsapp', status: 'completed', durationSeconds: 90 });
   assert.equal(chatMessages(f).length, 1);
   assert.equal(f.llmBodies.length, 1, 'summarised once');
 });
