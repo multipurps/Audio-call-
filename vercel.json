@@ -3,7 +3,8 @@
     "api/assistant.js": { "maxDuration": 60 },
     "api/social-calling.js": { "maxDuration": 60 },
     "api/calls.js": { "maxDuration": 60 },
-    "api/calls-status.js": { "maxDuration": 60 }
+    "api/calls-status.js": { "maxDuration": 60 },
+    "api/memories.js": { "maxDuration": 60 }
   },
   "rewrites": [
     { "source": "/api/bachs-webhook", "destination": "/api/referrals?action=webhook" }

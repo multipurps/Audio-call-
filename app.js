@@ -1706,7 +1706,12 @@ function renderContactRow(c) {
     } catch (err) { $('contactStatus').textContent = err.message; }
     finally { del.disabled = false; }
   };
-  el.append(name, call, del);
+  const history = document.createElement('button');
+  history.className = 'contactHistoryBtn';
+  history.setAttribute('aria-label', `WhatsApp history for ${c.name}`);
+  history.innerHTML = '<svg class="ic"><use href="#ic-history"/></svg>';
+  history.onclick = (e) => { e.stopPropagation(); openContactMemory(c); };
+  el.append(name, history, call, del);
   return el;
 }
 
@@ -3767,6 +3772,260 @@ const MEMORY_TYPE_LABEL = {
   emotional: 'Relationship',
   working: 'Working',
 };
+
+
+// ---------- WhatsApp history -> reviewed memories (per contact) ----------
+// Import a WhatsApp export, pick who is who, consent, then review what was
+// found. Only approved memories are used on calls. Chat text is only ever put
+// on screen with textContent.
+const CM_TYPE_LABEL = {
+  identity: 'Identity', preferences: 'Preferences', communication_style: 'How they communicate', important_relationships: 'People in their life',
+  recurring_facts: 'Recurring facts', previous_context: 'Earlier context', unresolved_issues: 'Open issues', commitments: 'Commitments',
+  important_dates: 'Important dates', caller_preferences: 'On calls',
+};
+let cmContact = null;
+let cmImport = null;
+let cmFilter = 'candidate';
+let cmMemories = [];
+let cmBusy = false;
+
+async function cmApi(action, { method = 'GET', query = {}, body } = {}) {
+  const params = new URLSearchParams({ scope: 'contact', action, ...query });
+  const resp = await authedFetch(`/api/memories?${params}`, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.error || 'Something went wrong. Try again.');
+  return data;
+}
+const cmSay = (text) => { $('cmStatus').textContent = text || ''; };
+
+function openContactMemory(contact) {
+  cmContact = contact;
+  cmImport = null;
+  cmFilter = 'candidate';
+  $('cmTitle').textContent = `${contact.name}: WhatsApp history`;
+  $('cmSetup').classList.add('hidden');
+  $('cmFile').value = '';
+  cmSay('');
+  openSheet('sheet-contact-memory');
+  cmRefresh();
+}
+
+async function cmRefresh() {
+  if (!cmContact) return;
+  try {
+    const [{ memories }, { imports }, ctx] = await Promise.all([
+      cmApi('cm-list', { query: { contactId: cmContact.id } }),
+      cmApi('import-list', { query: { contactId: cmContact.id } }),
+      cmApi('contact-context', { query: { contactId: cmContact.id } }),
+    ]);
+    cmMemories = memories;
+    cmRenderList();
+    cmRenderImports(imports);
+    $('cmPreviewText').textContent = ctx.promptBlock || 'Nothing approved yet.';
+  } catch (err) { cmSay(err.message); }
+}
+
+function cmRenderList() {
+  const count = (status) => cmMemories.filter((m) => m.status === status || (status === 'approved' && m.status === 'edited')).length;
+  $('cmCountCandidate').textContent = count('candidate') ? `(${count('candidate')})` : '';
+  $('cmCountApproved').textContent = count('approved') ? `(${count('approved')})` : '';
+  $('cmCountRejected').textContent = count('rejected') ? `(${count('rejected')})` : '';
+  document.querySelectorAll('#cmFilters .memoryFilterBtn').forEach((b) => b.classList.toggle('active', b.dataset.cmStatus === cmFilter));
+  const list = $('cmList');
+  list.textContent = '';
+  const shown = cmMemories.filter((m) => (cmFilter === 'approved' ? m.status === 'approved' || m.status === 'edited' : m.status === cmFilter));
+  if (!shown.length) {
+    const empty = document.createElement('div');
+    empty.className = 'cmEmpty';
+    empty.textContent = cmFilter === 'candidate' ? 'Nothing to review. Import a chat to get suggestions.' : cmFilter === 'approved' ? 'Nothing approved yet.' : 'Nothing rejected.';
+    list.appendChild(empty);
+    return;
+  }
+  for (const m of shown) list.appendChild(cmCard(m));
+}
+
+function cmButton(label, className, onClick) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = label;
+  if (className) b.className = className;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function cmCard(m) {
+  const card = document.createElement('div');
+  card.className = 'cmCard';
+  const type = document.createElement('div');
+  type.className = 'cmType';
+  type.textContent = CM_TYPE_LABEL[m.memory_type] || m.memory_type;
+  if (m.is_inferred || Number(m.confidence) < 0.7) {
+    const badge = document.createElement('span');
+    badge.className = 'cmBadge';
+    badge.textContent = m.is_inferred ? 'Inferred: check it' : 'Unsure: check it';
+    type.appendChild(badge);
+  }
+  const text = document.createElement('div');
+  text.className = 'cmText';
+  text.textContent = m.memory_text;
+  card.append(type, text);
+  if (m.source_message) {
+    const src = document.createElement('details');
+    src.className = 'cmSource';
+    const sum = document.createElement('summary');
+    sum.textContent = `From the chat${m.source_date ? `, ${m.source_date.slice(0, 10)}` : ''}`;
+    const quote = document.createElement('div');
+    quote.textContent = m.source_message;
+    src.append(sum, quote);
+    card.appendChild(src);
+  }
+  const actions = document.createElement('div');
+  actions.className = 'cmActions';
+  const act = (patch) => async () => { try { await cmApi('cm-update', { method: 'PATCH', body: { id: m.id, ...patch } }); await cmRefresh(); } catch (err) { cmSay(err.message); } };
+  if (m.status === 'candidate') actions.append(cmButton('Approve', 'cmApprove', act({ status: 'approved' })), cmButton('Edit', '', () => cmEdit(card, m)), cmButton('Reject', '', act({ status: 'rejected' })));
+  else if (m.status === 'rejected') actions.append(cmButton('Restore', '', act({ status: 'candidate' })), cmButton('Delete', 'cmDanger', () => cmDelete(m)));
+  else actions.append(cmButton('Edit', '', () => cmEdit(card, m)), cmButton('Reject', '', act({ status: 'rejected' })), cmButton('Delete', 'cmDanger', () => cmDelete(m)));
+  card.appendChild(actions);
+  return card;
+}
+
+function cmEdit(card, m) {
+  const area = document.createElement('textarea');
+  area.className = 'cmEdit';
+  area.maxLength = 300;
+  area.value = m.memory_text;
+  const actions = document.createElement('div');
+  actions.className = 'cmActions';
+  actions.append(
+    cmButton('Save and approve', 'cmApprove', async () => {
+      try { await cmApi('cm-update', { method: 'PATCH', body: { id: m.id, memoryText: area.value } }); await cmRefresh(); }
+      catch (err) { cmSay(err.message); }
+    }),
+    cmButton('Cancel', '', () => cmRenderList()),
+  );
+  card.textContent = '';
+  card.append(area, actions);
+  area.focus();
+}
+
+async function cmDelete(m) {
+  if (!confirm('Delete this memory?')) return;
+  try { await cmApi('cm-delete', { method: 'DELETE', body: { id: m.id } }); await cmRefresh(); }
+  catch (err) { cmSay(err.message); }
+}
+
+function cmRenderImports(imports) {
+  const box = $('cmImports');
+  box.textContent = '';
+  for (const imp of imports) {
+    const row = document.createElement('div');
+    row.className = 'cmImportRow';
+    const label = document.createElement('span');
+    const state = imp.status === 'analyzed' ? 'analysed' : imp.status === 'analyzing' ? 'partly analysed' : imp.status;
+    label.textContent = `${imp.original_filename} · ${imp.message_count || 0} messages · ${state}`;
+    row.append(label, cmButton('Remove', 'cmLinkBtn', async () => {
+      if (!confirm('Remove this import and its stored chat file?')) return;
+      const withMemories = confirm('Also delete the memories found in it? OK deletes them, Cancel keeps them.');
+      try { await cmApi('import-delete', { method: 'DELETE', body: { importId: imp.id, deleteMemories: withMemories } }); cmSetupHide(); await cmRefresh(); }
+      catch (err) { cmSay(err.message); }
+    }));
+    box.appendChild(row);
+  }
+}
+
+function cmSetupHide() { cmImport = null; $('cmSetup').classList.add('hidden'); }
+
+function cmShowSetup(info) {
+  cmImport = info;
+  $('cmSetup').classList.remove('hidden');
+  const span = info.firstMessageAt ? `${info.firstMessageAt.slice(0, 10)} to ${info.lastMessageAt.slice(0, 10)}` : '';
+  $('cmSummary').textContent = `${info.messageCount} messages${span ? `, ${span}` : ''}${info.hasMedia ? '. Photos, voice notes and other media are not read.' : '.'}${info.isGroup ? ' This looks like a group chat: only the two people you pick are analysed.' : ''}`;
+  for (const id of ['cmContactPicker', 'cmSelfPicker']) {
+    const sel = $(id);
+    sel.textContent = '';
+    const first = document.createElement('option');
+    first.value = '';
+    first.textContent = 'Choose…';
+    sel.appendChild(first);
+    for (const p of info.participants) {
+      const o = document.createElement('option');
+      o.value = p.name;
+      o.textContent = `${p.name} (${p.messages})`;
+      sel.appendChild(o);
+    }
+  }
+  $('cmContactPicker').value = info.identified?.contactParticipant || '';
+  $('cmSelfPicker').value = info.identified?.selfParticipant || '';
+  const p = info.preview?.[0];
+  $('cmDateRow').classList.toggle('hidden', !info.dateOrderAmbiguous);
+  $('cmDatePreview').textContent = p ? `The first message reads as ${p.sentAt.slice(0, 10)}. Is that right?` : '';
+  $('cmConsent').checked = false;
+  $('cmAnalyze').disabled = false;
+}
+
+async function cmUploadAndProcess(file) {
+  const init = await cmApi('import-init', { method: 'POST', body: { contactId: cmContact.id, filename: file.name, size: file.size } });
+  cmSay('Uploading…');
+  const up = await supabase.storage.from(init.bucket).uploadToSignedUrl(init.path, init.token, file);
+  if (up.error) throw new Error('The upload failed. Check your connection and try again.');
+  cmSay('Reading the chat…');
+  return cmApi('import-process', { method: 'POST', body: { importId: init.importId } });
+}
+
+$('cmFile').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file || cmBusy || !cmContact) return;
+  cmBusy = true;
+  try {
+    const info = await cmUploadAndProcess(file);
+    cmSay('');
+    cmShowSetup(info);
+    await cmRefresh();
+  } catch (err) { cmSay(err.message); }
+  finally { cmBusy = false; e.target.value = ''; }
+});
+
+$('cmFlipDates').addEventListener('click', async () => {
+  if (!cmImport || cmBusy) return;
+  cmBusy = true;
+  try {
+    const next = cmImport.dateOrder === 'dmy' ? 'mdy' : 'dmy';
+    const info = await cmApi('import-process', { method: 'POST', body: { importId: cmImport.importId, dateOrder: next } });
+    cmShowSetup(info);
+    $('cmDateRow').classList.remove('hidden');
+  } catch (err) { cmSay(err.message); }
+  finally { cmBusy = false; }
+});
+
+async function cmAnalyze(restart = false) {
+  if (!cmImport || cmBusy) return;
+  const contactParticipant = $('cmContactPicker').value;
+  const selfParticipant = $('cmSelfPicker').value;
+  if (!contactParticipant) { cmSay('Choose which person in the chat is this contact.'); return; }
+  if (selfParticipant && selfParticipant === contactParticipant) { cmSay('Pick two different people.'); return; }
+  if (!$('cmConsent').checked && !restart) { cmSay('Tick the box to let the chat text be analysed.'); return; }
+  cmBusy = true;
+  $('cmAnalyze').disabled = true;
+  try {
+    cmSay('Finding memories…');
+    await cmApi('import-set-participants', { method: 'POST', body: { importId: cmImport.importId, contactParticipant, selfParticipant: selfParticipant || null } });
+    const r = await cmApi('import-analyze', { method: 'POST', body: { importId: cmImport.importId, consent: true, restart } });
+    await cmApi('import-index', { method: 'POST', body: { importId: cmImport.importId, consent: true } }).catch(() => null);
+    cmSay(`${r.inserted} new ${r.inserted === 1 ? 'memory' : 'memories'} to review${r.done ? '.' : `. ${r.remainingWindows} parts of the chat are left.`}${r.method === 'rules' ? ' (Basic matching only: no AI service is set up.)' : ''}`);
+    $('cmMore').classList.toggle('hidden', r.done);
+    cmFilter = 'candidate';
+    await cmRefresh();
+    if (r.done) cmSetupHide();
+  } catch (err) { cmSay(err.message); }
+  finally { cmBusy = false; $('cmAnalyze').disabled = false; }
+}
+$('cmAnalyze').addEventListener('click', () => cmAnalyze(false));
+$('cmMore').addEventListener('click', () => cmAnalyze(false));
+document.querySelectorAll('#cmFilters .memoryFilterBtn').forEach((b) => b.addEventListener('click', () => { cmFilter = b.dataset.cmStatus; cmRenderList(); }));
 
 async function loadMemories() {
   const qs = selectedMemoryType ? `?type=${encodeURIComponent(selectedMemoryType)}` : '';

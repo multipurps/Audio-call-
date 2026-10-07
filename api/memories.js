@@ -1,4 +1,5 @@
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
+import handleContactMemory from '../lib/contactMemoryApi.js';
 import {
   normalizeMemoryRow,
   containsSensitiveSecret,
@@ -11,6 +12,8 @@ import {
 
 export default async function handler(req, res) {
   const supabase = getServiceClient();
+  // Imported WhatsApp history and reviewed per-contact memories (Phase 3).
+  if (req.query?.scope === 'contact') return handleContactMemory(req, res, { supabase });
   const userId = await getAuthedUserId(req, supabase);
   if (!userId) return res.status(401).json({ error: 'Not signed in' });
 

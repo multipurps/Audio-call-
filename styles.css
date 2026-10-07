@@ -988,3 +988,35 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .addTimeLinks{display:flex; align-items:center; justify-content:center; gap:10px; margin-top:4px; font-size:12px; color:var(--muted);}
 .addTimeLinks button{font-size:12px; color:var(--muted);}
 @media(prefers-reduced-motion:reduce){.dashAddBtn, .dashAction, .dashPerson{transition:none;}}
+
+/* ---------- WhatsApp history (per-contact memory review) ---------- */
+.contactHistoryBtn{width:36px; height:36px; display:flex; align-items:center; justify-content:center; color:var(--dim); flex:none;}
+.contactHistoryBtn .ic{width:20px; height:20px;}
+.cmLead{font-size:14px; line-height:1.5; color:var(--dim); margin-bottom:14px;}
+.cmFileBtn, .cmPrimaryBtn{display:flex; align-items:center; justify-content:center; width:100%; padding:14px; border-radius:14px; font-size:16px; font-weight:600; color:#fff; background:var(--accent-grad); cursor:pointer;}
+.cmPrimaryBtn:disabled{opacity:.5;}
+.cmSetup{margin:14px 0 6px; padding:14px; border-radius:18px; background:var(--glass-bg); border:1px solid var(--glass-border);}
+.cmSummary{font-size:14px; line-height:1.5; margin-bottom:10px;}
+.cmField{display:block; font-size:13px; color:var(--dim); margin-bottom:10px;}
+.cmField select{display:block; width:100%; margin-top:6px; padding:11px 12px; border-radius:12px; font-size:15px; color:var(--text); background:var(--coffee-light); border:1px solid var(--glass-border);}
+.cmDates{display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:13px; color:var(--dim); margin-bottom:10px;}
+.cmLinkBtn{font-size:14px; font-weight:600; color:var(--accent); padding:6px 0;}
+.cmConsent{display:flex; gap:10px; align-items:flex-start; font-size:13px; line-height:1.45; color:var(--dim); margin:6px 0 12px;}
+.cmConsent input{margin-top:3px; flex:none;}
+#cmFilters{margin-top:18px;}
+.cmCard{background:var(--coffee-light); border-radius:16px; padding:14px 16px; margin-bottom:10px;}
+.cmType{font-size:11.5px; font-weight:700; color:var(--accent); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;}
+.cmText{font-size:15px; line-height:1.45; color:var(--text);}
+.cmBadge{display:inline-block; margin-left:8px; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; text-transform:none; letter-spacing:0; color:#e8b86a; border:1px solid rgba(232,184,106,.5);}
+.cmSource{margin-top:8px; font-size:12.5px; line-height:1.4; color:var(--dim);}
+.cmSource summary{cursor:pointer;}
+.cmActions{display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;}
+.cmActions button{padding:8px 14px; border-radius:999px; font-size:13.5px; font-weight:600; color:var(--text); background:var(--glass-bg); border:1px solid var(--glass-border);}
+.cmActions button.cmApprove{color:#fff; background:var(--accent-grad); border-color:transparent;}
+.cmActions button.cmDanger{color:#e57a7a;}
+.cmEdit{width:100%; min-height:72px; padding:10px 12px; border-radius:12px; font-size:15px; color:var(--text); background:var(--coffee); border:1px solid var(--glass-border); resize:vertical;}
+.cmEmpty{padding:18px 2px; font-size:14px; color:var(--dim);}
+.cmPreview{margin-top:18px; font-size:14px; color:var(--dim);}
+.cmPreview pre{white-space:pre-wrap; margin-top:8px; padding:12px; border-radius:12px; font:12.5px/1.45 ui-monospace,Menlo,monospace; color:var(--text); background:var(--coffee-light);}
+.cmImports{margin-top:18px;}
+.cmImportRow{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 0; font-size:13px; color:var(--dim); border-top:1px solid var(--glass-border);}

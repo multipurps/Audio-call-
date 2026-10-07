@@ -79,3 +79,13 @@ test('payment return page is in the PWA scope and never claims the payment succe
   assert.ok(page.includes('href="./index.html"'));
   assert.ok(!/payment (was )?successful|you have been charged|minutes (were )?added/i.test(page));
 });
+
+test('WhatsApp history UI: entry point per contact, chat text only ever set with textContent', () => {
+  assert.ok(app.includes("history.onclick = (e) => { e.stopPropagation(); openContactMemory(c); }"));
+  const block = app.slice(app.indexOf('// ---------- WhatsApp history -> reviewed memories'), app.indexOf('async function loadMemories()'));
+  assert.ok(block.length > 3000);
+  assert.ok(!/innerHTML|insertAdjacentHTML|outerHTML/.test(block), 'chat-derived text must never be parsed as HTML');
+  for (const id of ['cmFile', 'cmConsent', 'cmAnalyze', 'cmList', 'cmPreviewText']) assert.ok(ids.has(id), id);
+  // nothing is analysed without the consent box
+  assert.ok(block.includes("Tick the box to let the chat text be analysed."));
+});

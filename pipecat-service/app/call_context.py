@@ -210,6 +210,9 @@ class CallContext:
     status: str
     extra_context: str
     memories: list[str] = field(default_factory=list)
+    #: Memories the USER reviewed and approved for this contact (from imported
+    #: WhatsApp history). Never the raw chat, never unreviewed candidates.
+    contact_memory: list[str] = field(default_factory=list)
     prior_summaries: list[str] = field(default_factory=list)
     #: The user's chosen language from Settings (ISO code). Drives STT and the
     #: reply language so a mis-heard word can never switch the call language.
@@ -639,6 +642,111 @@ async def _fetch_memories(
     return [content for _, content in scored[:8]]
 
 
+# --- Reviewed per-contact memory (sql/026_contact_memory.sql) ------------------
+#
+# Isolation: this service uses the service role, which bypasses RLS, so every
+# query here is pinned to user_id AND contact_id, and every returned row is
+# checked again. Only approved/edited memories are ever used.
+
+_USABLE_CONTACT_MEMORY = {"approved", "edited"}
+#: Mirrors IMPORT_SECRET_PATTERNS in lib/contactMemory.js: codes, PINs, passwords,
+#: bank/ID numbers, IBANs and any 9+ digit run. Imported chats are full of these.
+_CONTACT_MEMORY_SECRETS = re.compile(
+    r"(\b(code|otp|pin|passcode|token|cvv|cvc|password|passwd|pwd)\b[^\n]{0,25}?\d{4,}"
+    r"|\b(account|acct|routing|sort code|iban|bvn|nin|passport|licen[cs]e|ssn|tax id)\b[^\n]{0,30}?\d{4,}"
+    r"|\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b"
+    r"|\d(?:[ -]?\d){8,}"
+    r"|\b(password|passcode|secret|api[_ -]?key)\b\s*(is|:|=)\s*\S+)",
+    re.IGNORECASE,
+)
+_CONTACT_MEMORY_PRIORITY = [
+    "caller_preferences", "commitments", "unresolved_issues", "important_dates", "identity",
+    "preferences", "communication_style", "important_relationships", "recurring_facts", "previous_context",
+]
+_CONTACT_MEMORY_LABEL = {
+    "identity": "Identity", "preferences": "Preferences", "communication_style": "How they communicate",
+    "important_relationships": "People in their life", "recurring_facts": "Recurring facts",
+    "previous_context": "Earlier context", "unresolved_issues": "Open issues", "commitments": "Commitments",
+    "important_dates": "Important dates", "caller_preferences": "On calls",
+}
+_CONTACT_MEMORY_MAX_ITEMS = 14
+_CONTACT_MEMORY_MAX_CHARS = 1500
+
+
+def _digits(value: object) -> str:
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+async def _resolve_contact_by_number(
+    rest: _Rest, *, user_id: str, number: str, session_id: str
+) -> str | None:
+    """The user's own contact with exactly this number, or None.
+
+    Digits only, exact match, never a suffix match, and only within this
+    user's contacts. Two contacts with the same number is ambiguous: None.
+    """
+    wanted = _digits(number)
+    if len(wanted) < 7 or not user_id:
+        return None
+    try:
+        rows = await rest.select(
+            "contacts",
+            select="id, user_id, phone_number",
+            filters={"user_id": f"eq.{user_id}"},
+            limit=500,
+        )
+    except Exception as exc:  # noqa: BLE001 - context degrades, call continues
+        _log("WARNING", session_id, "contact lookup by number failed", error=type(exc).__name__)
+        return None
+    hits = [r for r in rows if str(r.get("user_id")) == user_id and _digits(r.get("phone_number")) == wanted]
+    return str(hits[0]["id"]) if len(hits) == 1 else None
+
+
+async def _fetch_contact_memory(
+    rest: _Rest, *, user_id: str, contact_id: str | None, session_id: str
+) -> list[str]:
+    if not user_id or not contact_id:
+        return []
+    try:
+        rows = await rest.select(
+            "contact_memories",
+            select="user_id, contact_id, memory_type, memory_text, status, updated_at",
+            filters={
+                "user_id": f"eq.{user_id}",
+                "contact_id": f"eq.{contact_id}",
+                "status": "in.(approved,edited)",
+            },
+            order="updated_at.desc",
+            limit=100,
+        )
+    except Exception as exc:  # noqa: BLE001 - context degrades, call continues
+        _log("WARNING", session_id, "contact memory retrieval failed", error=type(exc).__name__)
+        return []
+
+    usable = []
+    for row in rows:
+        if str(row.get("user_id")) != user_id or str(row.get("contact_id")) != contact_id:
+            continue  # never trust the filter alone
+        if row.get("status") not in _USABLE_CONTACT_MEMORY:
+            continue
+        text = str(row.get("memory_text") or "").strip()
+        if not text or _SECRET_PATTERNS.search(text) or _CONTACT_MEMORY_SECRETS.search(text):
+            continue
+        kind = str(row.get("memory_type") or "")
+        rank = _CONTACT_MEMORY_PRIORITY.index(kind) if kind in _CONTACT_MEMORY_PRIORITY else 99
+        usable.append((rank, f"{_CONTACT_MEMORY_LABEL.get(kind, kind)}: {text}"))
+    usable.sort(key=lambda item: item[0])  # stable: newest first within a type
+
+    lines: list[str] = []
+    used = 0
+    for _, line in usable[:_CONTACT_MEMORY_MAX_ITEMS]:
+        if used + len(line) > _CONTACT_MEMORY_MAX_CHARS:
+            break
+        lines.append(line)
+        used += len(line)
+    return lines
+
+
 async def _fetch_prior_summaries(
     rest: _Rest, *, user_id: str, contact_id: str | None, session_id: str
 ) -> list[str]:
@@ -725,6 +833,12 @@ def build_extra_context(context: CallContext) -> str:
     if context.memories:
         lines.append("Things you know about them:")
         lines.extend(f"- {memory}" for memory in context.memories)
+    if context.contact_memory:
+        lines.append(
+            "Notes about this person that your user has confirmed. Use them naturally when they fit; "
+            "never read them out as a list and never say where they came from:"
+        )
+        lines.extend(f"- {memory}" for memory in context.contact_memory)
     return "\n".join(lines)
 
 
@@ -836,10 +950,21 @@ async def resolve_call_context(
         contact_id = str(contact_id) if contact_id else None
         to_number = str(row.get("to_number") or "")
 
-        contact_name, memories, summaries, profile = await asyncio.gather(
+        # Who is on the other end? A call row without a contact id (for
+        # example an incoming WhatsApp call) is matched by phone number.
+        memory_contact_id = contact_id
+        if not memory_contact_id and db_user_id and to_number:
+            memory_contact_id = await _resolve_contact_by_number(
+                rest, user_id=db_user_id, number=to_number, session_id=session_id
+            )
+
+        contact_name, memories, contact_memory, summaries, profile = await asyncio.gather(
             _fetch_contact_name(rest, contact_id=contact_id, to_number=to_number, session_id=session_id),
             _fetch_memories(rest, user_id=db_user_id, contact_id=contact_id, session_id=session_id)
             if settings.enable_persistent_memory and db_user_id
+            else _empty(),
+            _fetch_contact_memory(rest, user_id=db_user_id, contact_id=memory_contact_id, session_id=session_id)
+            if settings.enable_persistent_memory and db_user_id and memory_contact_id
             else _empty(),
             _fetch_prior_summaries(rest, user_id=db_user_id, contact_id=contact_id, session_id=session_id)
             if db_user_id
@@ -861,6 +986,7 @@ async def resolve_call_context(
             status=str(row.get("status") or "queued"),
             extra_context="",
             memories=memories,
+            contact_memory=contact_memory,
             prior_summaries=summaries,
             language=language if isinstance(language, str) else "en",
             user_name=profile["name"],
@@ -875,6 +1001,7 @@ async def resolve_call_context(
             callId=call_id,
             status=context.status,
             memories=len(memories),
+            contactMemory=len(contact_memory),
             priorSummaries=len(summaries),
         )
         return context
