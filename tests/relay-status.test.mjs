@@ -197,8 +197,8 @@ test('a call with no captured conversation states that plainly instead of a gene
 test('rejected, busy, unanswered and disconnected all land in truthful terminal states', async () => {
   const f = await setup();
   const cases = [
-    ['rejected', 'no_answer', undefined],
-    ['declined', 'no_answer', undefined],
+    ['rejected', 'rejected', undefined],
+    ['declined', 'rejected', undefined],
     ['busy', 'busy', undefined],
     ['no-answer', 'no_answer', undefined],
     ['unanswered', 'no_answer', undefined],
@@ -221,7 +221,7 @@ test('rejected, busy, unanswered and disconnected all land in truthful terminal 
       ...(duration ? { durationSeconds: duration } : {}),
     });
     assert.equal(row(f, 'call-a').status, expected, `${reported} should map to ${expected}`);
-    assert.ok(['completed', 'no_answer', 'busy', 'canceled', 'failed'].includes(row(f, 'call-a').status));
+    assert.ok(['completed', 'rejected', 'no_answer', 'busy', 'canceled', 'failed'].includes(row(f, 'call-a').status));
     if (duration) assert.equal(row(f, 'call-a').duration_seconds, duration);
   }
   // Disconnected with no talk time at all → failed (never connected).
@@ -283,4 +283,41 @@ test('an in-app (platform app) call end records its status but never a summary o
   assert.ok(stored.ended_at);
   assert.ok(!stored.summary_status && !stored.outcome_summary, 'no summary for an in-app call');
   assert.equal(f.db.tables.assistant_messages.filter((m) => m.call_id === 'call-app').length, 0, 'no chat report for an in-app call');
+});
+
+// ---- live-call status: what the provider reports is what the row says ----------------
+
+test('a provider ringing report moves a dialing call to ringing, with no answer time', async () => {
+  const f = await setup();
+  row(f, 'call-a').status = 'queued';
+  await relay(f.handler, { userId: 'user-1', sessionId: '11111111-1111-1111-1111-111111111111', platform: 'whatsapp', peerIdentifier: '+15550001', status: 'ringing' });
+  assert.equal(row(f, 'call-a').status, 'ringing');
+  assert.ok(!row(f, 'call-a').answered_at, 'ringing must not stamp an answer time (the timer starts only on answer)');
+});
+
+test('a late ringing report can never pull an answered or finished call back', async () => {
+  const f = await setup();
+  for (const status of ['in_progress', 'completed', 'rejected']) {
+    row(f, 'call-a').status = status;
+    await relay(f.handler, { userId: 'user-1', sessionId: '11111111-1111-1111-1111-111111111111', platform: 'whatsapp', peerIdentifier: '+15550001', status: 'ringing' });
+    assert.equal(row(f, 'call-a').status, status, `ringing must not overwrite ${status}`);
+  }
+});
+
+test('a rejected call is its own outcome: "rejected", never a failure, with the right chat line', async () => {
+  const f = await setup();
+  row(f, 'call-a').transcript = [];
+  await relay(f.handler, { userId: 'user-1', sessionId: '11111111-1111-1111-1111-111111111111', platform: 'whatsapp', peerIdentifier: '+15550001', status: 'rejected' });
+  assert.equal(row(f, 'call-a').status, 'rejected');
+  assert.ok(!row(f, 'call-a').answered_at, 'a rejected call was never answered');
+  assert.match(row(f, 'call-a').outcome_summary || '', /declined the call/);
+});
+
+test('silence/DND is not a rejection and not an answer: a rang-out call ends as no_answer, never connected', async () => {
+  const f = await setup();
+  row(f, 'call-a').transcript = [];
+  row(f, 'call-a').status = 'ringing';
+  await relay(f.handler, { userId: 'user-1', sessionId: '11111111-1111-1111-1111-111111111111', platform: 'whatsapp', peerIdentifier: '+15550001', status: 'no_answer' });
+  assert.equal(row(f, 'call-a').status, 'no_answer');
+  assert.ok(!row(f, 'call-a').answered_at, 'no answer time may ever be stamped without a provider answer');
 });

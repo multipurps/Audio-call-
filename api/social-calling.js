@@ -149,8 +149,9 @@ async function relayCallStatus(req, res, supabase) {
     'no-answer': 'no_answer',
     no_answer: 'no_answer',
     unanswered: 'no_answer',
-    rejected: 'no_answer',
-    declined: 'no_answer',
+    // A rejection is its own outcome so the call screen can say "Call rejected".
+    rejected: 'rejected',
+    declined: 'rejected',
     busy: 'busy',
     canceled: 'canceled',
     cancelled: 'canceled',
@@ -162,7 +163,7 @@ async function relayCallStatus(req, res, supabase) {
     disconnected: Number(durationSeconds) > 0 ? 'completed' : 'failed',
   };
   const callStatus = statusNormalizeMap[String(rawCallStatus).toLowerCase()] || rawCallStatus;
-  const isTerminal = ['completed', 'no_answer', 'failed', 'busy', 'canceled'].includes(callStatus);
+  const isTerminal = ['completed', 'rejected', 'no_answer', 'failed', 'busy', 'canceled'].includes(callStatus);
   const isAnswer = ['in_progress'].includes(callStatus);
 
   // The provider call id may arrive directly, or encoded in the bridge
@@ -245,6 +246,11 @@ async function relayCallStatus(req, res, supabase) {
       .limit(1)
       .maybeSingle();
     call = data;
+  }
+
+  // A late "ringing" report must never pull an answered/finished call back.
+  if (callStatus === 'ringing' && call && !['queued', 'ringing'].includes(call.status)) {
+    return res.status(200).json({ ok: true, callId: call.id, ignored: 'late ringing' });
   }
 
   if (call) {
@@ -361,6 +367,8 @@ async function relayCallStatus(req, res, supabase) {
         : `There is no summary for the call with ${who} on ${channelName} — there was no conversation to capture.`;
     } else if (callStatus === 'completed') {
       text = mins ? `Finished the call with ${who} on ${channelName} (about ${mins} min).` : `Finished the call with ${who} on ${channelName}.`;
+    } else if (callStatus === 'rejected') {
+      text = `${who} rejected the call on ${channelName}.`;
     } else if (callStatus === 'no_answer') {
       text = `I called ${who} on ${channelName}, but there was no answer.`;
     } else if (callStatus === 'busy') {

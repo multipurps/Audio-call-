@@ -3,7 +3,7 @@ import { decodeMonitorFrame } from './lib/monitorFrame.js';
 import { floatToPcm16k, decodeAppCallFrame, describeAppCallMessage, describeAppCallClose, describeMicError } from './lib/appCallAudio.js';
 import { primeAudioSession, createCallOutput, watchLifecycle, pickOutputMode, micNeedsRestart } from './lib/appCallOutput.js';
 import { describeMonitorMessage, describeMonitorClose, noAudioMessage, MONITOR_NO_AUDIO_MS } from './lib/monitorStatus.js';
-import { answeredCallPill, assistantCallPill, listenInPill } from './lib/callStatus.js';
+import { answeredCallPill, assistantCallPill, listenInPill, liveCallView, endedCallLabel, formatCallTimer, TERMINAL_STATUSES } from './lib/callStatus.js';
 import { userError, friendlyAccountName } from './lib/userFacing.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -683,7 +683,7 @@ function trackActiveCall(callId, toNumber, contactName) {
   headerCallChannel = supabase
     .channel(`header-call-${callId}`)
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'calls', filter: `id=eq.${callId}` }, (payload) => {
-      if (['completed', 'failed', 'no_answer', 'busy', 'canceled'].includes(payload.new.status)) clearActiveCall();
+      if (TERMINAL_STATUSES.includes(payload.new.status)) clearActiveCall();
     })
     .subscribe();
 }
@@ -1926,21 +1926,22 @@ let callAiMuted = false;
 let callPlacedAtMs = null;
 let callAnsweredAtMs = null;
 
+// The timer is only ever visible for an ANSWERED call. While dialing or ringing it
+// is hidden (not "00:00"); the moment the provider reports the answer it appears
+// and starts counting - ensureCallTimer() renders immediately, no 1s wait.
+function renderCallTimer() {
+  const el = $('callTimer');
+  if (!el) return;
+  const text = formatCallTimer(callAnsweredAtMs);
+  el.classList.toggle('pending', text === null);
+  el.setAttribute('aria-hidden', text === null ? 'true' : 'false');
+  el.textContent = text ?? '\u00a0'; // keeps the header height steady while hidden
+}
+
 function ensureCallTimer() {
   clearInterval(callTimerInterval);
-  // The conversation timer only runs from the provider's answer event. While
-  // the phone is still ringing it holds at 00:00 (ring time is not talk time).
-  callTimerInterval = setInterval(() => {
-    if (!callAnsweredAtMs) {
-      $('callTimer').textContent = '00:00';
-      return;
-    }
-    const secs = Math.max(0, Math.floor((Date.now() - callAnsweredAtMs) / 1000));
-    const m = String(Math.floor(secs / 60)).padStart(2, '0');
-    const s = String(secs % 60).padStart(2, '0');
-    $('callTimer').textContent = `${m}:${s}`;
-  }, 1000);
-  $('callTimer').textContent = '00:00';
+  callTimerInterval = setInterval(renderCallTimer, 1000);
+  renderCallTimer();
 }
 
 // -- Local call tones ------------------------------------------------------
@@ -2006,13 +2007,6 @@ function playConnectedChime() {
   setTimeout(() => playToneBurst([880], 200, 0.07), 170);
 }
 
-const CALL_ENDED_LABELS = {
-  completed: 'Call ended',
-  no_answer: 'No answer',
-  busy: 'Busy',
-  failed: 'Call failed',
-  canceled: 'Call canceled',
-};
 
 function applyCallStatusUpdate(callRow) {
   if (!callRow) return;
@@ -2032,29 +2026,27 @@ function applyCallStatusUpdate(callRow) {
     stopRingback();
     return;
   }
-  if (st === 'queued') {
-    // The row stays 'queued' for the whole dial-and-ring period (it only
-    // becomes 'in_progress' on the provider's answer event), so this is the
-    // state a caller actually sits in while the phone rings.
-    setCallStatePill('connecting', 'Calling…');
-    startRingback();
-  } else if (st === 'ringing') {
-    setCallStatePill('connecting', 'Ringing…');
-    startRingback();
+  if (st === 'queued' || st === 'ringing') {
+    // 'queued' = we dialed and the provider has not reported ringing yet, so we
+    // say "Calling". Only a provider-reported 'ringing' says "Ringing" - and
+    // only then does the local ringback tone play.
+    applyCallPill(liveCallView({ status: st }).pill);
+    if (st === 'ringing') startRingback(); else stopRingback();
   } else if (st === 'in_progress' || st === 'in-progress') {
     // The provider's answer event: talk time starts at answered_at. Rows
     // written before this field existed fall back to the transition moment
-    // for display only — the recorded duration still comes from the server.
+    // for display only - the recorded duration still comes from the server.
     stopRingback();
     if (!callAnsweredAtMs) {
       callAnsweredAtMs = callRow.answered_at ? new Date(callRow.answered_at).getTime() : Date.now();
-      ensureCallTimer();
+      ensureCallTimer(); // shows the timer immediately
       playConnectedChime();
     }
-    applyCallPill(answeredCallPill({ aiMuted: callAiMuted }));
-  } else if (['completed', 'failed', 'no_answer', 'busy', 'canceled'].includes(st)) {
+    applyCallPill(liveCallView({ status: st, aiMuted: callAiMuted }).pill);
+  } else if (TERMINAL_STATUSES.includes(st)) {
     stopRingback();
-    setCallStatePill('ended', CALL_ENDED_LABELS[st] || `Call ${String(st).replace('_', ' ')}`);
+    // Real label per outcome - a rejection says "Call rejected", never a generic failure.
+    setCallStatePill('ended', endedCallLabel(st));
     clearActiveCall();
     // A call that never connected: say the real reason and what happened,
     // and leave it on screen long enough to read, instead of vanishing.
@@ -2103,7 +2095,7 @@ function openCallScreen(callId, toNumber, contactName) {
     $('waveRow').classList.remove('speaking');
     callAiMuted = false;
     $('callMuteBtn').classList.remove('active');
-    setCallStatePill('connecting', 'Connecting…');
+    applyCallPill(liveCallView({ status: 'queued' }).pill);
 
     // Ring time until the provider's answer event lands (answered_at), then
     // the conversation timer restarts from the real answer — see
@@ -2360,7 +2352,6 @@ function startCallMonitor(url, callId, unlockedCtx) {
     stopCallMonitor();
     setCallStatePill('connecting', text);
   };
-  setCallStatePill('connecting', 'Connecting…');
   $('callAudioBtn').classList.add('active');
   $('callAudioBtn').setAttribute('aria-label', 'Listening in - tap to mute listening');
 
@@ -2587,6 +2578,7 @@ function callSummaryLine(c) {
     case 'queued': return 'Starting the call…';
     case 'ringing': return `Calling ${name}…`;
     case 'in_progress': return `On the call with ${name}`;
+    case 'rejected': return `${name} rejected the call`;
     case 'no_answer': return `Reached ${name}'s voicemail and hung up`;
     case 'failed': return `Couldn't reach ${name} — the call failed to connect`;
     case 'completed': return c.duration_seconds
@@ -2980,7 +2972,7 @@ function setupSummaryRecovery(c, summaryText) {
   if (!btn) return;
   btn.classList.add('hidden');
   btn.onclick = null;
-  const terminal = ['completed', 'failed', 'no_answer', 'busy', 'canceled'].includes(c.status);
+  const terminal = TERMINAL_STATUSES.includes(c.status);
   const hasTranscript = Array.isArray(c.transcript) && c.transcript.some((t) => String(t?.content || t?.text || '').trim());
   if (summaryText || !terminal || !hasTranscript) return;
 

@@ -32,7 +32,7 @@ test('no connection/listening/speaking scaffolding is left in the client', () =>
 });
 
 test('legitimate call information is still there (nothing over-removed)', () => {
-  for (const s of ["'Calling…'", "'Ringing…'", "'Emysa muted'", "'No answer'", "'Busy'", "'Call failed'", "'Call canceled'", "'Call ended'", "'Ending call…'"]) {
+  for (const s of ["label: 'Calling'", "label: 'Ringing'", "'Call rejected'", "'Emysa muted'", "'No answer'", "'Busy'", "'Call failed'", "'Call canceled'", "'Call ended'", "'Ending call…'"]) {
     assert.ok(clientSources.includes(s), `missing legitimate status ${s}`);
   }
   assert.ok(/id="callTimer"/.test(html), 'call duration timer must remain');
