@@ -51,19 +51,8 @@ export default async function handler(req, res) {
   if (finished && ['queued', 'ringing'].includes(update.status)) return res.status(200).send('ok');
   await supabase.from('calls').update(update).eq('id', callId);
 
-  // Increment usage only once the call actually ends, using Twilio's
-  // authoritative duration rather than anything the relay server reported.
-  if (call?.user_id && CallDuration) {
-    const minutes = Math.ceil(parseInt(CallDuration, 10) / 60);
-    const { data: usage } = await supabase.from('user_usage').select('*').eq('user_id', call.user_id).maybeSingle();
-    const newUsed = (usage?.call_minutes_used ?? 0) + minutes;
-    await supabase.from('user_usage').upsert({
-      user_id: call.user_id,
-      call_minutes_used: newUsed,
-      monthly_minute_limit: usage?.monthly_minute_limit ?? 60,
-      updated_at: new Date().toISOString(),
-    });
-  }
+  // Minutes are charged by the calls_charge_minutes trigger (sql/027) when
+  // duration_seconds is written above, for every call type and exactly once.
 
   // Calls from chat (including keypad and Emysa callbacks) have a session_id.
   // Legacy calls without a chat session cannot receive a follow-up.

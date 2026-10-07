@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="ss3">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
@@ -11,43 +11,43 @@
 <link rel="apple-touch-icon" href="../icon-192.png">
 <link rel="stylesheet" href="../styles.css">
 <style>
-  #adminApp{position:fixed; inset:0; display:flex; flex-direction:column; background:#f3f4fb; color:#1b1f33; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; --ink:#1b1f33; --mute:#6b7186; --card:#fff; --acc:#1b1f33;}
+  #adminApp{position:absolute; top:0; left:0; right:0; bottom:0; height:100%; display:flex; flex-direction:column; background:var(--coffee); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif; --ink:var(--text); --mute:var(--muted); --acc:var(--accent); --card:var(--glass-bg); --line:var(--glass-border);}
   #adminApp *{box-sizing:border-box;}
   #adminApp button{cursor:pointer; border:0; font:inherit; color:inherit; background:none;}
-  #adminApp input,#adminApp select{font:inherit; color:var(--ink); background:#fff; border:1px solid #e1e4f0; border-radius:12px; padding:10px 12px; width:100%; min-width:0;}
-  .aBar{display:flex; align-items:center; gap:12px; padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 10px; background:#fff;}
-  .aIcon{width:42px; height:42px; border-radius:50%; background:#f1f2f9; display:flex; align-items:center; justify-content:center; flex:none;}
+  #adminApp input,#adminApp select{font:inherit; color:var(--ink); background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; width:100%; min-width:0;}
+  .aBar{display:flex; align-items:center; gap:12px; padding:max(env(safe-area-inset-top),14px) 16px 10px;}
+  .aIcon{width:42px; height:42px; border-radius:50%; background:var(--card); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; flex:none;}
   .aIcon svg{width:22px; height:22px;}
   .aBar h1{font-size:19px; margin:0; flex:1;}
-  .aChips{display:flex; background:#f1f2f9; border-radius:999px; padding:4px; margin:0 16px 12px; width:fit-content;}
+  .aChips{display:flex; background:var(--card); border:1px solid var(--line); border-radius:999px; padding:4px; margin:0 16px 12px; width:fit-content;}
   .aChips button{padding:8px 14px; border-radius:999px; font-size:13.5px; color:var(--mute);}
-  .aChips button.on{background:#fff; color:var(--ink); font-weight:650; box-shadow:0 1px 4px rgba(0,0,0,.08);}
-  #aBody{flex:1; overflow-y:auto; padding:6px 16px calc(env(safe-area-inset-bottom,0px) + 24px);}
+  .aChips button.on{background:var(--acc); color:var(--on-accent); font-weight:650;}
+  #aBody{flex:1; overflow-y:auto; padding:6px 16px 40px;}
   .aSec{display:none;} .aSec.on{display:block;}
   .aGrid{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
-  .aCard{background:var(--card); border-radius:24px; padding:16px; box-shadow:0 2px 14px rgba(27,31,51,.06);}
+  .aCard{background:var(--card); border:1px solid var(--line); backdrop-filter:blur(18px) saturate(160%); -webkit-backdrop-filter:blur(18px) saturate(160%); border-radius:16px; padding:14px;}
   .aCard .l{font-size:13px; color:var(--mute);} .aCard .v{font-size:26px; font-weight:700; margin:4px 0 2px; word-break:break-word;} .aCard .s{font-size:12px; color:var(--mute);}
   .aCard.wide{grid-column:1/-1;}
   .aBars{display:flex; align-items:flex-end; gap:2px; height:90px; margin-top:10px;}
   .aBars i{flex:1; background:var(--acc); border-radius:3px 3px 0 0; min-height:2px; opacity:.85;}
-  .aRow{background:#fff; border-radius:18px; padding:12px 14px; margin-bottom:10px; box-shadow:0 2px 10px rgba(27,31,51,.05);}
+  .aRow{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; margin-bottom:10px;}
   .aRow .t{font-size:14px; font-weight:600; word-break:break-all;} .aRow .m{font-size:12px; color:var(--mute); margin-top:2px;}
   .aFlex{display:flex; align-items:center; gap:10px; justify-content:space-between;}
-  .aBtn{background:var(--acc)!important; color:#fff!important; padding:10px 16px; border-radius:12px; font-weight:650; font-size:13.5px;}
-  .aBtn.ghost{background:#eceefa!important; color:var(--ink)!important;} .aBtn.sm{padding:7px 11px; font-size:12px;}
+  .aBtn{background:var(--acc)!important; color:var(--on-accent)!important; padding:10px 16px; border-radius:12px; font-weight:650; font-size:13.5px;}
+  .aBtn.ghost{background:var(--card)!important; border:1px solid var(--line)!important; color:var(--ink)!important;} .aBtn.sm{padding:7px 11px; font-size:12px;}
   .aField{margin-bottom:10px;} .aField label{display:block; font-size:12px; color:var(--mute); margin-bottom:4px;}
   .aHint{font-size:12.5px; color:var(--mute); margin-top:8px; min-height:16px;}
   .aPos{color:#0f9d68;} .aNeg{color:#d6453d;}
   .aBg{display:grid; grid-template-columns:repeat(3,1fr); gap:8px;}
-  .aBg .bgCard{position:relative; border-radius:12px; overflow:hidden; aspect-ratio:9/16; background:#e6e8f3;}
+  .aBg .bgCard{position:relative; border-radius:12px; overflow:hidden; aspect-ratio:9/16; background:var(--card);}
   .aBg img,.aBg video{width:100%; height:100%; object-fit:cover; display:block;}
   .aBg button{position:absolute; top:5px; right:5px; width:22px; height:22px; border-radius:50%; background:rgba(0,0,0,.6)!important; color:#fff; font-size:12px;}
-  #aScrim{position:fixed; inset:0; background:rgba(15,18,35,.45); opacity:0; pointer-events:none; transition:opacity .2s; z-index:20;}
-  #aDrawer{position:fixed; top:0; bottom:0; left:0; width:min(280px,82vw); background:#fff; z-index:21; transform:translateX(-100%); transition:transform .22s; padding:calc(env(safe-area-inset-top,0px) + 20px) 14px 20px; display:flex; flex-direction:column; gap:4px;}
+  #aScrim{position:absolute; inset:0; background:rgba(15,18,35,.45); opacity:0; pointer-events:none; transition:opacity .2s; z-index:20;}
+  #aDrawer{position:absolute; top:0; bottom:0; left:0; width:min(280px,82vw); background:var(--coffee-light); border-right:1px solid var(--line); z-index:21; transform:translateX(-100%); transition:transform .22s; padding:max(env(safe-area-inset-top),20px) 14px 20px; display:flex; flex-direction:column; gap:4px;}
   #adminApp.open #aScrim{opacity:1; pointer-events:auto;} #adminApp.open #aDrawer{transform:none;}
   #aDrawer .brand{display:flex; align-items:center; gap:10px; font-weight:700; font-size:17px; padding:4px 8px 14px;} #aDrawer .brand img{width:36px; height:36px; border-radius:10px;}
   #aDrawer .nav{text-align:left; padding:13px 14px; border-radius:14px; font-size:15px; color:var(--mute);}
-  #aDrawer .nav.on{background:#f1f2f9; color:var(--ink); font-weight:650;}
+  #aDrawer .nav.on{background:var(--card); color:var(--ink); font-weight:650;}
 </style>
 </head>
 <body>
@@ -136,7 +136,7 @@
   // standalone app. Tying the import to a version string that changes
   // every deploy forces a genuinely new request each time instead of
   // silently continuing to run whatever was cached from before.
-  import(`./admin.js?v=2026-10-06.1`).catch((err) => showBootFailure('Failed to load admin.js', err));
+  import(`./admin.js?v=2026-10-06.2`).catch((err) => showBootFailure('Failed to load admin.js', err));
 </script>
 <script>
   if ('serviceWorker' in navigator) {

@@ -71,6 +71,10 @@ async function enterAdmin() {
 }
 
 // ---------- panel shell ----------
+document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') === 'brave' ? 'brave' : 'dark');
+const isPWA = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+const fitHeight = () => { if (isPWA && window.screen.height) document.body.style.height = `${window.screen.height}px`; };
+fitHeight(); window.addEventListener('resize', fitHeight);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 async function api(action, { method = 'GET', body, qs = '' } = {}) {
   const resp = await authedFetch(`/api/admin?action=${action}${qs}`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
@@ -175,7 +179,7 @@ async function loadUsage() {
     if (!users.length) { el.innerHTML = `<div class="aHint">No calls in the last ${range} days.</div>`; return; }
     const max = Math.max(...users.map((u) => u.minutes), 1);
     el.innerHTML = users.map((u) => `<div class="aRow"><div class="aFlex"><div class="t" style="min-width:0">${esc(u.email)}</div><b>${num(u.minutes)}m</b></div>
-      <div class="aBars" style="height:6px;margin:8px 0 4px;display:block;background:#eceefa;border-radius:3px;"><i style="display:block;height:6px;width:${(u.minutes / max) * 100}%;border-radius:3px;"></i></div>
+      <div class="aBars" style="height:6px;margin:8px 0 4px;display:block;background:var(--line);border-radius:3px;"><i style="display:block;height:6px;width:${(u.minutes / max) * 100}%;border-radius:3px;"></i></div>
       <div class="m">${u.calls} call${u.calls === 1 ? '' : 's'}${u.lastActive ? ' · last ' + new Date(u.lastActive).toLocaleDateString() : ''}</div></div>`).join('');
   } catch (err) { fail(el, err); }
 }
@@ -191,7 +195,7 @@ async function loadCredits() {
     <div class="aField"><input type="text" id="creditNote" placeholder="Note (optional)" maxlength="200"></div>
     <div class="aFlex"><button class="aBtn" id="creditAdd" style="flex:1">Add minutes</button><button class="aBtn ghost" id="creditSub" style="flex:1">Remove</button></div>
     <div class="aHint" id="creditHint">Purchases are credited automatically after payment. Use this for gifts, refunds and fixes.</div></div>
-    <div class="l" style="margin:16px 4px 8px;color:#6b7186;font-size:13px;">Recent credits</div><div id="ledger"><div class="aHint">Loading…</div></div>`;
+    <div class="l" style="margin:16px 4px 8px;color:var(--muted);font-size:13px;">Recent credits</div><div id="ledger"><div class="aHint">Loading…</div></div>`;
   if (keep) $('creditUser').value = keep;
   const apply = async (sign) => {
     const m = Number($('creditMin').value);

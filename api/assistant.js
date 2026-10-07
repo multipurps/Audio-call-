@@ -2,6 +2,7 @@ import { LANGUAGE_NAMES } from '../lib/callLanguages.js';
 // Languages the transcription model accepts as a pinned language. Igbo is not
 // one of them, so it is left to auto-detect.
 const STT_LANGUAGES = new Set(['en', 'es', 'fr', 'pt', 'de', 'ha', 'yo', 'sw', 'ar', 'hi', 'zh']);
+import { minutesLeft, NO_MINUTES_MESSAGE } from '../lib/billing.js';
 import { prepareCall, saveCallPlan, confirmCallPlan, attachCallPlans } from '../lib/callPlans.js';
 import { resolveVoiceChoice, stripSpeechMarkers } from '../lib/voiceChoice.js';
 import { liveVoiceSpeak } from '../lib/liveVoicePreview.js';
@@ -691,6 +692,11 @@ async function sendMessage(req, res, supabase, userId) {
 
     if (callChannel === 'whatsapp' || callChannel === 'telegram') {
       const channelName = callChannel === 'whatsapp' ? 'WhatsApp' : 'Telegram';
+      const left = await minutesLeft(supabase, userId);
+      if (left && left.remaining <= 0) {
+        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', NO_MINUTES_MESSAGE, null, msgSource));
+        return respond();
+      }
       // Fail fast, before the relay round-trip: WhatsApp/Telegram calls only
       // resolve to a real account with a full international number — no way
       // to guess a country code for a bare local-format number.
