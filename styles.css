@@ -772,6 +772,7 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .callMinimizeBtn{position:absolute; top:calc(var(--safe-top, 12px) + 6px); right:18px; width:38px; height:38px; border-radius:50%; background:rgba(var(--fg-rgb),.12); color:var(--text); display:flex; align-items:center; justify-content:center; border:1px solid rgba(var(--fg-rgb),.15);}
 .callMinimizeBtn svg{width:20px; height:20px;}
 .callStatePill{display:inline-flex; align-items:center; gap:6px; margin-top:6px; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:500; letter-spacing:.01em; background:rgba(var(--fg-rgb),.12); color:rgba(var(--fg-rgb),.88); border:1px solid rgba(var(--fg-rgb),.14);}
+.callStatePill[hidden]{display:none;}
 .callStatePill::before{content:""; width:7px; height:7px; border-radius:50%; background:#ffd60a;}
 .callStatePill[data-phase="speaking"]::before{background:#30d158; box-shadow:0 0 8px #30d158;}
 .callStatePill[data-phase="listening"]::before,.callStatePill[data-phase="connected"]::before{background:#30d158;}

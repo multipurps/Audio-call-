@@ -3,6 +3,8 @@ import { decodeMonitorFrame } from './lib/monitorFrame.js';
 import { floatToPcm16k, decodeAppCallFrame, describeAppCallMessage, describeAppCallClose, describeMicError } from './lib/appCallAudio.js';
 import { primeAudioSession, createCallOutput, watchLifecycle, pickOutputMode, micNeedsRestart } from './lib/appCallOutput.js';
 import { describeMonitorMessage, describeMonitorClose, noAudioMessage, MONITOR_NO_AUDIO_MS } from './lib/monitorStatus.js';
+import { answeredCallPill, assistantCallPill, listenInPill } from './lib/callStatus.js';
+import { userError, friendlyAccountName } from './lib/userFacing.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // Installed PWAs (especially iOS "Add to Home Screen") can keep showing a
@@ -920,8 +922,17 @@ let assistantSpeaking = false;
 function setCallStatePill(phase, label) {
   const pill = $('callStatePill');
   if (!pill) return;
+  pill.hidden = false;
   pill.dataset.phase = phase || 'connecting';
   pill.textContent = label || 'Connecting…';
+}
+
+// A healthy call shows no pill (the timer and waveform already say it is live).
+// `view` comes from lib/callStatus.js: { phase, label } or null.
+function applyCallPill(view) {
+  if (view) { setCallStatePill(view.phase, view.label); return; }
+  const pill = $('callStatePill');
+  if (pill) { pill.hidden = true; pill.textContent = ''; }
 }
 
 function appendCallTranscriptLine(speaker, content) {
@@ -1115,7 +1126,7 @@ function openAssistantCallScreen() {
   $('transcriptPanel').textContent = '';
   $('waveRow').classList.remove('speaking');
   $('callMuteBtn').classList.remove('active');
-  setCallStatePill('connecting', 'Connecting to Emysa…');
+  setCallStatePill('connecting', 'Connecting…');
   $('homeHeaderLogoWrap').classList.remove('hidden');
   $('homeHeaderLogoWrap').classList.add('calling');
 
@@ -1138,7 +1149,7 @@ function openAssistantCallScreen() {
   $('callMuteBtn').onclick = () => {
     assistantMuted = !assistantMuted;
     $('callMuteBtn').classList.toggle('active', assistantMuted);
-    setCallStatePill(assistantMuted ? 'muted' : 'listening', assistantMuted ? 'Microphone muted' : 'Connected · Listening');
+    applyCallPill(assistantCallPill({ muted: assistantMuted }));
     if (appCall) appCall.muted = assistantMuted;
   };
   $('callKeypadBtn').onclick = () => {
@@ -1196,7 +1207,7 @@ async function submitAppCallBrief(callId, attempt = 0) {
       body: JSON.stringify({ callId }),
     });
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) { showToast(data?.error || 'Could not prepare the call from your briefing'); return; }
+    if (!resp.ok) { showToast(userError(data?.error, 'Could not prepare the call from your briefing')); return; }
     if (data.status === 'nothing-to-do' && attempt < 2) { setTimeout(() => submitAppCallBrief(callId, attempt + 1), 2500); return; }
     if (data.status === 'prepared' && data.sessionId) {
       showToast(`Call to ${data.contactName || 'your contact'} is ready. Review it and tap Call Now`);
@@ -1215,7 +1226,7 @@ async function startAppCallSession() {
     setCallStatePill('connecting', 'This device cannot do live voice calls');
     return;
   }
-  setCallStatePill('connecting', 'Connecting to Emysa…');
+  setCallStatePill('connecting', 'Connecting…');
   // Everything here runs inside the tap gesture: iOS refuses audio otherwise.
   // 1) Tell WebKit this page is a call BEFORE the mic opens.
   // 2) Reply audio is rendered as a MediaStream track (see lib/appCallOutput.js),
@@ -1268,7 +1279,8 @@ async function startAppCallSession() {
   } catch {
     stream.getTracks().forEach((t) => t.stop());
     output.dispose();
-    finishAppCallUi('The call address is invalid. PUBLIC_ASSISTANT_WS_URL must be a wss:// address');
+    console.error('[call] PUBLIC_ASSISTANT_WS_URL is not a valid wss:// address');
+    finishAppCallUi('The call couldn\u2019t start. Try again later');
     return;
   }
   ws.binaryType = 'arraybuffer';
@@ -1367,12 +1379,10 @@ async function startAppCallSession() {
     call.nextTime += audio.duration;
     call.sources.add(src);
     $('waveRow')?.classList.add('speaking');
-    if (!call.muted) setCallStatePill('speaking', 'Emysa is speaking');
     src.onended = () => {
       call.sources.delete(src);
       if (!call.sources.size && appCall === call) {
         $('waveRow')?.classList.remove('speaking');
-        if (!call.muted) setCallStatePill('listening', 'Connected · Listening');
       }
     };
   };
@@ -1406,13 +1416,13 @@ async function startAppCallSession() {
       if (msg?.type === 'interrupt') { clearPlayback(); return; }
       const info = describeAppCallMessage(msg);
       if (!info) return;
-      if (info.kind === 'error') { call.explained = true; finishAppCallUi(info.text); return; }
+      if (info.kind === 'error') { console.warn('[call] service error', msg); call.explained = true; finishAppCallUi(info.text); return; }
       if (info.kind === 'ended') { call.ended = true; finishAppCallUi('Call ended', { close: true }); return; }
       if (msg.type === 'ready') {
         call.opened = true;
         call.briefable = true;
         startMic();
-        setCallStatePill('listening', 'Connected · Listening');
+        applyCallPill(assistantCallPill({ muted: assistantMuted }));
         call.transcriptTimer = setInterval(pollTranscript, 1200);
       }
       return;
@@ -1424,6 +1434,7 @@ async function startAppCallSession() {
   const onGone = (event) => {
     if (appCall !== call) return;
     const text = describeAppCallClose({ opened: call.opened, code: event?.code, explained: call.explained, ended: call.ended });
+    if (text) console.warn('[call] socket closed', { opened: call.opened, code: event?.code });
     if (text) finishAppCallUi(text);
     else stopAppCallSession();
   };
@@ -1654,7 +1665,7 @@ $('addContactBtn').addEventListener('click', async () => {
 async function callApi(url, body, method = 'POST') {
   const response = await authedFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Request failed. Please try again.');
+  if (!response.ok) throw new Error(userError(data.error, 'Request failed. Please try again.'));
   return data;
 }
 
@@ -1997,18 +2008,7 @@ function applyCallStatusUpdate(callRow) {
       ensureCallTimer();
       playConnectedChime();
     }
-    if (callAiMuted) {
-      setCallStatePill('muted', 'Emysa muted');
-    } else {
-      const last = Array.isArray(callRow.transcript) && callRow.transcript.length
-        ? callRow.transcript[callRow.transcript.length - 1]
-        : null;
-      if (last && (last.speaker === 'ai' || last.speaker === 'assistant')) {
-        setCallStatePill('speaking', 'Emysa speaking…');
-      } else {
-        setCallStatePill('connected', 'Connected · Live');
-      }
-    }
+    applyCallPill(answeredCallPill({ aiMuted: callAiMuted }));
   } else if (['completed', 'failed', 'no_answer', 'busy', 'canceled'].includes(st)) {
     stopRingback();
     setCallStatePill('ended', CALL_ENDED_LABELS[st] || `Call ${String(st).replace('_', ' ')}`);
@@ -2108,7 +2108,7 @@ function openCallScreen(callId, toNumber, contactName) {
   $('callMuteBtn').onclick = async () => {
     callAiMuted = !callAiMuted;
     $('callMuteBtn').classList.toggle('active', callAiMuted);
-    setCallStatePill(callAiMuted ? 'muted' : 'connected', callAiMuted ? 'Emysa muted' : 'Connected · Live');
+    applyCallPill(answeredCallPill({ aiMuted: callAiMuted }));
     await authedFetch('/api/calls?action=mute', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2160,11 +2160,11 @@ async function toggleCallMonitor() {
       $('callAudioBtn').classList.remove('active');
       $('callAudioBtn').classList.add('monitorMuted');
       $('callAudioBtn').setAttribute('aria-label', 'Monitoring muted — tap to stop listening');
-      setCallStatePill('muted', 'Listening · muted');
+      applyCallPill(listenInPill({ muted: true }));
       return;
     }
     stopCallMonitor();
-    setCallStatePill('connected', 'Monitor off');
+    applyCallPill(answeredCallPill({ aiMuted: callAiMuted }));
     return;
   }
   const callId = activeCallScreenId;
@@ -2199,12 +2199,12 @@ async function toggleCallMonitor() {
     payload = await resp.json().catch(() => ({}));
     if (!resp.ok) {
       abandonCtx();
-      setCallStatePill('connecting', payload?.error || 'Monitoring unavailable');
+      setCallStatePill('connecting', userError(payload?.error, 'Listen-in isn\u2019t available right now'));
       return;
     }
   } catch {
     abandonCtx();
-    setCallStatePill('connecting', 'Could not reach the app server to start listen-in. Check your connection');
+    setCallStatePill('connecting', 'Couldn\u2019t start listen-in. Check your connection');
     return;
   }
   if (activeCallScreenId !== callId) { abandonCtx(); return; } // screen changed while fetching
@@ -2213,7 +2213,8 @@ async function toggleCallMonitor() {
     startCallMonitor(payload.url, callId, ctx);
   } catch (err) {
     abandonCtx();
-    setCallStatePill('connecting', `Could not start listen-in: ${String(err?.message || 'audio error').slice(0, 80)}`);
+    console.warn('[listen-in] start failed', err);
+    setCallStatePill('connecting', 'Couldn\u2019t start listen-in. Try again');
   }
 }
 
@@ -2300,7 +2301,8 @@ function startCallMonitor(url, callId, unlockedCtx) {
     ws = new WebSocket(url);
   } catch (err) {
     try { ctx.close(); } catch {}
-    setCallStatePill('connecting', 'Listen-in address is invalid. PUBLIC_ASSISTANT_WS_URL must be a wss:// address');
+    console.error('[listen-in] PUBLIC_ASSISTANT_WS_URL is not a valid wss:// address', err);
+    setCallStatePill('connecting', 'Listen-in isn\u2019t available right now');
     return;
   }
   ws.binaryType = 'arraybuffer';
@@ -2315,7 +2317,7 @@ function startCallMonitor(url, callId, unlockedCtx) {
     stopCallMonitor();
     setCallStatePill('connecting', text);
   };
-  setCallStatePill('connecting', 'Connecting to call audio');
+  setCallStatePill('connecting', 'Connecting…');
   $('callAudioBtn').classList.add('active');
   $('callAudioBtn').setAttribute('aria-label', 'Listening in - tap to mute listening');
 
@@ -2327,7 +2329,7 @@ function startCallMonitor(url, callId, unlockedCtx) {
       let msg = null;
       try { msg = JSON.parse(event.data); } catch {}
       if (handleLiveTranscriptMessage(msg, callId)) return;
-      if (msg?.type === 'ended') { stopCallMonitor(); setCallStatePill('connected', 'Call ended'); return; }
+      if (msg?.type === 'ended') { stopCallMonitor(); setCallStatePill('ended', 'Call ended'); return; }
       const info = describeMonitorMessage(msg);
       if (msg?.type === 'ready') {
         mon.opened = true;
@@ -2349,7 +2351,7 @@ function startCallMonitor(url, callId, unlockedCtx) {
     if (!mon.gotAudio) {
       mon.gotAudio = true;
       clearTimeout(mon.noAudioTimer);
-      if (mon.state === 'live') setCallStatePill('connected', 'Listening in - both sides');
+      if (mon.state === 'live') applyCallPill(answeredCallPill({ aiMuted: callAiMuted }));
     }
     const { rate, samples } = frame;
     // Collect ~80 ms before scheduling: 50 tiny nodes a second per side was
@@ -2372,6 +2374,7 @@ function startCallMonitor(url, callId, unlockedCtx) {
   const onGone = (event) => {
     if (callMonitor !== mon) return;
     const text = describeMonitorClose({ opened: mon.opened, code: event?.code, hadAudio: mon.gotAudio, alreadyExplained: mon.explained });
+    if (text) console.warn('[listen-in] socket closed', { opened: mon.opened, code: event?.code });
     if (text) fail(text);
     else { clearTimeout(mon.noAudioTimer); stopCallMonitor(); }
   };
@@ -2498,10 +2501,6 @@ function renderTranscript(history) {
   panel.textContent = '';
   const items = Array.isArray(history) ? history : [];
   if (items.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'transcriptEmptyHint';
-    empty.textContent = 'Live transcript will appear here as the conversation unfolds…';
-    panel.appendChild(empty);
     $('waveRow')?.classList.remove('speaking');
     return;
   }
@@ -2913,7 +2912,7 @@ async function callAgainFromDetail() {
       }
       return;
     }
-    if (!resp.ok) throw new Error(data.error || 'Could not place the call.');
+    if (!resp.ok) throw new Error(userError(data.error, 'Could not place the call.'));
     const dbCallId = data.dbCallId || data.callId;
     trackActiveCall(dbCallId, c.to_number, name);
     $('callDetailDialog').close();
@@ -3647,7 +3646,7 @@ async function cmApi(action, { method = 'GET', query = {}, body } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(data.error || `Something went wrong (HTTP ${resp.status}). Try again.`);
+  if (!resp.ok) throw new Error(userError(data.error, `Something went wrong (HTTP ${resp.status}). Try again.`));
   return data;
 }
 const cmSay = (text) => { $('cmStatus').textContent = text || ''; };
@@ -4424,7 +4423,7 @@ function renderTelegramStatus(tg) {
   const subEl = $('telegramAccountSub');
   const btn = $('telegramConnectBtn');
   if (tg?.status === 'connected') {
-    statusEl.textContent = `Connected as ${tg.displayName || 'Telegram user'}`;
+    statusEl.textContent = `Connected as ${friendlyAccountName(tg.displayName, 'Telegram user')}`;
     subEl.textContent = tg.phoneLast4 ? `Ending in ${tg.phoneLast4}` : '';
     btn.textContent = 'Disconnect';
     btn.onclick = async () => { await authedFetch('/api/social-calling?action=telegram-disconnect', { method: 'POST' }); loadSocialAccounts(); };
@@ -4441,7 +4440,7 @@ function renderWhatsappStatus(wa) {
   const subEl = $('whatsappAccountSub');
   const btn = $('whatsappConnectBtn');
   if (wa?.status === 'connected') {
-    statusEl.textContent = `Connected as ${wa.displayName || 'WhatsApp user'}`;
+    statusEl.textContent = `Connected as ${friendlyAccountName(wa.displayName, 'WhatsApp user')}`;
     subEl.textContent = '';
     btn.textContent = 'Disconnect';
     btn.onclick = async () => { await authedFetch('/api/social-calling?action=whatsapp-disconnect', { method: 'POST' }); loadSocialAccounts(); };
@@ -4463,7 +4462,7 @@ $('telegramSendCodeBtn').addEventListener('click', async () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone }),
     });
     const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || 'Could not send code');
+    if (!resp.ok) throw new Error(userError(data.error, 'Could not send code'));
     $('telegramLoginForm').classList.add('hidden');
     $('telegramOtpForm').classList.remove('hidden');
   } catch (err) {
@@ -4484,7 +4483,7 @@ $('telegramVerifyBtn').addEventListener('click', async () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, password }),
     });
     const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || 'Could not verify code');
+    if (!resp.ok) throw new Error(userError(data.error, 'Could not verify code'));
     if (data.status === 'needs_password') {
       $('telegramPasswordField').classList.remove('hidden');
       $('telegramLoginError').textContent = 'This account has 2FA — enter your password too.';
@@ -4710,7 +4709,7 @@ async function lineApi(action, { method = 'GET', body, query = '' } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(data.error || 'Something went wrong. Please try again.');
+  if (!resp.ok) throw new Error(userError(data.error, 'Something went wrong. Please try again.'));
   return data;
 }
 

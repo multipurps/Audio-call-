@@ -27,14 +27,14 @@ test('a service frame decodes to rate and samples (unaligned-safe)', () => {
 });
 
 test('service messages become plain-language statuses', () => {
-  assert.match(describeAppCallMessage({ type: 'error', reason: 'auth-refused' }).text, /ASSISTANT_BRIDGE_SECRET/);
+  assert.doesNotMatch(describeAppCallMessage({ type: 'error', reason: 'auth-refused' }).text, /SECRET|Vercel|service/i);
   assert.equal(describeAppCallMessage({ type: 'hangup' }).kind, 'ended');
   assert.equal(describeAppCallMessage({ type: 'ready' }).kind, 'info');
   assert.equal(describeAppCallMessage({ type: 'x' }), null);
 });
 
 test('closes are explained once, and a normal end is silent', () => {
-  assert.match(describeAppCallClose({ opened: false }), /PUBLIC_ASSISTANT_WS_URL/);
+  assert.doesNotMatch(describeAppCallClose({ opened: false }), /PUBLIC_|wss|Render|service/i);
   assert.equal(describeAppCallClose({ opened: true, ended: true }), null);
   assert.equal(describeAppCallClose({ opened: true, explained: true }), null);
   assert.match(describeAppCallClose({ opened: true, code: 1006 }), /dropped/);

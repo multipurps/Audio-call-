@@ -9,7 +9,7 @@
 <title>Emysa</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-10-07.3">
+<link rel="stylesheet" href="styles.css?v=2026-10-07.5">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -77,14 +77,31 @@
       // ever load. Without this, a script error or a rejected promise
       // with no .catch (e.g. the Supabase CDN import failing on a flaky
       // connection) leaves the splash screen stuck with zero feedback.
-      function showBootError(message) {
+      function showBootError(message, detail) {
+        if (detail) console.error('[boot]', detail);
         var boot = document.getElementById('authBoot');
         if (boot && boot.style.display !== 'none') {
-          boot.innerHTML =
-            '<div style="text-align:left; padding:0 20px;">' +
-            '<div style="color:#ffb199; font-size:12px; margin-bottom:14px; white-space:pre-wrap; word-break:break-word; max-height:60vh; overflow-y:auto;">' + message + '</div>' +
-            '<button class="secondaryBtn" onclick="location.reload()" style="width:auto; padding:10px 20px; margin:0 auto; display:block;">Retry</button>' +
-            '</div>';
+          boot.textContent = '';
+          var wrap = document.createElement('div');
+          wrap.style.cssText = 'text-align:left; padding:0 20px;';
+          var msg = document.createElement('div');
+          msg.style.cssText = 'font-size:15px; margin-bottom:14px;';
+          msg.textContent = message;
+          wrap.appendChild(msg);
+          // Technical detail is for developers only: open the app with ?debug to see it.
+          if (detail && /[?&]debug\b/.test(location.search)) {
+            var pre = document.createElement('div');
+            pre.style.cssText = 'color:#ffb199; font-size:12px; margin-bottom:14px; white-space:pre-wrap; word-break:break-word; max-height:60vh; overflow-y:auto;';
+            pre.textContent = detail;
+            wrap.appendChild(pre);
+          }
+          var btn = document.createElement('button');
+          btn.className = 'secondaryBtn';
+          btn.textContent = 'Retry';
+          btn.onclick = function () { location.reload(); };
+          btn.style.cssText = 'width:auto; padding:10px 20px; margin:0 auto; display:block;';
+          wrap.appendChild(btn);
+          boot.appendChild(wrap);
         }
       }
       // A plain <script type="module" src="..."> deliberately hides the
@@ -94,11 +111,11 @@
       // rejected error object with a real message and stack.
       window.addEventListener('error', function (e) {
         var err = e.error || e.message;
-        showBootError('Script error: ' + ((err && err.stack) || (err && err.message) || String(err)));
+        showBootError('Something went wrong. Check your connection and try again.', 'Script error: ' + ((err && err.stack) || (err && err.message) || String(err)));
       });
       window.addEventListener('unhandledrejection', function (e) {
         var err = e.reason;
-        showBootError('Unhandled rejection: ' + ((err && err.stack) || (err && err.message) || String(err)));
+        showBootError('Something went wrong. Check your connection and try again.', 'Unhandled rejection: ' + ((err && err.stack) || (err && err.message) || String(err)));
       });
       setTimeout(function () {
         var boot = document.getElementById('authBoot');
@@ -109,8 +126,8 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-10-07.4').catch(function (err) {
-          showBootError('Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
+        import('./app.js?v=2026-10-07.5').catch(function (err) {
+          showBootError('Something went wrong. Check your connection and try again.', 'Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
       if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadApp);
