@@ -1,0 +1,14 @@
+emysa-tgcall (Phase 5 prototype)
+
+The call-signaling sequencing (requestCall/acceptCall/confirmCall/discardCall,
+signaling-blob relay, one-call-at-a-time busy decline, NTgCalls EXTERNAL-audio
+usage, the playback-on-microphone quirk and relay-to-RTCServer mapping) follows
+the approach documented and implemented in foobar26/tg2sip (Apache-2.0,
+Copyright 2026 Frank Egger), commit fab2613. No source files were copied; the
+code here is a re-implementation with a different structure. tg2sip's SIP/PJSUA2
+layer is intentionally not used.
+
+Runtime dependencies keep their own licenses:
+  ntgcalls (NTgCalls, pytgcalls/ntgcalls)   - see https://github.com/pytgcalls/ntgcalls
+  pyrogram 2.0.106                          - LGPL-3.0
+MarshalX/tgcalls (LGPL-3.0) was inspected for research only; nothing from it is used.

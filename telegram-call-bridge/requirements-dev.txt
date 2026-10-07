@@ -1,0 +1,4 @@
+ntgcalls==3.0.0
+pyrogram==2.0.106
+pytest>=8
+pytest-asyncio>=0.23

@@ -1,0 +1,19 @@
+[project]
+name = "emysa-tgcall"
+version = "0.5.0.dev0"
+description = "Emysa Phase 5 prototype: Telegram private calls (user account) <-> PCM bridge"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+telegram = ["pyrogram==2.0.106", "tgcrypto>=1.2.5"]
+media = ["ntgcalls==3.0.0"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "pyrogram==2.0.106", "ntgcalls==3.0.0"]
+
+[tool.setuptools.packages.find]
+include = ["emysa_tgcall*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = ["real_ntgcalls: uses the real ntgcalls engine (loopback, no Telegram servers)"]
