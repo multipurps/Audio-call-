@@ -70,30 +70,54 @@ def test_prompt_no_longer_trains_reflex_reactions():
     assert '"Mm, yeah."' not in p
     # The old backchannel policy asked for "mm"/"yeah" while they talk.
     assert 'light, occasional backchannels ("mm", "yeah")' not in p
-    assert "Mostly stay quiet while they are telling you something" in p
+    assert "Stay quiet while they are telling you something" in p
 
 
-def test_acknowledgement_phrases_are_limited_but_not_banned():
+def test_acknowledgement_sounds_are_suppressed_not_rationed():
     rules = _section(_prompt(), "PRIVATE BEHAVIOR RULES", "CALL OBJECTIVE")
-    for phrase in AUTOMATIC_ACKNOWLEDGEMENTS:
-        assert f'"{phrase}"' in rules, phrase
     flat = " ".join(rules.split())
-    assert "are not banned" in flat and "never a reflex" in flat
-    assert "Do not acknowledge every statement" in flat
+    for phrase in AUTOMATIC_ACKNOWLEDGEMENTS:
+        assert f'"{phrase}"' in flat, phrase
+    for phrase in ("Hmm", "I see", "Got it", "Right", "Yeah", "Yeahh", "Good", "Great", "Perfect", "That's correct", "Hun", "Mm-hmm"):
+        assert phrase in AUTOMATIC_ACKNOWLEDGEMENTS
+    assert "not a conversational tool" in flat
+    assert "as glue between turns" in flat
+    assert "Never swap in a different acknowledgement word" in flat
+    # The old "allowed in rare moments" wording must be gone.
+    assert "are not banned" not in flat and "rare moment" not in flat and "never a reflex" not in flat
+    for ok in ("answer", "pause", "disagree", "ask one specific question", "carry on"):
+        assert ok in flat, ok
     assert "Do not use filler to cover a pause" in flat
-    assert "A brief silence is fine" in flat
     assert "Do not agree just because they said something" in flat
 
 
-def test_audit_flags_reflexive_acknowledgements_across_replies():
-    reflex = ["I see.", "Perfect, thanks.", "I see. And the date?", "Great.", "I see.", "Good."]
-    assert "i see" in find_automatic_acknowledgements(reflex)
-    healthy = ["Friday at six, yes.", "How late are we talking?", "I had Friday. Did something move?", "Hmm, not sure. Probably eight?"]
-    assert find_automatic_acknowledgements(healthy) == []
-    # A single genuine use is allowed.
-    assert find_automatic_acknowledgements(["Okay, one sec.", "Perfect, that works.", "Friday then.", "Yeah."]) == []
-    assert acknowledgement_opener("I understand your frustration") == "i understand"
+def test_live_backchannel_policy_allows_no_sounds():
+    from app.live import _LIVE_POLICIES
+
+    flat = " ".join(_LIVE_POLICIES.split())
+    assert "short sound is fine" not in flat and "very short sound" not in flat
+    assert "Make no acknowledgement sounds at all" in flat
+    for w in ('"hmm"', '"mm-hmm"', '"yeah"', '"right"', '"I see"', '"got it"', '"good"', '"great"', '"perfect"', '"that\'s correct"'):
+        assert w in flat, w
+    assert "never cycle through different ones" in flat
+
+
+def test_live_prompt_never_invites_filler_or_acknowledgement_openers():
+    p = " ".join(_prompt().split())
+    assert "React first" not in p and '"Mm, yeah."' not in p
+    assert "Use small fillers" not in p and "Plain \"Hmm.\"" not in p
+
+
+def test_audit_flags_any_acknowledgement_opener():
+    for reply in ("I see.", "Got it, thanks.", "Right, so Friday.", "Yeahh, sure.", "Yeah.", "Good.", "Great.",
+                  "Perfect, that works.", "That's correct.", "Hun, listen.", "Mm-hmm.", "Hmm, not sure."):
+        assert acknowledgement_opener(reply), reply
+    assert find_automatic_acknowledgements(["Perfect, that works."]) == ["perfect"]
+    clean = ["Friday at six, yes.", "How late are we talking?", "I had Friday. Did something move?", "Not sure, I'd have to check."]
+    assert find_automatic_acknowledgements(clean) == []
     assert acknowledgement_opener("Friday works") is None
+    assert acknowledgement_opener("Rightly so, I think.") is None
+    assert acknowledgement_opener("Goodbye then.") is None
 
 
 # ------------------------------------------------------ instruction leakage
@@ -146,15 +170,26 @@ def test_narrating_behaviour_is_ruled_out():
 def test_opening_style_is_contextual_and_avoids_assistant_openers():
     opening = _section(_prompt(), "OPENING STYLE", "SPOKEN EXAMPLES")
     flat = " ".join(opening.split())
-    for banned in ('"Good."', '"Great."', '"Perfect."', '"How can I help you today?"'):
-        assert banned in flat
+    for banned in ('"Good."', '"Great."', '"Perfect."', '"Hmm."', '"Got it."', '"Right."', '"How can I help you today?"'):
+        assert banned in flat, banned
     assert "Never start with" in flat
-    assert "not a template" in flat
+    assert "Open from the actual purpose of the call" in flat
+    for default_opener in ("What's on your mind?", "What's going on?", "How can I help?", "What can I do for you?"):
+        assert f'"{default_opener}"' in flat, default_opener
+    assert 'generic "how are you"' in flat
     assert "Skip pleasantries when they answer sounding busy, upset, impatient or urgent" in flat
-    assert "few words of pleasantries are fine when the person sounds relaxed" in flat
     assert END_CALL_TOOL in flat
     assert "Can you hear me" not in opening
     assert "unless there is real evidence the audio is unclear" in " ".join(_prompt().split())
+
+
+def test_live_opening_note_is_tied_to_the_call_purpose():
+    from app.live import _LIVE_OPENING_AND_ENDING
+
+    flat = " ".join(_LIVE_OPENING_AND_ENDING.split())
+    assert "maybe a" not in flat and "let the call find its own pace" not in flat
+    assert "Open from the real purpose of the call" in flat
+    assert "What's on your mind?" in flat and "How can I help?" in flat
 
 
 def test_opening_uses_the_real_call_context():
@@ -209,7 +244,7 @@ def test_frustrated_caller_guidance_is_slower_and_specific():
 def test_casual_caller_guidance_loosens_up_without_reflexes():
     flat = " ".join(_prompt().split())
     assert "Relaxed or chatty: loosen up" in flat
-    assert "still apply" in flat
+    assert "no-acknowledgement-sounds rule still applies" in flat
     assert "Casual caller, looser" in _section(_prompt(), "SPOKEN EXAMPLES", None)
     assert classify_caller_state("haha no worries, what's up") == CALLER_CASUAL
     assert classify_caller_state("The venue is on Main Street") is None

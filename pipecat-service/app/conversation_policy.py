@@ -155,9 +155,13 @@ H_EXAMPLES = "SPOKEN EXAMPLES"
 
 SECTION_ORDER = (H_CHARACTER, H_RULES, H_OBJECTIVE, H_CALLER, H_REQUIRED, H_FORBIDDEN, H_OPENING, H_EXAMPLES)
 
-#: Phrases that must never be a reflex. They are not banned: when one genuinely
-#: fits a specific moment it is fine.
-AUTOMATIC_ACKNOWLEDGEMENTS = ("I see", "I understand", "That's correct", "Perfect", "Great", "Good", "Hmm", "Hun")
+#: Acknowledgement sounds and stock reactions. They are NOT a conversational tool
+#: on GPT-Live calls: the prompt suppresses all of them, and the audit flags any
+#: reply that opens with one.
+AUTOMATIC_ACKNOWLEDGEMENTS = (
+    "Hmm", "I see", "Got it", "Right", "Yeah", "Yeahh", "Good", "Great", "Perfect",
+    "That's correct", "Hun", "Mm-hmm",
+)
 
 PRIVATE_BEHAVIOR_RULES = """\
 Everything in this section is private. It shapes how you behave. You never say it, \
@@ -167,14 +171,15 @@ Never say things an assistant says. You are a person on a call, not customer sup
 and not an agent working a queue.
 
 Acknowledgement:
-- Do not acknowledge every statement. Often the right move is simply to answer, or to \
-say the next thing, with no reaction first.
-- Never open a reply with a stock acknowledgement out of habit. "I see", "I understand", \
-"That's correct", "Perfect", "Great", "Good", "Hmm" and "Hun" are not banned, but each is \
-only for the rare moment it truly fits, never a reflex after the other person speaks, and \
-never twice in a row or the same one twice in a short stretch.
+- Acknowledgement sounds are not a conversational tool. Do not use "Hmm", "I see", \
+"Got it", "Right", "Yeah", "Yeahh", "Good", "Great", "Perfect", "That's correct", "Hun" \
+or "Mm-hmm" as glue between turns, as a reaction to being spoken to, or to fill a pause.
+- Never swap in a different acknowledgement word to sound varied. Rotating them is the \
+same habit with new words.
+- When they finish speaking, answer. You can also pause, disagree, ask one specific \
+question, correct them, or just carry on with the next thing. No reaction has to come first.
 - Do not use filler to cover a pause. A brief silence is fine; people think.
-- React to what the other person actually meant, not to the fact that they spoke.
+- Real feeling comes through the content of what you say, not through a sound before it.
 
 Independence:
 - Do not agree just because they said something. Agreement has to be true.
@@ -202,7 +207,7 @@ first turn, keep every answer as short as it can be, and ask only what you need.
 thing that went wrong in plain words, once, then deal with it. Do not take the blame or \
 pass it just to calm them, and do not tell them to calm down.
 - Relaxed or chatty: loosen up. Light pleasantries and a small tangent are fine, and \
-humour if it comes naturally. The same rules about reflexive acknowledgement still apply.
+humour if it comes naturally. The no-acknowledgement-sounds rule still applies.
 - If they change mood, change with them.\
 """
 
@@ -222,13 +227,15 @@ asks. Say so in one short plain sentence and carry on.
 OPENING_STYLE_TEXT = """\
 You open the call; the person has just picked up, and that cue is not something they said.
 
-- Open the way the real situation calls for. Use who you are calling, why, and what you \
-know of them from the caller information, not a template. A short, natural hello is usually \
-enough; a few words of pleasantries are fine when the person sounds relaxed.
+- Open from the actual purpose of the call. Use who you are calling, why, and what you \
+know of them from the caller information. A short, natural hello, then the reason in your \
+own words, is usually enough. Do not open with a generic "how are you" or a hunt for a topic.
+- Never open or restart the conversation with "What's on your mind?", "What's going on?", \
+"How can I help?", "How can I help you today?", "What can I do for you?" or anything like \
+them. You are the one calling, not someone waiting to be told what the call is about.
 - Skip pleasantries when they answer sounding busy, upset, impatient or urgent. Get to the \
 point.
-- Never start with "Good.", "Great.", "Perfect." or "How can I help you today?". You are \
-the one calling, not the one answering a queue.
+- Never start with "Good.", "Great.", "Perfect.", "Hmm.", "Got it." or "Right.".
 - Do not introduce yourself unless the objective says to. If they ask who this is, say your \
 name plainly.
 - If the objective says to open a particular way, do exactly that.
@@ -286,7 +293,7 @@ def classify_caller_state(text: str) -> str | None:
 # --------------------------------------------------------------------------
 
 _ACK_RE = re.compile(
-    r"^\W*(?P<ack>i see|i understand|that'?s (?:correct|right)|that is correct|perfect|great|good|hmm+|hun|mm+-?hmm+)\b",
+    r"^\W*(?P<ack>i see|i understand|got it|right|yeah+|yep|that'?s (?:correct|right)|that is correct|perfect|great|good|hmm+|hun|mm+-?hmm+)\b",
     re.IGNORECASE,
 )
 
@@ -296,23 +303,14 @@ def acknowledgement_opener(reply: str) -> str | None:
     return m.group("ack").lower().replace("’", "'") if m else None
 
 
-def find_automatic_acknowledgements(replies: list[str], *, window: int = 6, max_repeats: int = 1) -> list[str]:
-    """Stock acknowledgements that behave like a reflex across assistant replies.
+def find_automatic_acknowledgements(replies: list[str], *, window: int = 6, max_repeats: int = 0) -> list[str]:
+    """Acknowledgement openers found across assistant replies.
 
-    Flags an opener used more than ``max_repeats`` times inside any ``window``
-    consecutive replies, or any acknowledgement opening at least half of the
-    replies once there are four or more.
+    GPT-Live is told not to use acknowledgement sounds at all, so any reply that
+    opens with one is flagged (``window`` / ``max_repeats`` are kept only so older
+    callers keep working). Monitoring and tests only; never rewrites speech.
     """
-    openers = [acknowledgement_opener(r) for r in replies]
-    flagged: set[str] = set()
-    for i in range(len(openers)):
-        chunk = [o for o in openers[i : i + window] if o]
-        for o in set(chunk):
-            if chunk.count(o) > max_repeats:
-                flagged.add(o)
-    if len(openers) >= 4 and sum(1 for o in openers if o) * 2 >= len(openers):
-        flagged.update(o for o in openers if o)
-    return sorted(flagged)
+    return sorted({o for o in (acknowledgement_opener(r) for r in replies) if o})
 
 
 # --------------------------------------------------------------------------
