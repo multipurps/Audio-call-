@@ -9,7 +9,7 @@
 <title>Emysa</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-10-07.7">
+<link rel="stylesheet" href="styles.css?v=2026-10-08.1">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -126,7 +126,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-10-07.7').catch(function (err) {
+        import('./app.js?v=2026-10-08.1').catch(function (err) {
           showBootError('Something went wrong. Check your connection and try again.', 'Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -281,7 +281,7 @@
       <button class="authBack" id="waNumBack" aria-label="Back"><svg viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
       <div class="authTitle authTitleLg">WhatsApp</div>
-      <div class="authSub">Enter the number on your WhatsApp.</div>
+      <div class="authSub">Input your WhatsApp number</div>
       <div class="field">
         <label>WhatsApp Number</label>
         <div class="inputWrap"><svg class="inputIconSvg phoneIc" viewBox="0 0 24 24"><use href="#ic-phone"/></svg><input type="tel" id="waNumInput" placeholder="Enter Your Number" autocomplete="tel"></div>

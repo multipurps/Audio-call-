@@ -162,7 +162,8 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .gsSpacer{flex:1;}
 .gsButtons{margin-top:auto;}
 
-.authBack{position:absolute; top:20px; left:0; width:38px; height:38px; border-radius:50%; background:var(--glass-bg); backdrop-filter:blur(16px) saturate(160%); -webkit-backdrop-filter:blur(16px) saturate(160%); border:1px solid var(--glass-border); display:flex; align-items:center; justify-content:center; color:var(--text); z-index:2;}
+/* Pinned to the top-left of the screen (below the status bar), not to the vertically-centred panel. */
+.authBack{position:fixed; top:calc(env(safe-area-inset-top, 0px) + 14px); left:24px; z-index:5; width:38px; height:38px; border-radius:50%; background:var(--glass-bg); backdrop-filter:blur(16px) saturate(160%); -webkit-backdrop-filter:blur(16px) saturate(160%); border:1px solid var(--glass-border); display:flex; align-items:center; justify-content:center; color:var(--text); z-index:2;}
 .authBack svg{width:18px; height:18px;}
 
 .gsDots{display:flex; justify-content:center; gap:6px; margin-bottom:20px;}
