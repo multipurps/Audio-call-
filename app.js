@@ -3208,59 +3208,11 @@ function renderBalance() {
   $('dashBalanceSub').textContent = homeBalance?.pending ? 'confirming payment…' : 'remaining';
 }
 
-// Payment bookkeeping the balance code below depends on (declared first so nothing
-// can reach it before it exists).
-const PAY_FLAG = 'emysa_pay_started';
-const PAY_FLAG_MAX_AGE_MS = 2 * 60 * 60 * 1000;
-const payPending = () => {
-  const at = Number(localStorage.getItem(PAY_FLAG) || 0);
-  if (at && Date.now() - at > PAY_FLAG_MAX_AGE_MS) { localStorage.removeItem(PAY_FLAG); return false; }
-  return Boolean(at);
-};
-
-let payWatching = false;
-
 async function loadBalance() {
   const resp = await authedFetch('/api/referrals?action=billing').catch(() => null);
   if (!resp?.ok) return;
-  applyBillingState(await resp.json());
-}
-
-const PAY_OUTCOME_SEEN = 'emysa_pay_outcome_seen';
-const PAY_OUTCOME_TEXT = {
-  failed: 'Payment failed. You were not charged.',
-  cancelled: 'Payment cancelled. You were not charged.',
-  expired: 'The payment window expired. You were not charged.',
-};
-
-// The one place billing state from the server is applied, whether it came from
-// opening Home, a refresh, returning from the payment page, or the polling loop.
-// The server reconciles with the payment provider on every call, so this never
-// has to trust anything the client remembered: "confirming payment" shows only
-// while the server says a payment is genuinely in flight, a failed or cancelled
-// payment clears it and says so once, and a paid one updates the balance.
-function applyBillingState(data) {
-  const before = homeBalance?.remaining;
-  homeBalance = { ...(homeBalance || {}), ...data };
+  homeBalance = await resp.json();
   renderBalance();
-  if (before != null && data.remaining > before) {
-    showToast(`${formatMinutes(data.remaining - before)} added`);
-    closeAddTime();
-  }
-  const outcome = data.outcome;
-  if (outcome && PAY_OUTCOME_TEXT[outcome.state] && localStorage.getItem(PAY_OUTCOME_SEEN) !== outcome.id) {
-    localStorage.setItem(PAY_OUTCOME_SEEN, outcome.id);
-    showToast(PAY_OUTCOME_TEXT[outcome.state]);
-    if (!$('addTimeScreen').classList.contains('hidden')) $('addTimeStatus').textContent = PAY_OUTCOME_TEXT[outcome.state];
-  }
-  if (!data.pending) {
-    localStorage.removeItem(PAY_FLAG);
-  } else {
-    // A payment is in flight on the server (e.g. the page was refreshed mid-payment):
-    // pick the checks back up even though this page never started it.
-    if (!payPending()) localStorage.setItem(PAY_FLAG, String(Date.now()));
-    watchPayment();
-  }
 }
 
 async function loadHomePeople() {
@@ -3359,6 +3311,14 @@ document.querySelectorAll('[data-more]').forEach((btn) => btn.addEventListener('
 // navigated away. The minutes are credited server-side (signed webhook, or the
 // verify call below when the app comes back to the foreground), so nothing here
 // can add minutes by itself.
+const PAY_FLAG = 'emysa_pay_started';
+const PAY_FLAG_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+const payPending = () => {
+  const at = Number(localStorage.getItem(PAY_FLAG) || 0);
+  if (at && Date.now() - at > PAY_FLAG_MAX_AGE_MS) { localStorage.removeItem(PAY_FLAG); return false; }
+  return Boolean(at);
+};
+
 let addTimeQty = 1;
 
 // "5 hours" / "5 call hours"; odd lengths fall back to minutes.
@@ -3448,11 +3408,19 @@ $('addTimeClose').addEventListener('click', closeAddTime);
 $('addTimeTerms').addEventListener('click', () => openSheet('sheet-terms'));
 $('addTimePrivacy').addEventListener('click', () => openSheet('sheet-privacy'));
 
+let payWatching = false;
 async function verifyPayment() {
   const resp = await authedFetch('/api/referrals?action=billing-verify', { method: 'POST' }).catch(() => null);
   if (!resp?.ok) return null;
   const data = await resp.json();
-  applyBillingState({ ...data, payments: true });
+  const before = homeBalance?.remaining;
+  homeBalance = { ...(homeBalance || {}), ...data, payments: true };
+  renderBalance();
+  if (before != null && data.remaining > before) {
+    showToast(`${formatMinutes(data.remaining - before)} added`);
+    closeAddTime();
+  }
+  if (!data.pending) localStorage.removeItem(PAY_FLAG);
   return data;
 }
 

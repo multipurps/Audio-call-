@@ -1,3 +1,4 @@
+import { userError } from '../lib/userFacing.js';
 import { LANGUAGE_NAMES } from '../lib/callLanguages.js';
 // Languages the transcription model accepts as a pinned language. Igbo is not
 // one of them, so it is left to auto-detect.
@@ -867,7 +868,7 @@ async function sendMessage(req, res, supabase, userId) {
         return respond({ channelUsed: callChannel, callId: callRow.id, toNumber: digitsOnly, contactName: contact?.name || null });
       } catch (err) {
         await markSocialRowFailed(callRow, err.message);
-        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${label} on ${channelName}: ${err.message}`, callRow?.id || null, msgSource));
+        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${label} on ${channelName}: ${userError(err.message, 'it did not go through')}`, callRow?.id || null, msgSource));
         return respond({ channelUsed: callChannel });
       }
     }

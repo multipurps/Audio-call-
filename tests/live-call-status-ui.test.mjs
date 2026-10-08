@@ -135,3 +135,13 @@ test('both transcript render paths mark Emysa lines with the same ai class', () 
   assert.match(app, /normalizedSpeaker = \(speaker === 'ai' \|\| speaker === 'assistant'\) \? 'ai' : 'user'/);
   assert.match(app, /const roleClass = isAi \? 'ai' : 'caller'/);
 });
+
+// ---- a revoked WhatsApp link says what to do, not relay wording ------------------------------------------
+import { userError } from '../lib/userFacing.js';
+
+test('a logged-out / unavailable WhatsApp worker tells the user to reconnect', () => {
+  for (const raw of ['not paired', 'worker not available', 'whatsapp session logged out', 'session parked: worker capacity reached']) {
+    assert.match(userError(raw, 'x'), /WhatsApp is disconnected\. Reconnect it in Profile/);
+  }
+  assert.equal(userError('A call to this number is already in progress', 'x'), 'A call to this number is already in progress');
+});
