@@ -4686,13 +4686,17 @@ $('whatsappPhoneSubmitBtn').addEventListener('click', async () => {
 // Shown inside the login screen, same panels as sign-in. Twilio (phone) exists
 // only for a user who verified or rented a number; the server enforces that.
 // This just walks them through getting a line, then a short profile.
-let lineState = { loaded: false, line: null, channels: { phone: false, whatsapp: false }, rent: { enabled: false, monthlyUsd: null, countries: [] } };
+let lineState = { loaded: false, line: null, channels: { phone: false, whatsapp: false, telegram: false }, rent: { enabled: false, monthlyUsd: null, countries: [] } };
 let lineVerifyTimer = null;
 let lineWaTimer = null;
 let lineSetupVoluntary = false; // opened from Profile/menu (can go back) vs required first run
 
 const hint = (id, text) => { $(id).textContent = text || ''; };
-function stopLinePolls() { clearInterval(lineVerifyTimer); clearInterval(lineWaTimer); lineVerifyTimer = lineWaTimer = null; }
+function stopLinePolls() {
+  clearInterval(lineVerifyTimer); clearInterval(lineWaTimer); lineVerifyTimer = lineWaTimer = null;
+  if (waVisibilityHandler) { document.removeEventListener('visibilitychange', waVisibilityHandler); window.removeEventListener('focus', waVisibilityHandler); waVisibilityHandler = null; }
+}
+let waVisibilityHandler = null;
 
 function showSetupPanel(id) {
   $('authBoot').style.display = 'none';
@@ -4752,7 +4756,7 @@ async function lineApi(action, { method = 'GET', body, query = '' } = {}) {
 // unknown state means no gate (the server still refuses Twilio without a line).
 async function onboardingStep() {
   await loadLineState();
-  if (lineState.loaded && !lineState.channels.phone && !lineState.channels.whatsapp) return 'line';
+  if (lineState.loaded && !lineState.channels.phone && !lineState.channels.whatsapp && !lineState.channels.telegram) return 'line';
   try {
     const { data, error } = await supabase.from('profiles').select('setup_completed').eq('user_id', currentUser.id).maybeSingle();
     if (!error && data && data.setup_completed === false) return 'profile';
@@ -4886,10 +4890,88 @@ $('rentSearchBtn').addEventListener('click', async () => {
   finally { $('rentSearchBtn').disabled = false; }
 });
 
+// -- pairing code display: one contained box (two groups of cells, never wraps) + copy
+function renderPairCode(el, code) {
+  const raw = String(code || '').trim();
+  el.dataset.code = raw;
+  el.textContent = '';
+  if (!raw) {
+    const w = document.createElement('span'); w.className = 'pw'; w.textContent = 'Getting your code…';
+    el.appendChild(w);
+    return;
+  }
+  const clean = raw.replace(/[\s-]/g, '');
+  const half = Math.ceil(clean.length / 2);
+  const groups = raw.includes('-') ? raw.split('-') : [clean.slice(0, half), clean.slice(half)];
+  groups.forEach((g, i) => {
+    if (i) { const d = document.createElement('span'); d.className = 'pd'; d.textContent = '–'; el.appendChild(d); }
+    [...g].forEach((ch) => { const c = document.createElement('span'); c.className = 'pc'; c.textContent = ch; el.appendChild(c); });
+  });
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch { /* fall through (older iOS / PWA) */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;font-size:16px;';
+    document.body.appendChild(ta); ta.focus(); ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch { return false; }
+}
+
+$('waCodeCopy').addEventListener('click', async () => {
+  const code = $('waCodeValue').dataset.code;
+  if (!code) return;
+  const label = $('waCodeCopy').querySelector('span');
+  const ok = await copyText(code);
+  label.textContent = ok ? 'Copied' : 'Press and hold the code to copy';
+  setTimeout(() => { label.textContent = 'Copy code'; }, 2000);
+});
+
 // -- WhatsApp: number page, then a separate page with the pairing code
 $('lineWaBtn').addEventListener('click', () => { hint('waNumHint', ''); showSetupPanel('panelWaNumber'); });
 $('waNumBack').addEventListener('click', showLineSetup);
 $('waCodeBack').addEventListener('click', () => { stopLinePolls(); showSetupPanel('panelWaNumber'); });
+
+function showWaCode(code) {
+  renderPairCode($('waCodeValue'), code);
+  $('waCodeCopy').disabled = !code;
+}
+
+// One status check. Used by the timer, by coming back to the app (iOS freezes a
+// backgrounded page while you type the code into WhatsApp, so the timer alone is
+// not enough) and by the "I've linked it" button. Failures are shown, not swallowed.
+let waChecking = false;
+let waFailStreak = 0;
+async function checkWaLinked({ manual = false } = {}) {
+  if (waChecking) return;
+  waChecking = true;
+  if (manual) { $('waCodeCheck').disabled = true; hint('waCodeHint', 'Checking…'); }
+  try {
+    const r = await authedFetch('/api/social-calling?action=whatsapp-status');
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || `Status check failed (${r.status})`);
+    waFailStreak = 0;
+    if (d.pairingCode) showWaCode(d.pairingCode);
+    if (d.status === 'connected') { stopLinePolls(); await lineStepDone(); return; }
+    if (d.status === 'disconnected') {
+      stopLinePolls();
+      hint('waCodeHint', 'This link expired. Go back and get a new code.');
+      return;
+    }
+    hint('waCodeHint', manual ? 'Not linked yet. Enter the code in WhatsApp, then tap again.' : 'Waiting for you to link…');
+  } catch (err) {
+    waFailStreak += 1;
+    if (manual || waFailStreak >= 3) hint('waCodeHint', `Can't reach the server (${err.message}). Retrying…`);
+  } finally {
+    waChecking = false;
+    $('waCodeCheck').disabled = false;
+  }
+}
+$('waCodeCheck').addEventListener('click', () => checkWaLinked({ manual: true }));
+
 $('waNumSubmit').addEventListener('click', async () => {
   const phone = $('waNumInput').value.trim();
   if (!phone) { hint('waNumHint', 'Enter your WhatsApp number first.'); return; }
@@ -4902,22 +4984,65 @@ $('waNumSubmit').addEventListener('click', async () => {
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.error || 'Could not get a pairing code');
     if (data.status === 'connected') { lineStepDone(); return; }
-    const showCode = (code) => { $('waCodeValue').textContent = code.split('').join(' '); };
-    $('waCodeValue').textContent = '— — — — — — — —';
+    showWaCode(data.pairingCode || '');
     hint('waCodeHint', 'Waiting for you to link…');
     showSetupPanel('panelWaCode');
-    if (data.pairingCode) showCode(data.pairingCode);
-    clearInterval(lineWaTimer);
-    lineWaTimer = setInterval(async () => {
-      try {
-        const r = await authedFetch('/api/social-calling?action=whatsapp-status');
-        const d = await r.json();
-        if (d.pairingCode) showCode(d.pairingCode);
-        if (d.status === 'connected') { clearInterval(lineWaTimer); lineStepDone(); }
-      } catch { /* keep polling */ }
-    }, 3000);
+    stopLinePolls();
+    waFailStreak = 0;
+    lineWaTimer = setInterval(() => checkWaLinked(), 3000);
+    waVisibilityHandler = () => { if (!document.hidden) checkWaLinked(); };
+    document.addEventListener('visibilitychange', waVisibilityHandler);
+    window.addEventListener('focus', waVisibilityHandler);
   } catch (err) { hint('waNumHint', err.message); }
   finally { $('waNumSubmit').disabled = false; }
+});
+
+// -- Telegram: number page, then a code page (plus 2FA password if the account has one)
+$('lineTgBtn').addEventListener('click', () => { hint('tgNumHint', ''); showSetupPanel('panelTgNumber'); });
+$('tgNumBack').addEventListener('click', showLineSetup);
+$('tgCodeBack').addEventListener('click', () => showSetupPanel('panelTgNumber'));
+$('tgNumSubmit').addEventListener('click', async () => {
+  const phone = $('tgNumInput').value.trim();
+  if (!phone) { hint('tgNumHint', 'Enter your Telegram number first.'); return; }
+  $('tgNumSubmit').disabled = true;
+  hint('tgNumHint', '');
+  try {
+    const resp = await authedFetch('/api/social-calling?action=telegram-start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(userError(data.error, 'Could not send the code'));
+    $('tgCodeInput').value = ''; $('tgPasswordInput').value = '';
+    $('tgPasswordField').classList.add('hidden');
+    hint('tgCodeHint', '');
+    showSetupPanel('panelTgCode');
+  } catch (err) { hint('tgNumHint', err.message); }
+  finally { $('tgNumSubmit').disabled = false; }
+});
+$('tgCodeSubmit').addEventListener('click', async () => {
+  const code = $('tgCodeInput').value.trim();
+  const password = $('tgPasswordInput').value;
+  const needPw = !$('tgPasswordField').classList.contains('hidden');
+  if (!needPw && !code) { hint('tgCodeHint', 'Enter the code Telegram sent you.'); return; }
+  if (needPw && !password.trim()) { hint('tgCodeHint', 'Enter your Telegram 2FA password.'); return; }
+  $('tgCodeSubmit').disabled = true;
+  hint('tgCodeHint', '');
+  try {
+    // Same two-step contract as the Connected accounts screen: code first, then password alone.
+    const resp = await authedFetch('/api/social-calling?action=telegram-verify', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(needPw ? { password } : { code }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(userError(data.error, 'Could not verify the code'));
+    if (data.status === 'needs_password') {
+      $('tgPasswordField').classList.remove('hidden');
+      hint('tgCodeHint', 'This account has 2FA. Enter your Telegram password.');
+      return;
+    }
+    await lineStepDone();
+  } catch (err) { hint('tgCodeHint', err.message); }
+  finally { $('tgCodeSubmit').disabled = false; }
 });
 
 // -- profile step: name, language, country (voice optional)

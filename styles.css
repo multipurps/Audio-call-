@@ -902,6 +902,14 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .lineChoiceBtn:disabled .recoPill{background:transparent; border:1px solid var(--glass-border); color:var(--dim);}
 .waIcon{flex:none; color:var(--text);}
 .authCode{text-align:center; margin:6px 0 14px; font-size:34px;}
+/* Pairing code: one contained box, never wraps. Two groups of cells that shrink with the screen width. */
+.pairCodeBox{width:100%; box-sizing:border-box; margin:18px 0 12px; padding:16px 10px; border-radius:18px; background:var(--glass-bg); border:1px solid var(--glass-border); overflow:hidden;}
+.pairCode{display:flex; flex-wrap:nowrap; align-items:center; justify-content:center; gap:clamp(3px,1.4vw,7px); min-height:44px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-weight:800; color:var(--text);}
+.pairCode .pc{flex:0 1 auto; min-width:0; width:clamp(26px,8.6vw,38px); height:clamp(36px,11vw,48px); display:flex; align-items:center; justify-content:center; font-size:clamp(18px,6vw,26px); border-radius:10px; background:rgba(255,255,255,0.07); user-select:all; -webkit-user-select:all;}
+.pairCode .pd{flex:none; width:clamp(8px,2.4vw,14px); text-align:center; color:var(--dim); font-size:clamp(18px,6vw,26px);}
+.pairCode .pw{font-size:14px; font-weight:600; color:var(--dim); letter-spacing:0;}
+.pairCopyBtn{display:flex; align-items:center; justify-content:center; gap:8px;}
+.pairCopyBtn:disabled{opacity:0.5;}
 .field select{padding-right:34px; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%23999' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 10px center; background-size:18px;}
 .field select option{background:var(--coffee); color:var(--text);}
 .rentResults{margin-top:12px; display:flex; flex-direction:column; gap:8px; max-height:34vh; overflow-y:auto;}

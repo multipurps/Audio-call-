@@ -578,8 +578,14 @@ async function whatsappStatus(req, res, supabase, userId) {
   if (!row?.wacalls_session_id) return res.status(200).json({ status: 'disconnected' });
   let detail = null;
   const live = await resolveWhatsappStatus(row, async () => { detail = await wacallsDetail(userId, row.wacalls_session_id); return detail; });
-  if (live.update) await supabase.from('whatsapp_accounts').update(live.update).eq('user_id', userId);
-  return res.status(200).json({ status: live.status, qr: detail?.qr || null, pairingCode: detail?.code || null, displayName: live.displayName });
+  if (live.update) {
+    // Upsert, not update, and check the result: the app decides whether setup
+    // is finished from this row, so a silently failed write left people on
+    // the link screen even though the relay was paired.
+    const { error: saveErr } = await supabase.from('whatsapp_accounts').upsert({ user_id: userId, ...live.update }, { onConflict: 'user_id' });
+    if (saveErr) console.error('whatsapp-status: could not save status:', saveErr.message);
+  }
+  return res.status(200).json({ status: live.status, qr: detail?.qr || null, pairingCode: detail?.code || null, displayName: live.displayName, unreachable: Boolean(live.unreachable) });
 }
 
 async function whatsappDisconnect(req, res, supabase, userId) {
