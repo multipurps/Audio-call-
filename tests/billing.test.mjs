@@ -95,7 +95,7 @@ test('checkout: server decides the price from the quantity; bad quantities and m
   assert.equal(sent.pack.amount, '60.00');
   assert.equal(sent.pack.minutes, 600);
   assert.equal(sent.successUrl, 'https://app.example/pay-return.html');
-  assert.equal(sent.cancelUrl, 'https://app.example/pay-return.html?pay=cancel');
+  assert.equal(sent.cancelUrl, `https://app.example/pay-return.html?pay=cancel&ref=${sent.reference}`, 'the cancel page carries the purchase reference so it can tell the server');
   const row = f.db.tables.minute_purchases[0];
   assert.equal(row.minutes, 600);
   assert.equal(row.amount, 60);

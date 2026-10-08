@@ -26,9 +26,22 @@
 <script>
   // This page only reports where you are. It never changes a balance: minutes
   // are added by Emysa's server after Bachs confirms the payment.
-  if (new URLSearchParams(location.search).get('pay') === 'cancel') {
+  const params = new URLSearchParams(location.search);
+  if (params.get('pay') === 'cancel') {
     document.getElementById('title').textContent = 'Payment cancelled';
     document.getElementById('note').textContent = 'You have not been charged. You can add time again from Home.';
+    // Tell the server now, so Home stops showing "confirming payment" at once.
+    // The server asks the payment provider first: a checkout that was in fact paid
+    // is credited, never cancelled.
+    const ref = params.get('ref');
+    if (ref) {
+      fetch('/api/referrals?action=billing-cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference: ref }),
+        keepalive: true,
+      }).catch(() => {});
+    }
   }
 </script>
 </body>
