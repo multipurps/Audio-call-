@@ -949,18 +949,21 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .dashIconBtn{width:44px; height:44px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; color:var(--icon-color); background:var(--glass-bg); border:1px solid var(--glass-border);}
 
 .dashCard{background:var(--glass-bg); border:1px solid var(--glass-border); border-radius:24px;}
-.dashHero{position:relative; overflow:hidden; display:flex; flex-direction:column; justify-content:flex-end; min-height:clamp(220px, 62vw, 300px); padding:0 12px 14px; border-radius:28px; background:var(--glass-bg); border:1px solid var(--glass-border);}
+.dashHero{position:relative; overflow:hidden; display:flex; flex-direction:column; min-height:clamp(420px, 118vw, 560px); margin:0 -18px; padding:0 18px 18px; border-radius:0 0 32px 32px; background:var(--glass-bg);}
+.dashHero::before{content:""; position:absolute; inset:0 0 auto 0; height:190px; z-index:1; pointer-events:none; background:linear-gradient(to bottom, rgba(0,0,0,.6), rgba(0,0,0,0));}
+.dashHero > .dashHeader{position:relative; z-index:2; flex:none;}
+.dashHero .dashIconBtn{background:rgba(var(--coffee-light-rgb),0.55); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);}
 .dashHeroMedia{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0;}
 .dashHeroMedia[hidden]{display:none;}
-.dashHero .dashBalance{position:relative; z-index:1; background:rgba(var(--coffee-light-rgb),0.78); backdrop-filter:blur(18px) saturate(160%); -webkit-backdrop-filter:blur(18px) saturate(160%); box-shadow:0 10px 30px rgba(0,0,0,.35);}
-.dashBalance{display:flex; align-items:center; gap:14px; padding:16px 16px 16px 18px;}
-.dashBalanceIcon{width:52px; height:52px; flex:none; border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--accent); border:1.5px solid var(--glass-border);}
+.dashHero .dashBalance{position:relative; z-index:2; margin-top:auto; background:rgba(var(--coffee-light-rgb),0.78); backdrop-filter:blur(18px) saturate(160%); -webkit-backdrop-filter:blur(18px) saturate(160%); box-shadow:0 10px 30px rgba(0,0,0,.35);}
+.dashBalance{display:flex; align-items:center; gap:12px; padding:14px 14px 14px 16px;}
+.dashBalanceIcon{width:46px; height:46px; flex:none; border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--accent); border:1.5px solid var(--glass-border);}
 .dashBalanceIcon .ic{width:26px; height:26px;}
 .dashBalanceBody{flex:1; min-width:0; display:flex; flex-direction:column; align-items:flex-start; text-align:left; gap:1px; color:var(--text);}
 .dashLabel, .dashSub{font-size:13px; color:var(--dim);}
-.dashMinutes{display:flex; align-items:center; gap:4px; font-size:26px; font-weight:650; letter-spacing:-0.01em; line-height:1.15;}
+.dashMinutes{display:flex; align-items:center; gap:4px; white-space:nowrap; font-size:23px; font-weight:650; letter-spacing:-0.01em; line-height:1.15;}
 .dashChev{width:16px; height:16px; color:var(--dim);}
-.dashAddBtn{flex:none; display:flex; align-items:center; gap:6px; padding:11px 16px; border-radius:999px; color:var(--text); font-size:15px; font-weight:600; border:1px solid var(--glass-border); background:rgba(var(--fg-rgb),0.05);}
+.dashAddBtn{flex:none; display:flex; align-items:center; gap:6px; padding:10px 14px; white-space:nowrap; border-radius:999px; color:var(--text); font-size:15px; font-weight:600; border:1px solid var(--glass-border); background:rgba(var(--fg-rgb),0.05);}
 .dashAddBtn .ic{width:16px; height:16px; color:var(--accent);}
 .dashAddBtn:active, .dashAction:active, .dashPerson:active{opacity:.7;}
 
