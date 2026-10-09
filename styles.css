@@ -1066,14 +1066,27 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .cookieLink{display:inline; padding:0; background:none; border:0; color:var(--accent); font:inherit; text-decoration:underline; cursor:pointer;}
 
 /* ---------- Get Started voice intro ---------- */
-.introStage{display:none; flex-direction:column; align-items:center; gap:14px; min-height:120px; padding:0 8px 16px;}
+.introStage{display:none; width:100%; max-width:420px; margin:0 auto; padding:14px 16px 10px; flex-direction:column; gap:10px;
+  border:1px solid rgba(255,120,120,.22); border-radius:16px; background:linear-gradient(180deg,rgba(20,8,12,.62),rgba(8,4,8,.78));
+  backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); box-shadow:0 0 40px rgba(255,40,60,.10), inset 0 0 0 1px rgba(255,255,255,.03);}
 .introPlaying .introStage{display:flex;}
-.introText{font-size:22px; line-height:1.35; font-weight:700; text-align:center; color:#fff; min-height:3.2em; text-shadow:0 2px 14px rgba(0,0,0,.6);}
-.introText.typing::after{content:''; display:inline-block; width:2px; height:1em; margin-left:3px; background:currentColor; vertical-align:-0.12em; animation:introCaret .9s steps(1) infinite;}
-.introText[data-speaker^="male"]{color:#cfe6ff;}
-.introText[data-speaker^="female"]{color:#ffd9e6;}
-@keyframes introCaret{50%{opacity:0;}}
-.introSkip{background:none; border:0; color:var(--dim); font-size:13px; padding:8px 14px;}
+.introHead{display:flex; align-items:center; gap:8px; font:600 11px/1 ui-monospace,"SF Mono",Menlo,Consolas,monospace; letter-spacing:.2em; color:rgba(255,200,200,.7);}
+.introLive{width:7px; height:7px; border-radius:50%; background:#ff3b4e; box-shadow:0 0 10px #ff3b4e; animation:introPulse 1.4s ease-in-out infinite;}
+.introBars{margin-left:auto; display:flex; gap:3px; align-items:flex-end; height:12px;}
+.introBars i{width:3px; height:30%; background:rgba(255,160,160,.8); border-radius:2px; animation:introBar .9s ease-in-out infinite;}
+.introBars i:nth-child(2){animation-delay:.15s} .introBars i:nth-child(3){animation-delay:.3s} .introBars i:nth-child(4){animation-delay:.45s}
+.introStage.silent .introBars i{animation-play-state:paused; height:20%;}
+.introLog{min-height:96px; display:flex; flex-direction:column; justify-content:flex-end; gap:6px;
+  font:500 17px/1.45 ui-monospace,"SF Mono",Menlo,Consolas,monospace; color:#ffe9e6; text-shadow:0 0 12px rgba(255,90,90,.35); word-break:break-word;}
+.introLine{opacity:.28; transition:opacity .4s ease;}
+.introLine.prev{opacity:.5;}
+.introLine.cur{opacity:1;}
+.introLine .introPrompt{color:#ff5a6a; margin-right:8px;}
+.introCaret{display:inline-block; margin-left:5px; color:#ff5a6a; animation:introBlink 1s steps(1) infinite;}
+.introSkip{align-self:flex-end; background:none; border:0; color:rgba(255,220,220,.55); font:500 12px/1 ui-monospace,Menlo,monospace; letter-spacing:.12em; padding:6px 4px;}
+@keyframes introBlink{0%,55%{opacity:1}56%,100%{opacity:0}}
+@keyframes introPulse{50%{opacity:.35}}
+@keyframes introBar{0%,100%{height:25%}50%{height:100%}}
 .introPlaying .gsButtons{opacity:0; pointer-events:none; transform:translateY(12px);}
-.gsButtons{transition:opacity .5s ease, transform .5s ease;}
+.gsButtons{transition:opacity .6s ease, transform .6s ease;}
 .introPlaying .gsButtons.revealed, .introDone .gsButtons{opacity:1; pointer-events:auto; transform:none;}
