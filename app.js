@@ -138,8 +138,19 @@ function showAuthPanel(name) {
 }
 
 function startAuthFlow() {
-  showAuthPanel(localStorage.getItem(ONBOARD_KEY) ? 'Login' : 'GetStarted');
+  const firstTime = !localStorage.getItem(ONBOARD_KEY);
+  showAuthPanel(firstTime ? 'GetStarted' : 'Login');
+  if (firstTime && !introStarted) {
+    introStarted = true;
+    import('./intro.js').then(({ introAlreadySeen, playIntro }) => {
+      const panel = $('panelGetStarted');
+      if (introAlreadySeen()) { panel.classList.add('introDone'); return; }
+      panel.classList.add('introPlaying');
+      playIntro({ panel, onDone: () => { panel.classList.remove('introPlaying'); panel.classList.add('introDone'); } });
+    }).catch(() => $('panelGetStarted').classList.add('introDone'));
+  }
 }
+let introStarted = false;
 
 $('gsSignUp').addEventListener('click', () => { localStorage.setItem(ONBOARD_KEY, '1'); showAuthPanel('Signup'); });
 $('gsLogIn').addEventListener('click', () => { localStorage.setItem(ONBOARD_KEY, '1'); showAuthPanel('Login'); });

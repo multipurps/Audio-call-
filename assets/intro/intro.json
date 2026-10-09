@@ -1,0 +1,284 @@
+{
+ "version": 2,
+ "audio": "assets/intro/intro.mp3",
+ "lines": [
+  {
+   "speaker": "emysa",
+   "text": "Hey, I'm Emysa.",
+   "words": [
+    {
+     "text": "Hey,",
+     "start": 0.81
+    },
+    {
+     "text": "I'm",
+     "start": 1.14
+    },
+    {
+     "text": "Emysa.",
+     "start": 1.41
+    }
+   ]
+  },
+  {
+   "speaker": "emysa",
+   "text": "I call people for you, in your own voice.",
+   "words": [
+    {
+     "text": "I",
+     "start": 1.88
+    },
+    {
+     "text": "call",
+     "start": 2.01
+    },
+    {
+     "text": "people",
+     "start": 2.68
+    },
+    {
+     "text": "for",
+     "start": 3.15
+    },
+    {
+     "text": "you,",
+     "start": 3.41
+    },
+    {
+     "text": "in",
+     "start": 3.75
+    },
+    {
+     "text": "your",
+     "start": 3.95
+    },
+    {
+     "text": "own",
+     "start": 4.28
+    },
+    {
+     "text": "voice.",
+     "start": 4.55
+    }
+   ]
+  },
+  {
+   "speaker": "emysa",
+   "text": "On the platform you prefer: a regular phone line or number...",
+   "words": [
+    {
+     "text": "On",
+     "start": 5.02
+    },
+    {
+     "text": "the",
+     "start": 5.22
+    },
+    {
+     "text": "platform",
+     "start": 5.48
+    },
+    {
+     "text": "you",
+     "start": 6.41
+    },
+    {
+     "text": "prefer:",
+     "start": 6.68
+    },
+    {
+     "text": "a",
+     "start": 7.21
+    },
+    {
+     "text": "regular",
+     "start": 7.79
+    },
+    {
+     "text": "phone",
+     "start": 8.32
+    },
+    {
+     "text": "line",
+     "start": 8.72
+    },
+    {
+     "text": "or",
+     "start": 9.06
+    },
+    {
+     "text": "number...",
+     "start": 9.26
+    }
+   ]
+  },
+  {
+   "speaker": "emysa",
+   "text": "WhatsApp. Telegram. Wherever they are.",
+   "words": [
+    {
+     "text": "WhatsApp.",
+     "start": 10.19
+    },
+    {
+     "text": "Telegram.",
+     "start": 11.2
+    },
+    {
+     "text": "Wherever",
+     "start": 11.86
+    },
+    {
+     "text": "they",
+     "start": 12.46
+    },
+    {
+     "text": "are.",
+     "start": 12.8
+    }
+   ]
+  },
+  {
+   "speaker": "emysa",
+   "text": "I remember the context from your last calls.",
+   "words": [
+    {
+     "text": "I",
+     "start": 13.13
+    },
+    {
+     "text": "remember",
+     "start": 13.53
+    },
+    {
+     "text": "the",
+     "start": 14.14
+    },
+    {
+     "text": "context",
+     "start": 14.4
+    },
+    {
+     "text": "from",
+     "start": 14.94
+    },
+    {
+     "text": "your",
+     "start": 15.27
+    },
+    {
+     "text": "last",
+     "start": 15.6
+    },
+    {
+     "text": "calls.",
+     "start": 16.24
+    }
+   ]
+  },
+  {
+   "speaker": "emysa",
+   "text": "Import your chats here, and you stay in control of my memory.",
+   "words": [
+    {
+     "text": "Import",
+     "start": 17.28
+    },
+    {
+     "text": "your",
+     "start": 17.75
+    },
+    {
+     "text": "chats",
+     "start": 18.08
+    },
+    {
+     "text": "here,",
+     "start": 18.49
+    },
+    {
+     "text": "and",
+     "start": 19.16
+    },
+    {
+     "text": "you",
+     "start": 19.43
+    },
+    {
+     "text": "stay",
+     "start": 19.69
+    },
+    {
+     "text": "in",
+     "start": 20.03
+    },
+    {
+     "text": "control",
+     "start": 20.23
+    },
+    {
+     "text": "of",
+     "start": 20.76
+    },
+    {
+     "text": "my",
+     "start": 21.54
+    },
+    {
+     "text": "memory.",
+     "start": 21.74
+    }
+   ]
+  },
+  {
+   "speaker": "emysa",
+   "text": "Sign up with your email and number, and let's get started.",
+   "words": [
+    {
+     "text": "Sign",
+     "start": 22.27
+    },
+    {
+     "text": "up",
+     "start": 22.61
+    },
+    {
+     "text": "with",
+     "start": 22.81
+    },
+    {
+     "text": "your",
+     "start": 23.14
+    },
+    {
+     "text": "email",
+     "start": 23.47
+    },
+    {
+     "text": "and",
+     "start": 23.87
+    },
+    {
+     "text": "number,",
+     "start": 24.14
+    },
+    {
+     "text": "and",
+     "start": 25.06
+    },
+    {
+     "text": "let's",
+     "start": 25.32
+    },
+    {
+     "text": "get",
+     "start": 25.72
+    },
+    {
+     "text": "started.",
+     "start": 25.99
+    }
+   ]
+  }
+ ]
+}

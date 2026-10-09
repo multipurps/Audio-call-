@@ -1064,3 +1064,16 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .cookieBanner.hidden{display:none;}
 .cookieBanner p{font-size:14px; line-height:1.5; margin:0 0 14px;}
 .cookieLink{display:inline; padding:0; background:none; border:0; color:var(--accent); font:inherit; text-decoration:underline; cursor:pointer;}
+
+/* ---------- Get Started voice intro ---------- */
+.introStage{display:none; flex-direction:column; align-items:center; gap:14px; min-height:120px; padding:0 8px 16px;}
+.introPlaying .introStage{display:flex;}
+.introText{font-size:22px; line-height:1.35; font-weight:700; text-align:center; color:#fff; min-height:3.2em; text-shadow:0 2px 14px rgba(0,0,0,.6);}
+.introText.typing::after{content:''; display:inline-block; width:2px; height:1em; margin-left:3px; background:currentColor; vertical-align:-0.12em; animation:introCaret .9s steps(1) infinite;}
+.introText[data-speaker^="male"]{color:#cfe6ff;}
+.introText[data-speaker^="female"]{color:#ffd9e6;}
+@keyframes introCaret{50%{opacity:0;}}
+.introSkip{background:none; border:0; color:var(--dim); font-size:13px; padding:8px 14px;}
+.introPlaying .gsButtons{opacity:0; pointer-events:none; transform:translateY(12px);}
+.gsButtons{transition:opacity .5s ease, transform .5s ease;}
+.introPlaying .gsButtons.revealed, .introDone .gsButtons{opacity:1; pointer-events:auto; transform:none;}
