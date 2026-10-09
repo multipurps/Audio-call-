@@ -17,6 +17,7 @@ import { wacallsPlaceAICall } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
 import { resolvePersonSession } from '../lib/personSession.js';
 import { endCallRow, isEndCallRequest, LIVE_CALL_STATUSES } from '../lib/callHangup.js';
+import { OBJECTIVE_BOUNDARY_RULES, sanitizeObjective } from '../lib/callContextGuard.js';
 import { sendCallNote } from '../lib/callNote.js';
 import { availableChannels } from '../lib/phoneLines.js';
 import { createCallRecord, markCallPlaced, markCallFailed, findDuplicateActiveCall } from '../lib/callSession.js';
@@ -521,6 +522,7 @@ async function sendMessage(req, res, supabase, userId) {
     'Reply with ONLY a JSON object, no other text, matching this shape:',
     '{"action":"call"|"retry"|"reply","phoneNumber":string|null,"contactName":string|null,"objective":string|null,"channel":"phone"|"whatsapp"|"telegram"|null,"reply":string|null,"mood":string|null}',
     '- action "call": the user wants you to call someone new. If they gave you an actual phone number in their message, put the digits (with country code if given, e.g. "+15551234567") in phoneNumber. Otherwise, if they named someone from the saved contacts list, put your best guess at that name in contactName. objective is a short phrase describing what to say or ask on the call — if they also gave any tone or manner direction (stay calm, keep it light, let it flow naturally, be quick about it, etc.), include that in objective too, don\'t drop it. If they explicitly named which line to call on in this message (e.g. "on WhatsApp", "call him on Telegram", "use my phone line"), put that in channel - phone/whatsapp/telegram. If they did not name a line in THIS message, leave channel null; do not guess or reuse a line from earlier in the conversation, since the app\'s own line selector already carries that forward and takes over whenever this is null.',
+    `- ${OBJECTIVE_BOUNDARY_RULES}`,
     '- action "retry": the user wants you to call the same person again (e.g. "call him again", "try it again", "call her back"). Leave channel null unless they name a line in THIS message; the app keeps using the line this conversation already used.',
     '- For both "call" and "retry", also put in reply ONE short, natural sentence in your own voice saying what you are about to do (for example agreeing to ask him something). Use the future tense and never say the call is placed, ringing or connected: it is placed right after the user has read your reply.',
     '- action "reply": anything else — general conversation, emotional support, questions about you or the app, small talk, or a call request with no number/contact given yet. Answer naturally, warmly, and helpfully in "reply". Only ask for a phone number or contact name if they\'ve actually expressed intent to make a call but haven\'t said who.',
@@ -742,7 +744,7 @@ async function sendMessage(req, res, supabase, userId) {
     const addedObjective = intent.objective && !isRetryCommand(intent.objective) && intent.objective !== retryObjective ? intent.objective : null;
     let objective = intent.action === 'retry'
       ? [retryObjective, addedObjective].filter(Boolean).join('\nAlso: ') || 'Say hello and share what the user wants to talk about.'
-      : intent.objective || 'Say hello and share what the user wants to talk about.';
+      : sanitizeObjective(intent.objective || '') || 'Say hello and share what the user wants to talk about.';
     const { data: langProfile } = await supabase.from('profiles').select('language').eq('user_id', userId).maybeSingle();
     if (langProfile?.language && langProfile.language !== 'en') {
       const langName = LANGUAGE_NAMES[langProfile.language] || langProfile.language;

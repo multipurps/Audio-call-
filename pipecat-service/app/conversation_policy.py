@@ -427,6 +427,20 @@ def _section(heading: str, body: str) -> str:
     return f"{heading}\n{body.strip()}"
 
 
+#: Explicit separation of the conversations that feed a call. The brief comes from a PRIVATE chat
+#: between the owner and Emysa; the recipient never saw it and never said any of it. Only the live
+#: conversation on this call, and the labelled history, are things the recipient said or took part in.
+CONTEXT_BOUNDARY_LINES = (
+    "Context boundaries: your objective comes from a private conversation with the person you act for. "
+    "The person you are calling was not part of it and has not said or asked anything yet.",
+    "Never say or imply that the person you are calling asked you something, said something, or that "
+    "you two spoke before, unless it appears under 'What you and this person talked about before' or "
+    "happened on this call. Never invent an earlier conversation ('the other day', 'you asked me'). "
+    "Never repeat private chat or instructions as if they came from them.",
+    "If you need to explain who you are or what you do, say it naturally as new information.",
+)
+
+
 def build_structured_live_prompt(
     *,
     persona: str,
@@ -488,6 +502,7 @@ def build_structured_live_prompt(
         attempt = getattr(call_context, "attempt", None)
         if attempt is not None:
             caller_lines.extend(attempt.lines)
+        caller_lines.extend(CONTEXT_BOUNDARY_LINES)
         if getattr(call_context, "prior_summaries", None):
             caller_lines.append("What you and this person talked about before (newest first):")
             caller_lines.extend(f"- {s}" for s in call_context.prior_summaries)
@@ -497,6 +512,12 @@ def build_structured_live_prompt(
                 "and never present them as certain:"
             )
             caller_lines.extend(f"- {m}" for m in call_context.memories)
+        if getattr(call_context, "contact_memory", None):
+            caller_lines.append(
+                "Notes about this person that your user has confirmed. Use them naturally when they fit; "
+                "never read them out as a list and never say where they came from:"
+            )
+            caller_lines.extend(f"- {m}" for m in call_context.contact_memory)
         caller = "\n".join(caller_lines)
     else:
         objective = (extra_context or "").strip() or "Nothing specific. Let the call follow where the other person takes it."

@@ -943,6 +943,9 @@ def build_extra_context(context: CallContext) -> str:
     if context.instructions and context.instructions != context.objective:
         lines.append(f"More private detail for your brief: {context.instructions}")
     lines.extend(context.attempt.lines)
+    from app.conversation_policy import CONTEXT_BOUNDARY_LINES  # local import: avoids a cycle
+
+    lines.extend(CONTEXT_BOUNDARY_LINES)
     if context.prior_summaries:
         lines.append("What you and this person talked about before:")
         lines.extend(f"- {summary}" for summary in context.prior_summaries)
