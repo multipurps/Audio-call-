@@ -11,9 +11,19 @@ import {
 } from '../lib/memoryManager.js';
 
 export default async function handler(req, res) {
-  const supabase = getServiceClient();
   // Imported WhatsApp history and reviewed per-contact memories (Phase 3).
-  if (req.query?.scope === 'contact') return handleContactMemory(req, res, { supabase });
+  // Anything thrown here used to escape as an empty-bodied 500; answer with a
+  // JSON error instead, and log the cause.
+  if (req.query?.scope === 'contact') {
+    try {
+      return await handleContactMemory(req, res, { supabase: getServiceClient() });
+    } catch (err) {
+      console.error('contact memory handler crashed:', req.query?.action, err?.message);
+      if (res.headersSent) return undefined;
+      return res.status(500).json({ error: 'Something went wrong. Try again.' });
+    }
+  }
+  const supabase = getServiceClient();
   const userId = await getAuthedUserId(req, supabase);
   if (!userId) return res.status(401).json({ error: 'Not signed in' });
 
