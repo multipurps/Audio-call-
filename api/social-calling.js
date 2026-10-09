@@ -7,7 +7,6 @@ import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
 import { signalStartLink, signalLinkStatus, signalRemoveAccount, signalPlaceCall, signalHangup } from '../lib/signalClient.js';
 import { resolvePersonSession } from '../lib/personSession.js';
-import { endCallRow, LIVE_CALL_STATUSES } from '../lib/callHangup.js';
 import {
   createCallRecord,
   markCallPlaced,
@@ -670,28 +669,6 @@ async function signalDisconnect(req, res, supabase, userId) {
   return res.status(200).json({ status: 'disconnected' });
 }
 
-async function clearLeftoverWhatsappCalls(supabase, userId, sessionId, exceptDbCallId) {
-  const since = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-  const { data: rows } = await supabase
-    .from('calls')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('platform', 'whatsapp')
-    .not('platform_call_id', 'is', null)
-    .gte('created_at', since)
-    .order('created_at', { ascending: false })
-    .limit(5);
-  for (const c of rows || []) {
-    if (c.id === exceptDbCallId) continue;
-    if (LIVE_CALL_STATUSES.includes(c.status)) {
-      await endCallRow(supabase, userId, c); // hangs up on the relay and finalises the row
-    } else {
-      // Row already closed here, but the relay may never have heard about it.
-      await wacallsHangup(userId, sessionId, c.platform_call_id).catch(() => {});
-    }
-  }
-}
-
 async function placeCall(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { platform, objective, instructions, contactId, contactName, sessionId } = req.body || {};
@@ -742,10 +719,6 @@ async function placeCall(req, res, supabase, userId) {
         // assistant bridge dials in (attach), so the row carries the id the
         // pipeline will look for.
         onCallStarted: ({ callId }) => markCallPlaced(supabase, dbCall.id, { platformCallId: callId }),
-        // The relay refuses a new call while it still counts an old one of this
-        // user as live. Hang up this user's recent WhatsApp calls (and finalise
-        // any row still marked live) so the retry goes through.
-        onOperatorBusy: () => clearLeftoverWhatsappCalls(supabase, userId, row.wacalls_session_id, dbCall.id),
       });
       return res.status(200).json({
         ...placed.started,
