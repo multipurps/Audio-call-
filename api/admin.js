@@ -20,6 +20,9 @@ export default async function handler(req, res) {
     case 'create-background-upload': return createBackgroundUpload(req, res, supabase);
     case 'confirm-background': return confirmBackground(req, res, supabase);
     case 'delete-background': return deleteBackground(req, res, supabase);
+    case 'create-hero-upload': return createHeroUpload(req, res, supabase);
+    case 'confirm-hero': return confirmHero(req, res, supabase);
+    case 'delete-hero': return deleteHero(req, res, supabase);
     case 'analytics': return analytics(req, res, supabase);
     case 'send-announcement': return sendAnnouncement(req, res, supabase);
     case 'overview': return overview(req, res, supabase);
@@ -129,6 +132,45 @@ async function deleteBackground(req, res, supabase) {
   await supabase.storage.from('app-assets').remove([row.storage_path]);
   const { error: delErr } = await supabase.from('auth_backgrounds').delete().eq('id', id);
   if (delErr) return res.status(500).json({ error: delErr.message });
+  return res.status(200).json({ ok: true });
+}
+
+// Home hero GIF. Same direct-to-storage upload as the backgrounds above (the
+// 4.5MB body cap would block a GIF). There is only ever one hero: confirming a
+// new one replaces the old row and its stored file.
+async function createHeroUpload(req, res, supabase) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { mimeType } = req.body || {};
+  if (mimeType !== 'image/gif') return res.status(400).json({ error: 'The hero must be a GIF' });
+  const path = `home-hero/${randomUUID()}.gif`;
+  const { data, error } = await supabase.storage.from('app-assets').createSignedUploadUrl(path);
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ path: data.path, token: data.token });
+}
+
+async function confirmHero(req, res, supabase) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { path } = req.body || {};
+  if (!path || !path.startsWith('home-hero/')) return res.status(400).json({ error: 'path required' });
+  const { data: old } = await supabase.from('home_hero').select('id,storage_path');
+  const { data: pub } = supabase.storage.from('app-assets').getPublicUrl(path);
+  const { data: row, error } = await supabase.from('home_hero').insert({ url: pub.publicUrl, storage_path: path }).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  if (old?.length) {
+    await supabase.storage.from('app-assets').remove(old.map((r) => r.storage_path));
+    await supabase.from('home_hero').delete().in('id', old.map((r) => r.id));
+  }
+  return res.status(200).json({ ok: true, row });
+}
+
+async function deleteHero(req, res, supabase) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { data: rows, error } = await supabase.from('home_hero').select('id,storage_path');
+  if (error) return res.status(500).json({ error: error.message });
+  if (rows?.length) {
+    await supabase.storage.from('app-assets').remove(rows.map((r) => r.storage_path));
+    await supabase.from('home_hero').delete().in('id', rows.map((r) => r.id));
+  }
   return res.status(200).json({ ok: true });
 }
 

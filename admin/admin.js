@@ -310,6 +310,49 @@ $('bgFileInput').addEventListener('change', async (e) => {
   if (confirmResp.ok) loadBackgrounds();
 });
 
+// ---------- Home screen GIF ----------
+async function loadHero() {
+  const { data } = await supabase.from('home_hero').select('url').order('created_at', { ascending: false }).limit(1).maybeSingle();
+  $('heroPreview').innerHTML = data ? `<div class="bgCard"><img src="${data.url}" alt=""></div>` : '<div class="authHint" style="grid-column:1/-1;">No GIF yet.</div>';
+  $('removeHeroBtn').style.display = data ? '' : 'none';
+}
+loadHero();
+
+$('uploadHeroBtn').addEventListener('click', () => $('heroFileInput').click());
+$('heroFileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  if (file.type !== 'image/gif') { $('heroUploadStatus').textContent = 'Choose a GIF file.'; return; }
+  $('heroUploadStatus').textContent = 'Preparing upload…';
+  const createResp = await authedFetch('/api/admin?action=create-hero-upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mimeType: file.type }),
+  });
+  const createData = await createResp.json();
+  if (!createResp.ok) { $('heroUploadStatus').textContent = createData.error || 'Could not start upload.'; return; }
+  $('heroUploadStatus').textContent = 'Uploading…';
+  const { error: uploadErr } = await supabase.storage.from('app-assets').uploadToSignedUrl(createData.path, createData.token, file);
+  if (uploadErr) { $('heroUploadStatus').textContent = uploadErr.message || 'Upload failed.'; return; }
+  const confirmResp = await authedFetch('/api/admin?action=confirm-hero', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: createData.path }),
+  });
+  const confirmData = await confirmResp.json();
+  $('heroUploadStatus').textContent = confirmResp.ok ? 'Added. It now shows on Home.' : (confirmData.error || 'Could not save the upload.');
+  if (confirmResp.ok) loadHero();
+});
+$('removeHeroBtn').addEventListener('click', async () => {
+  $('removeHeroBtn').disabled = true;
+  const resp = await authedFetch('/api/admin?action=delete-hero', { method: 'POST' });
+  const data = await resp.json().catch(() => ({}));
+  $('heroUploadStatus').textContent = resp.ok ? 'Removed.' : (data.error || 'Delete failed.');
+  $('removeHeroBtn').disabled = false;
+  loadHero();
+});
+
 // ---------- announcements ----------
 $('announceSendBtn').addEventListener('click', async () => {
   const title = $('announceTitle').value.trim();

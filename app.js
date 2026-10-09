@@ -3217,6 +3217,20 @@ async function loadBalance() {
   renderBalance();
 }
 
+let homeContacts = [];
+let homeHeroLoadedAt = 0;
+
+// Hero GIF: one row in home_hero, uploaded from the admin panel. Nothing is
+// shown (no placeholder) until a GIF exists.
+async function loadHomeHero() {
+  if (Date.now() - homeHeroLoadedAt < 60000) return;
+  homeHeroLoadedAt = Date.now();
+  const { data } = await supabase.from('home_hero').select('url').order('created_at', { ascending: false }).limit(1).maybeSingle();
+  const img = $('dashHeroMedia');
+  if (data?.url) { if (img.getAttribute('src') !== data.url) img.src = data.url; img.hidden = false; }
+  else { img.removeAttribute('src'); img.hidden = true; }
+}
+
 async function loadHomePeople() {
   const [contactsResp, callsResp] = await Promise.all([
     authedFetch('/api/contacts').catch(() => null),
@@ -3225,7 +3239,8 @@ async function loadHomePeople() {
   if (!contactsResp?.ok) return;
   const { contacts } = await contactsResp.json();
   const calls = callsResp?.ok ? ((await callsResp.json()).calls || []) : [];
-  renderHomePeople(contacts || [], calls);
+  homeContacts = contacts || [];
+  renderHomePeople(homeContacts, calls);
 }
 
 // Only people saved inside Emysa (never device contacts). Most recently called
@@ -3277,6 +3292,7 @@ function loadHome(force = false) {
   homeLoadedAt = Date.now();
   loadBalance();
   loadHomePeople();
+  loadHomeHero();
 }
 
 // Quick actions. Each one opens something that already exists: no new backend.
@@ -3295,18 +3311,34 @@ const HOME_ACTIONS = {
   schedule: () => openChatWith('Schedule a call with '),
   followup: () => openChatWith('Follow up with '),
   ask: () => openChatWith('Find out '),
-  more: () => $('moreDialog').showModal(),
+  import: openImportPicker,
 };
 document.querySelectorAll('#dashActions .dashAction').forEach((btn) => btn.addEventListener('click', () => HOME_ACTIONS[btn.dataset.action]?.()));
 $('dashNotifBtn').addEventListener('click', () => openSheet('sheet-notifications'));
 $('dashPeopleAll').addEventListener('click', () => showTab('contacts'));
-document.querySelectorAll('[data-more]').forEach((btn) => btn.addEventListener('click', () => {
-  $('moreDialog').close();
-  const which = btn.dataset.more;
-  if (which === 'keypad') { showTab('contacts'); $('openKeypadBtn').click(); }
-  if (which === 'contacts') showTab('contacts');
-  if (which === 'newchat') { startNewChat(); showTab('chat'); $('briefInput').focus(); }
-}));
+// Chat history is imported per person, so Import Chat first asks who it is for,
+// then opens that person's existing WhatsApp history sheet (which has the file picker).
+function openImportPicker() {
+  if (!homeContacts.length) { showTab('contacts'); return; }
+  const list = $('importPickList');
+  list.textContent = '';
+  const head = document.createElement('div');
+  head.className = 'iosMenuHeader';
+  head.textContent = 'Import chat for…';
+  list.appendChild(head);
+  for (const c of [...homeContacts].sort((x, y) => (x.name || '').localeCompare(y.name || ''))) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'iosRow iosRowLink';
+    const title = document.createElement('span');
+    title.className = 'iosRowTitle';
+    title.textContent = c.name;
+    row.appendChild(title);
+    row.addEventListener('click', () => { $('moreDialog').close(); openContactMemory(c); });
+    list.appendChild(row);
+  }
+  $('moreDialog').showModal();
+}
 
 // ---------- Add time (paid through Bachs hosted checkout) ----------
 // The payment page is opened as a separate window so the installed PWA is never
