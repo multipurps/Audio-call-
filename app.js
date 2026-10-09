@@ -2777,7 +2777,9 @@ let callAgainInFlight = false;
 
 const CALL_DETAIL_SUMMARY_SECTIONS = {
   topics: 'Topics discussed',
-  learned: 'What Emysa learned',
+  learned: 'What I learned',
+  confirmed: 'Confirmed',
+  unclear: 'Unclear, not treated as fact',
   decisions: 'Decisions & agreements',
   commitments: 'Promises & commitments',
   details: 'Dates, amounts & specifics',

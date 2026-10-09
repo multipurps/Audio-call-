@@ -9,7 +9,7 @@ const SECRET = 'relay-secret-test';
 const ENV = { RELAY_CALLBACK_SECRET: SECRET, OPENAI_API_KEY: 'test-only' };
 const CHAT = '11111111-1111-1111-1111-111111111111';
 const SUMMARY = {
-  summary: 'Agreed to move lunch to 1pm at the window table; Ayo will email the menu.',
+  summary: 'I agreed with Ayo to move lunch to 1pm at the window table; he will email the menu.',
   topics: ['lunch'], decisions: ['1pm, window table'], commitments: ['Ayo emails the menu'],
   followups: ['email the menu'], incomplete: false, memories: [],
 };
@@ -73,7 +73,7 @@ test('End button: the full-call summary is stored on the call AND posted into th
   const msgs = chatMessages(f);
   assert.equal(msgs.length, 1, 'exactly one chat message');
   assert.equal(msgs[0].content, BUBBLE);
-  assert.match(msgs[0].content, /Agreed to move lunch to 1pm/);
+  assert.match(msgs[0].content, /agreed with Ayo to move lunch to 1pm/);
   assert.equal(msgs[0].session_id, CHAT);
 
   const prompt = f.llmBodies[0].messages[1].content;

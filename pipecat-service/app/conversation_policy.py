@@ -197,6 +197,13 @@ than was asked and do not summarise what they just said back to them.
 used, start differently.
 - Never narrate your own behaviour: no "I'm keeping it casual", "I'm being concise", \
 "I'm staying calm", "I'm exchanging pleasantries", "I'm following your instructions".
+- Never narrate processing. Do not say you are checking, looking something up, \
+thinking or about to do something, and do not ask for a second or a moment. Either \
+you know it, or you say plainly that you do not.
+- Backend actions are silent. When you hand the backend the hang-up action, say \
+nothing about it; the goodbye is the last thing you say.
+- Unclear or partial speech: if you did not catch something, say so once and ask for \
+that specific part. Never guess at it and never treat a fragment as something they said.
 - Do not ask whether they can hear you unless there is real evidence the audio is \
 unclear (their words cut off, repeated "hello?", garbled speech).
 
@@ -238,6 +245,10 @@ point.
 - Never start with "Good.", "Great.", "Perfect.", "Hmm.", "Got it." or "Right.".
 - Do not introduce yourself unless the objective says to. If they ask who this is, say your \
 name plainly.
+- If this is not the first attempt to reach them, open exactly as you would a first \
+call. Do not mention an earlier attempt, a missed call, or a call that did not ring \
+unless they bring it up, and then say only what you actually know. Never ask whether \
+they have, use, or have set up the app you are calling on.
 - If the objective says to open a particular way, do exactly that.
 - If they only say "hello?", answer warmly and carry on.
 - When the purpose is done and you have said your final goodbye, hand the backend the \
@@ -293,7 +304,27 @@ def classify_caller_state(text: str) -> str | None:
 # --------------------------------------------------------------------------
 
 _ACK_RE = re.compile(
-    r"^\W*(?P<ack>i see|i understand|got it|right|yeah+|yep|that'?s (?:correct|right)|that is correct|perfect|great|good|hmm+|hun|mm+-?hmm+)\b",
+    r"^\W*(?P<ack>i see|i understand|got it|right|yeah+|yeaah+|yep|that'?s (?:correct|right)|that is correct|perfect|great|good|hmm+|hun|mm+-?hmm+)\b",
+    re.IGNORECASE,
+)
+
+#: Narrating internal processing, or filling a pause with a promise to check. A
+#: spoken reply that contains one is flagged by the audit; nothing rewrites it.
+_NARRATION_RE = re.compile(
+    r"\b(?:let me (?:just )?(?:check|look(?: that| it)? up|see|think|pull (?:that|it) up)"
+    r"|give me a (?:sec|second|moment|minute)(?:, let me check)?"
+    r"|one (?:sec|second|moment)"
+    r"|bear with me"
+    r"|hold on a (?:sec|second|moment)"
+    r"|i(?:'m| am) (?:checking|looking (?:that|it) up|processing|thinking)"
+    r"|i(?:'m| am) (?:keeping it|staying|being) (?:casual|calm|brief|concise)"
+    r"|my instructions|the user|on behalf of)\b",
+    re.IGNORECASE,
+)
+
+#: Openers that make the call sound like a generic assistant waiting for a task.
+_GENERIC_OPENER_RE = re.compile(
+    r"^\W*(?:what'?s on your mind|what'?s going on(?: with you)?|how can i (?:help|assist)(?: you)?(?: today)?|what can i do for you)",
     re.IGNORECASE,
 )
 
@@ -311,6 +342,80 @@ def find_automatic_acknowledgements(replies: list[str], *, window: int = 6, max_
     callers keep working). Monitoring and tests only; never rewrites speech.
     """
     return sorted({o for o in (acknowledgement_opener(r) for r in replies) if o})
+
+
+def narration_in(reply: str) -> str | None:
+    """The processing-narration phrase found in a reply, if any."""
+    m = _NARRATION_RE.search((reply or "").replace("\u2019", "'"))
+    return m.group(0).lower() if m else None
+
+
+def generic_opener(reply: str) -> str | None:
+    m = _GENERIC_OPENER_RE.match((reply or "").replace("\u2019", "'"))
+    return m.group(0).strip().lower() if m else None
+
+
+def audit_reply(reply: str) -> list[str]:
+    """Every conversation-policy violation in one spoken reply (monitoring/tests only)."""
+    found: list[str] = []
+    ack = acknowledgement_opener(reply)
+    if ack:
+        found.append(f"acknowledgement:{ack}")
+    nar = narration_in(reply)
+    if nar:
+        found.append(f"narration:{nar}")
+    gen = generic_opener(reply)
+    if gen:
+        found.append(f"generic-opener:{gen}")
+    return found
+
+
+# --------------------------------------------------------------------------
+# Instruction integrity
+# --------------------------------------------------------------------------
+
+#: Text that must never be present in what GPT-Live is told. Each is a directive
+#: from the older text-chat persona that trained reflex reactions and fillers.
+_FORBIDDEN_DIRECTIVES = (
+    "React first, then add",
+    "Often the whole turn is just a reaction",
+    "Mm, yeah.",
+    "Use small fillers like",
+    'a quiet "Hmm."',
+    "Plain \"Hmm.\"",
+    "[laughing]",
+    "[[END_CALL]]",
+)
+
+
+def validate_live_instructions(text: str) -> list[str]:
+    """Problems that would make a GPT-Live session sound like a generic assistant.
+
+    Empty list = the instructions carry every required section, in order, and none
+    of the legacy directives. Used when the session is built and when it starts.
+    """
+    problems: list[str] = []
+    last = -1
+    for heading in (H_RULES, H_OBJECTIVE, H_CALLER, H_FORBIDDEN, H_OPENING):
+        idx = (text or "").find(heading)
+        if idx < 0:
+            problems.append(f"missing section: {heading}")
+        elif idx < last:
+            problems.append(f"section out of order: {heading}")
+        else:
+            last = idx
+    for needle in _FORBIDDEN_DIRECTIVES:
+        if needle in (text or ""):
+            problems.append(f"legacy directive present: {needle!r}")
+    return problems
+
+
+def instructions_fingerprint(text: str) -> str:
+    """Short stable id for logs. Proves WHICH instructions a session used without logging them."""
+    import hashlib
+
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:12]
+
 
 
 # --------------------------------------------------------------------------
@@ -380,11 +485,17 @@ def build_structured_live_prompt(
             caller_lines.append(
                 f"Speak only {lang} for the whole call, whatever a mis-heard transcript looks like. Never switch on your own."
             )
+        attempt = getattr(call_context, "attempt", None)
+        if attempt is not None:
+            caller_lines.extend(attempt.lines)
         if getattr(call_context, "prior_summaries", None):
-            caller_lines.append("What you and this person talked about before:")
+            caller_lines.append("What you and this person talked about before (newest first):")
             caller_lines.extend(f"- {s}" for s in call_context.prior_summaries)
         if getattr(call_context, "memories", None):
-            caller_lines.append("Things you know about them:")
+            caller_lines.append(
+                "Things you know about them, with how recent each is. Treat older ones as possibly out of date "
+                "and never present them as certain:"
+            )
             caller_lines.extend(f"- {m}" for m in call_context.memories)
         caller = "\n".join(caller_lines)
     else:

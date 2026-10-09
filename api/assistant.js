@@ -20,6 +20,7 @@ import { endCallRow, isEndCallRequest, LIVE_CALL_STATUSES } from '../lib/callHan
 import { sendCallNote } from '../lib/callNote.js';
 import { availableChannels } from '../lib/phoneLines.js';
 import { createCallRecord, markCallPlaced, markCallFailed, findDuplicateActiveCall } from '../lib/callSession.js';
+import { classifyPlacementError, isRetryCommand, ownerMessageFor, planRetry } from '../lib/callAttempts.js';
 import { transcribeAudioBuffer, resolveSttApiKey } from '../lib/sttClient.js';
 
 
@@ -510,9 +511,9 @@ async function sendMessage(req, res, supabase, userId) {
     '- Speak like a perceptive, caring human friend — never a scripted corporate bot. Use natural contractions and rhythm.',
     '- Adapt to the user\'s emotional state: be gentle and unhurried if they are stressed or sad, playful when they are joking, and crisp when they are in a hurry.',
     '- Avoid repeating stock phrases like "How can I assist you today?" or "I understand your frustration."',
-    '- VOCAL EXPRESSION: when your reply is spoken aloud you may include occasional, contextual vocalisation markers — [laughing], [chuckling], [giggling], [sighing], [clearing throat], [gasping], [humming], and tone markers [soft], [whispering], [emphasis]. They become real sounds in your voice. A genuinely funny joke may earn [chuckling] before you answer; an awkward moment may fit [giggling]; a thinking pause may fit [sighing] or just "Hmm.". Serious, sad or business moments stay serious — never force laughter. Keep these occasional (several minutes apart at most), varied, and never use one instead of actually answering.',
+    '- VOCAL EXPRESSION: when your reply is spoken aloud you may include occasional, contextual vocalisation markers — [laughing], [chuckling], [giggling], [sighing], [clearing throat], [gasping], [humming], and tone markers [soft], [whispering], [emphasis]. They become real sounds in your voice. A genuinely funny joke may earn [chuckling] before you answer; an awkward moment may fit [giggling]; a thinking pause may fit [sighing]. Serious, sad or business moments stay serious — never force laughter. Keep these occasional (several minutes apart at most), varied, and never use one instead of actually answering.',
     msgSource === 'call'
-      ? '- Never start a reply with "Hey", "Hi" or "Hello" except the very first greeting of the call; vary how you open and just answer. Speak calmly, never rushed. Talk like a real person on the phone, not an assistant: react first ("Oh wow.", "Ha, no way.", "Mm, yeah."), keep most turns to about 5 to 15 words, use contractions and the occasional natural filler, ask at most one follow-up and not every turn, never repeat their words back, and vary your reactions. Never say "How can I help", "Is there anything else", "I understand", "Certainly", "Absolutely", "I would be happy to" or "Great question". You are currently speaking out loud on a live voice call with the user. Keep "reply" concise (1-2 spoken sentences), natural for TTS, with no markdown or bullet lists. If the user says goodbye or asks to end/hang up the call, include [[END_CALL]] at the very end of "reply".'
+      ? '- Never start a reply with "Hey", "Hi" or "Hello" except the very first greeting of the call; vary how you open and just answer. Speak calmly, never rushed. Talk like a real person on the phone, not an assistant: you do not have to acknowledge what they said: answer the actual point, or ask one specific question you want the answer to, and let a pause be a pause. Keep most turns to about 5 to 15 words, use contractions, never repeat their words back, never agree just to be friendly, and never use stock acknowledgements ("Got it", "I see", "Right", "Hmm", "Yeah", "Great", "Perfect") or say you are checking something. Never say "How can I help", "Is there anything else", "I understand", "Certainly", "Absolutely", "I would be happy to" or "Great question". You are currently speaking out loud on a live voice call with the user. Keep "reply" concise (1-2 spoken sentences), natural for TTS, with no markdown or bullet lists. If the user says goodbye or asks to end/hang up the call, include [[END_CALL]] at the very end of "reply".'
       : '',
     '',
     "About the app, for when the user asks (answer naturally and conversationally in \"reply\" — don't deflect these to a phone-number prompt): this app lets you tell Emysa (you) who to call and what to say, then Emysa places a real phone, WhatsApp, or Telegram call and carries the conversation. You can call any phone number or a saved contact, ask for the same person again with something like \"call him again\", and Emysa remembers context from past conversations and calls.",
@@ -604,15 +605,23 @@ async function sendMessage(req, res, supabase, userId) {
   // resolver below. See lib/callPlatform.js.
   let priorCalls = [];
   let priorPlans = [];
-  if (intent.action === 'retry') {
+  // "Try again" on its own is a repeat of this conversation's last call, whatever the
+  // intent model made of it. Without this a bare "Try again" could be read as a new
+  // call whose objective is the words "try again", or as small talk.
+  const looksLikeRetry = !target && !pending && isRetryCommand(text);
+  if (intent.action === 'retry' || looksLikeRetry) {
     const [{ data: sessionCalls }, { data: sessionPlans }] = await Promise.all([
-      supabase.from('calls').select('contact_id,to_number,objective,platform,created_at')
+      supabase.from('calls').select('id,contact_id,to_number,objective,instructions,platform,status,retry_of,attempt_number,created_at')
         .eq('user_id', userId).eq('session_id', sessionId).order('created_at', { ascending: false }).limit(10),
       supabase.from('call_plans').select('to_number,contact_id,objective,created_at')
         .eq('user_id', userId).eq('session_id', sessionId).order('created_at', { ascending: false }).limit(1),
     ]);
     priorCalls = sessionCalls || [];
     priorPlans = sessionPlans || [];
+    if (looksLikeRetry && intent.action !== 'retry' && !intent.phoneNumber && (priorCalls.length || priorPlans.length)) {
+      console.log('[retry] bare retry command resolved to the conversation\'s last call');
+      intent = { ...intent, action: 'retry', contactName: null, phoneNumber: null, objective: null };
+    }
   }
   const platformChoice = resolveCallPlatform({ action: intent.action, intentChannel: intent.channel, uiChannel, priorCalls, plans: priorPlans });
   let callChannel = platformChoice.channel;
@@ -629,6 +638,7 @@ async function sendMessage(req, res, supabase, userId) {
     let contact = null;
     let retryToNumber = null;
     let retryObjective = null;
+    let retryPlan = null;
 
     // Which lines does THIS user actually have? Twilio exists only for users
     // who verified or rented a number; WhatsApp only once it is linked.
@@ -668,16 +678,14 @@ async function sendMessage(req, res, supabase, userId) {
       // The call to repeat: this conversation's most recent call on the
       // chosen line; failing that, its most recent call on any line (the
       // person is a property of the conversation, the line is not).
-      const lastCall = callChannel
-        ? priorCalls.find((c) => c.platform === callChannel) || null
-        : priorCalls[0] || null;
-      const identityRow = lastCall || priorCalls[0] || null;
+      retryPlan = planRetry(priorCalls, { channel: callChannel });
+      const identityRow = retryPlan?.last || null;
       if (identityRow?.contact_id) {
         const { data: c } = await supabase.from('contacts').select('*').eq('id', identityRow.contact_id).maybeSingle();
         contact = c;
       }
-      retryToNumber = identityRow?.to_number || null;
-      retryObjective = lastCall?.objective || identityRow?.objective || null;
+      retryToNumber = retryPlan?.toNumber || null;
+      retryObjective = retryPlan?.objective || null;
 
       if (!retryToNumber) {
         // A phone call prepared through the plan flow is this conversation's
@@ -728,7 +736,13 @@ async function sendMessage(req, res, supabase, userId) {
       newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `What would you like me to say to ${label}? Send your instructions and I'll prepare a summary before you tap Call Now.`, null, msgSource));
       return respond();
     }
-    let objective = intent.objective || (intent.action === 'retry' ? retryObjective : null) || 'Say hello and share what the user wants to talk about.';
+    // A retry keeps the objective of the call being repeated. The user's retry wording
+    // ("try again") is a command to the app, never part of what the call is about; words
+    // they add beyond it are appended.
+    const addedObjective = intent.objective && !isRetryCommand(intent.objective) && intent.objective !== retryObjective ? intent.objective : null;
+    let objective = intent.action === 'retry'
+      ? [retryObjective, addedObjective].filter(Boolean).join('\nAlso: ') || 'Say hello and share what the user wants to talk about.'
+      : intent.objective || 'Say hello and share what the user wants to talk about.';
     const { data: langProfile } = await supabase.from('profiles').select('language').eq('user_id', userId).maybeSingle();
     if (langProfile?.language && langProfile.language !== 'en') {
       const langName = LANGUAGE_NAMES[langProfile.language] || langProfile.language;
@@ -764,18 +778,26 @@ async function sendMessage(req, res, supabase, userId) {
         await supabase.from('social_calls').insert({ user_id: userId, platform: callChannel, peer_identifier: digitsOnly, status: 'queued' })
           .then(({ error }) => { if (error) console.error('social_calls insert failed:', error.message); });
         // Throws on failure — a call we cannot track must not be dialled.
+        const isRetry = intent.action === 'retry' && retryPlan;
+        const keptInstructions = isRetry ? [retryPlan.instructions, isRetryCommand(text) ? null : text.trim()].filter(Boolean).join('\n') || null : text.trim();
         return createCallRecord(supabase, userId, {
           platform: callChannel,
           toNumber: digitsOnly,
           objective,
-          instructions: text.trim(),
+          // The original instructions travel with every attempt; "try again" never replaces them.
+          instructions: keptInstructions,
           contactId: contact?.id || null,
           sessionId,
+          ...(isRetry ? { retryOf: retryPlan.rootId, attemptNumber: retryPlan.attemptNumber } : {}),
         });
       };
-      const markSocialRowFailed = async (callRow, reason) => {
+      const markSocialRowFailed = async (callRow, reason, classification) => {
         if (!callRow) return;
-        await markCallFailed(supabase, callRow.id, reason);
+        await markCallFailed(supabase, callRow.id, reason, {
+          scope: classification?.scope || null,
+          attemptState: classification?.attemptState || 'failed',
+          ownerMessage: classification ? ownerMessageFor(classification, { label, channelName, reason: userError(reason, null) }) : null,
+        });
         await supabase.from('social_calls')
           .update({ status: 'failed' })
           .eq('user_id', userId)
@@ -822,6 +844,11 @@ async function sendMessage(req, res, supabase, userId) {
         return respond({ pendingCall: { token, channel: callChannel, contactName: contact?.name || null, toNumber: digitsOnly }, channelUsed: callChannel });
       }
       const callRow = await createSocialRow();
+      if (callRow?.duplicateOfAttempt) {
+        // A simultaneous "try again" already created this attempt: report it, never dial twice.
+        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I'm already calling ${label} on ${channelName}.`, callRow.id, msgSource));
+        return respond({ channelUsed: callChannel, callId: callRow.id, toNumber: digitsOnly, contactName: contact?.name || null });
+      }
       try {
         let platformCallId = null;
         if (callChannel === 'whatsapp') {
@@ -867,8 +894,17 @@ async function sendMessage(req, res, supabase, userId) {
         newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `Calling ${label} on ${channelName} ${verb}.`, callRow.id, msgSource));
         return respond({ channelUsed: callChannel, callId: callRow.id, toNumber: digitsOnly, contactName: contact?.name || null });
       } catch (err) {
-        await markSocialRowFailed(callRow, err.message);
-        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `I couldn't call ${label} on ${channelName}: ${userError(err.message, 'it did not go through')}`, callRow?.id || null, msgSource));
+        const classification = classifyPlacementError(err);
+        await markSocialRowFailed(callRow, err.message, classification);
+        if (classification.ownerLinkDown) {
+          // The OWNER's own linked account is down. Say so on the account's status (the
+          // Connected accounts screen) so the owner sees it there; it is an internal
+          // problem and never becomes a statement about the recipient.
+          const table = callChannel === 'whatsapp' ? 'whatsapp_accounts' : 'telegram_accounts';
+          await supabase.from(table).update({ status: 'disconnected', last_error: 'The link needs reconnecting' }).eq('user_id', userId);
+        }
+        console.warn('[call-placement] failed', { callId: callRow?.id, scope: classification.scope, attemptState: classification.attemptState, status: err?.statusCode || null });
+        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', ownerMessageFor(classification, { label, channelName, reason: userError(err.message, null) }), callRow?.id || null, msgSource));
         return respond({ channelUsed: callChannel });
       }
     }
@@ -892,13 +928,13 @@ async function sendMessage(req, res, supabase, userId) {
     }
   }
 
-  const rawReplyText = intent.reply || 'Got it.';
+  const rawReplyText = intent.reply || 'Sorry, could you say that again?';
   const { endCall, cleanText } = shouldEndCall(rawReplyText, text);
   const { moodTag } = extractAndStripControlTags(rawReplyText);
   const inlineMood = intent.mood ? { emotion: String(intent.mood) } : moodTag;
   const finalEmotion = await commitTurn({ moodTag: inlineMood });
 
-  newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', cleanText || 'Got it.', null, msgSource));
+  newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', cleanText || 'Sorry, could you say that again?', null, msgSource));
   return respond({
     endCall,
     emotionState: {

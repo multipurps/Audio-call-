@@ -64,7 +64,7 @@ function fixture() {
     if (url.includes('api.openai.com')) {
       const body = JSON.parse(options.body);
       const reply = llmReplies.length ? llmReplies.shift() : {
-        summary: 'Confirmed lunch at noon with a window table.',
+        summary: 'I confirmed lunch at noon with a window table.',
         topics: ['lunch booking'], decisions: ['noon, window table'],
         commitments: ['keep the reservation'], followups: [], incomplete: false, memories: [],
       };
@@ -161,11 +161,11 @@ test('terminal transitions summarise the persisted transcript and post the summa
   assert.equal(call.status, 'completed');
   assert.equal(call.duration_seconds, 300);
   assert.ok(call.outcome_summary, 'summary must be generated from the transcript');
-  assert.match(call.outcome_summary, /Confirmed lunch at noon/, call.outcome_summary);
+  assert.match(call.outcome_summary, /confirmed lunch at noon/, call.outcome_summary);
   assert.equal(call.summary_status, 'completed');
   const chatRows = f.db.tables.assistant_messages.filter((m) => m.call_id === 'call-a');
   assert.equal(chatRows.length, 1, 'exactly one chat follow-up per finished call');
-  assert.match(chatRows[0].content, /Confirmed lunch at noon/, 'the chat message carries the real summary, not a generic label');
+  assert.match(chatRows[0].content, /confirmed lunch at noon/, 'the chat message carries the real summary, not a generic label');
   assert.doesNotMatch(chatRows[0].content, /Call finished\.$/i);
 
   // A duplicate terminal callback (carrier retries) must not double-post or

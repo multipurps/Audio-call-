@@ -4,7 +4,7 @@ import { database, loadApi } from './helpers.mjs';
 
 const ENV = { OPENAI_API_KEY: 'test-only', VAPID_PUBLIC_KEY: '', VAPID_PRIVATE_KEY: '', VAPID_SUBJECT: '' };
 const SUMMARY = {
-  summary: 'Ayo confirmed the venue for Friday at six and agreed to bring the printed menus.',
+  summary: 'I confirmed the venue for Friday at six with Ayo, and he agreed to bring the printed menus.',
   topics: ['venue'], learned: [], decisions: ['Venue confirmed for Friday at six'], commitments: ['Ayo will bring printed menus'],
   details: ['Friday, 6pm'], followups: ['Send Ayo the guest count'], unresolved: [], memories: [], incomplete: false,
 };

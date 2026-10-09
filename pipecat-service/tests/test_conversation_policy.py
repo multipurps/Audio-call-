@@ -15,7 +15,9 @@ from app.conversation_policy import (
     acknowledgement_opener,
     classify_caller_state,
     find_automatic_acknowledgements,
+    audit_reply,
     split_style_instructions,
+    validate_live_instructions,
 )
 from app.live import END_CALL_TOOL, build_live_system_prompt, opening_cue
 
@@ -257,11 +259,14 @@ def test_caller_state_does_not_leak_as_an_announcement():
 
 # ------------------------------------------------- engine/voice/prompt safety
 
-def test_operator_supplied_prompt_still_owns_the_persona():
+def test_operator_supplied_prompt_owns_the_persona_but_never_switches_the_policy_off():
     s = load_settings({**ENV, "ASSISTANT_SYSTEM_PROMPT": "You are Ada. Be terse."})
     p = build_live_system_prompt(s, "Speaking as Ada.")
-    assert p.startswith("You are Ada. Be terse.")
-    assert "PRIVATE BEHAVIOR RULES" not in p and "Delegation policy:" in p and "Speaking as Ada." in p
+    assert "You are Ada. Be terse." in _section(p, "CHARACTER / PERSONALITY", "PRIVATE BEHAVIOR RULES")
+    assert all(h in p for h in SECTION_ORDER)
+    assert "Acknowledgement sounds are not a conversational tool" in p
+    assert "Speaking as Ada." in p
+    assert validate_live_instructions(p) == []
 
 
 def test_missing_call_row_falls_back_to_the_context_string():

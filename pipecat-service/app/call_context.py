@@ -40,6 +40,14 @@ from typing import Any
 import httpx
 from loguru import logger
 
+from app.call_state import (
+    ATTEMPT_WINDOW_SECS,
+    AttemptContext,
+    derive_attempts,
+    in_chain,
+    is_diagnostic_text,
+    is_retry_command,
+)
 from app.config import Settings
 
 #: Statuses after which a call is finished. Mirrors the app's vocabulary
@@ -225,6 +233,9 @@ class CallContext:
     #: ISO timestamp of the actual answer (set by ``set_in_progress``), so
     #: talk duration can be measured from the answer rather than from dial.
     answered_at: str | None = None
+    #: Verified facts about earlier attempts of the same call request. Built only
+    #: from recorded provider events; account-link state is deliberately absent.
+    attempt: AttemptContext = field(default_factory=AttemptContext)
     _rest: _Rest | None = field(default=None, repr=False)
     _in_progress_done: bool = field(default=False, repr=False)
 
@@ -602,6 +613,15 @@ def _session_id_candidates(session_id: str) -> list[str]:
     return out
 
 
+_CALL_COLUMNS_LEGACY = (
+    "id, user_id, contact_id, to_number, objective, instructions, "
+    "status, platform, session_id, outcome_summary, created_at"
+)
+#: sql/029 adds the attempt columns. PostgREST rejects a select naming a column that
+#: does not exist yet, so an un-migrated database falls back to the legacy list.
+_CALL_COLUMNS_FULL = _CALL_COLUMNS_LEGACY + ", retry_of, attempt_number, attempt_events"
+
+
 async def _find_call_row(
     rest: _Rest, *, session_id: str, platform: str
 ) -> dict[str, Any] | None:
@@ -613,54 +633,114 @@ async def _find_call_row(
         if _is_uuid(candidate):
             attempts.append({"id": f"eq.{candidate}"})
         for filters in attempts:
-            try:
-                rows = await rest.select(
-                    "calls",
-                    select=(
-                        "id, user_id, contact_id, to_number, objective, instructions, "
-                        "status, platform, session_id, outcome_summary, created_at"
-                    ),
-                    filters=filters,
-                    order="created_at.desc",
-                    limit=1,
-                )
-            except Exception:  # noqa: BLE001 - try the next candidate
-                continue
+            rows = None
+            for columns in (_CALL_COLUMNS_FULL, _CALL_COLUMNS_LEGACY):
+                try:
+                    rows = await rest.select(
+                        "calls", select=columns, filters=filters, order="created_at.desc", limit=1
+                    )
+                    break
+                except Exception:  # noqa: BLE001 - try fewer columns, then the next candidate
+                    continue
             if rows:
                 return rows[0]
     return None
 
 
+async def _fetch_attempt_context(
+    rest: _Rest, *, user_id: str, row: dict[str, Any], session_id: str
+) -> AttemptContext:
+    """Earlier attempts of THIS call request (the retry chain), never other calls.
+
+    Only rows that share the chain root are considered, so an unrelated earlier call
+    to the same person is not mistaken for a failed attempt of this one.
+    """
+    call_id = str(row.get("id"))
+    retry_of = str(row["retry_of"]) if row.get("retry_of") else None
+    attempt_number = int(row.get("attempt_number") or 1)
+    if not retry_of or not user_id:
+        return AttemptContext(attempt_number=attempt_number, retry_of=retry_of)
+    try:
+        rows = await rest.select(
+            "calls",
+            select="id, status, created_at, answered_at, duration_seconds, attempt_number, attempt_events, retry_of",
+            filters={"user_id": f"eq.{user_id}", "or": f"(id.eq.{retry_of},retry_of.eq.{retry_of})"},
+            order="created_at.desc",
+            limit=10,
+        )
+    except Exception as exc:  # noqa: BLE001 - attempt facts are best-effort; absent means unknown
+        _log("WARNING", session_id, "attempt history unavailable", error=type(exc).__name__)
+        return AttemptContext(attempt_number=attempt_number, retry_of=retry_of)
+    chain = [r for r in rows if in_chain(r, root_id=retry_of, current_id=call_id)]
+    previous = [
+        a for a in derive_attempts(chain, current_id=call_id)
+        if a.age_secs is None or a.age_secs <= ATTEMPT_WINDOW_SECS
+    ]
+    return AttemptContext(attempt_number=max(attempt_number, len(previous) + 1), retry_of=retry_of, previous=previous)
+
+
+def _age_label(iso: object, now: float | None = None) -> str:
+    """"today", "3 days ago", "2 months ago": how recent a remembered fact is."""
+    ts = _entry_epoch({"at": iso}) if isinstance(iso, str) else 0.0
+    if not ts:
+        return "date unknown"
+    days = int(((now if now is not None else time.time()) - ts) // 86400)
+    if days <= 0:
+        return "today"
+    if days == 1:
+        return "yesterday"
+    if days < 14:
+        return f"{days} days ago"
+    if days < 60:
+        return f"{days // 7} weeks ago"
+    if days < 700:
+        return f"{days // 30} months ago"
+    return "over a year ago"
+
+
 async def _fetch_memories(
     rest: _Rest, *, user_id: str, contact_id: str | None, session_id: str
 ) -> list[str]:
-    filters: dict[str, str] = {"user_id": f"eq.{user_id}"}
-    if contact_id:
-        filters["or"] = f"(contact_id.eq.{contact_id},contact_id.is.null)"
-    try:
-        rows = await rest.select(
-            "memories",
-            select="content, memory_type, contact_id, created_at",
-            filters=filters,
-            order="created_at.desc",
-            limit=50,
-        )
-    except Exception as exc:  # noqa: BLE001 - context degrades, call continues
-        _log("WARNING", session_id, "memory retrieval failed", error=type(exc).__name__)
+    """Facts learned on earlier calls with THIS contact, confirmed ones only.
+
+    Anything without a contact is never returned: a fact recorded against nobody
+    could belong to a different person, and speaking it to this one is a leak.
+    Uncertain and superseded rows are not facts and are skipped. Each line carries
+    how old it is so recent information can be told from old.
+    """
+    if not user_id or not contact_id:
+        return []
+    filters: dict[str, str] = {"user_id": f"eq.{user_id}", "contact_id": f"eq.{contact_id}"}
+    rows = None
+    last: Exception | None = None
+    for columns, extra in (
+        ("content, memory_type, contact_id, user_id, created_at, updated_at, status", {"status": "eq.confirmed"}),
+        ("content, memory_type, contact_id, user_id, created_at, updated_at", {}),  # pre-029 schema
+    ):
+        try:
+            rows = await rest.select(
+                "memories",
+                select=columns,
+                filters={**filters, **extra},
+                order="updated_at.desc",
+                limit=50,
+            )
+            break
+        except Exception as exc:  # noqa: BLE001 - try the older schema, then degrade
+            last = exc
+    if rows is None:
+        _log("WARNING", session_id, "memory retrieval failed", error=type(last).__name__ if last else "unknown")
         return []
 
-    scored: list[tuple[int, str]] = []
+    lines: list[str] = []
     for row in rows:
+        if str(row.get("user_id") or user_id) != user_id or str(row.get("contact_id")) != contact_id:
+            continue  # never trust the filter alone
         content = str(row.get("content") or "").strip()
-        if not content or _SECRET_PATTERNS.search(content):
+        if not content or _SECRET_PATTERNS.search(content) or is_diagnostic_text(content):
             continue
-        # Prefer memories recorded against this specific contact, then
-        # general user memories; within each band recency wins (rows arrive
-        # newest-first).
-        rank = 0 if contact_id and row.get("contact_id") == contact_id else 1
-        scored.append((rank, content))
-    scored.sort(key=lambda item: item[0])
-    return [content for _, content in scored[:8]]
+        lines.append(f"{content} ({_age_label(row.get('updated_at') or row.get('created_at'))})")
+    return lines[:8]
 
 
 # --- Reviewed per-contact memory (sql/026_contact_memory.sql) ------------------
@@ -769,26 +849,40 @@ async def _fetch_contact_memory(
 
 
 async def _fetch_prior_summaries(
-    rest: _Rest, *, user_id: str, contact_id: str | None, session_id: str
+    rest: _Rest, *, user_id: str, contact_id: str | None, session_id: str, exclude_call_id: str | None = None
 ) -> list[str]:
+    """Summaries of earlier calls that were real conversations with this contact.
+
+    A call that never connected has an ``outcome_summary`` too (the owner-facing
+    "couldn't connect" text), but it is not something the two of them talked about
+    and it often names an internal problem. Only summaries generated from a
+    transcript (``summary_status = completed``) are used, and never the current
+    call's own row.
+    """
     if not contact_id:
         return []
+    filters = {
+        "user_id": f"eq.{user_id}",
+        "contact_id": f"eq.{contact_id}",
+        "outcome_summary": "not.is.null",
+        "summary_status": "eq.completed",
+        "status": "eq.completed",
+    }
+    if exclude_call_id:
+        filters["id"] = f"neq.{exclude_call_id}"
     try:
         rows = await rest.select(
-            "calls",
-            select="outcome_summary, created_at",
-            filters={
-                "user_id": f"eq.{user_id}",
-                "contact_id": f"eq.{contact_id}",
-                "outcome_summary": "not.is.null",
-            },
-            order="created_at.desc",
-            limit=5,
+            "calls", select="outcome_summary, created_at", filters=filters, order="created_at.desc", limit=5
         )
     except Exception as exc:  # noqa: BLE001
         _log("WARNING", session_id, "summary history retrieval failed", error=type(exc).__name__)
         return []
-    return [str(row.get("outcome_summary") or "").strip() for row in rows if row.get("outcome_summary")]
+    out = []
+    for row in rows:
+        text = str(row.get("outcome_summary") or "").strip()
+        if text and not is_diagnostic_text(text):
+            out.append(text)
+    return out
 
 
 async def _fetch_contact_name(
@@ -848,6 +942,7 @@ def build_extra_context(context: CallContext) -> str:
         )
     if context.instructions and context.instructions != context.objective:
         lines.append(f"More private detail for your brief: {context.instructions}")
+    lines.extend(context.attempt.lines)
     if context.prior_summaries:
         lines.append("What you and this person talked about before:")
         lines.extend(f"- {summary}" for summary in context.prior_summaries)
@@ -979,18 +1074,21 @@ async def resolve_call_context(
                 rest, user_id=db_user_id, number=to_number, session_id=session_id
             )
 
-        contact_name, memories, contact_memory, summaries, profile = await asyncio.gather(
+        contact_name, memories, contact_memory, summaries, profile, attempt = await asyncio.gather(
             _fetch_contact_name(rest, contact_id=contact_id, to_number=to_number, session_id=session_id),
-            _fetch_memories(rest, user_id=db_user_id, contact_id=contact_id, session_id=session_id)
-            if settings.enable_persistent_memory and db_user_id
+            _fetch_memories(rest, user_id=db_user_id, contact_id=memory_contact_id, session_id=session_id)
+            if settings.enable_persistent_memory and db_user_id and memory_contact_id
             else _empty(),
             _fetch_contact_memory(rest, user_id=db_user_id, contact_id=memory_contact_id, session_id=session_id)
             if settings.enable_persistent_memory and db_user_id and memory_contact_id
             else _empty(),
-            _fetch_prior_summaries(rest, user_id=db_user_id, contact_id=contact_id, session_id=session_id)
+            _fetch_prior_summaries(
+                rest, user_id=db_user_id, contact_id=memory_contact_id, session_id=session_id, exclude_call_id=call_id
+            )
             if db_user_id
             else _empty(),
             _fetch_profile(rest, user_id=db_user_id) if db_user_id else _default_profile(),
+            _fetch_attempt_context(rest, user_id=db_user_id, row=row, session_id=session_id),
         )
         language = profile["language"]
 
@@ -1003,7 +1101,9 @@ async def resolve_call_context(
             session_id=session_id,
             to_number=to_number,
             objective=str(row.get("objective") or ""),
-            instructions=str(row.get("instructions") or ""),
+            # A bare "try again" saved as the instructions of a retry (older rows) is
+            # a command to the app, not part of what this call is about.
+            instructions="" if is_retry_command(row.get("instructions")) else str(row.get("instructions") or ""),
             status=str(row.get("status") or "queued"),
             extra_context="",
             memories=memories,
@@ -1012,6 +1112,7 @@ async def resolve_call_context(
             language=language if isinstance(language, str) else "en",
             user_name=profile["name"],
             user_country=profile["country"],
+            attempt=attempt,
             _rest=rest,
         )
         context.extra_context = build_extra_context(context)
@@ -1024,6 +1125,8 @@ async def resolve_call_context(
             memories=len(memories),
             contactMemory=len(contact_memory),
             priorSummaries=len(summaries),
+            attempt=attempt.attempt_number,
+            earlierAttempts=len(attempt.previous),
         )
         return context
     except Exception as exc:  # noqa: BLE001 - never block the call on context

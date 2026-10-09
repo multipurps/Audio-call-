@@ -11,7 +11,10 @@ test('declined, busy, rang out and voicemail are told apart with the action take
   assert.match(d({ rawStatus: 'ended', reason: 'voicemail' }), /voicemail.*without leaving a message/);
 });
 
-test('failed calls say it never rang; connected calls are left to the summary', () => {
-  assert.match(d({ rawStatus: 'failed', reason: 'not registered' }), /did not connect.*never rang/);
+test('failed calls say only that they did not connect; no claim about ringing or the recipient\'s app', () => {
+  const text = d({ rawStatus: 'failed', reason: 'not registered' });
+  assert.match(text, /did not connect/);
+  assert.match(text, /don't know why/);
+  assert.doesNotMatch(text, /never rang|check that they have/i);
   assert.equal(d({ rawStatus: 'completed', answered: true }), null);
 });

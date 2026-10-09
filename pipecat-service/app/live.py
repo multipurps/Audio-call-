@@ -35,7 +35,12 @@ from typing import Any
 from loguru import logger
 
 from app.config import Settings
-from app.conversation_policy import build_structured_live_prompt
+from app.conversation_policy import (
+    audit_reply,
+    build_structured_live_prompt,
+    instructions_fingerprint,
+    validate_live_instructions,
+)
 from app.expressive_context import build_personality_context
 from app.pipeline import DEFAULT_SYSTEM_PROMPT
 
@@ -101,7 +106,9 @@ Do not delegate to the backend when:
 - You can answer from the conversation or the call context.
 - You need a brief clarification.
 
-Never guess the result of backend work while waiting."""
+Backend work is silent. Do not announce it, do not say you are checking or waiting, \
+and do not fill the time with a phrase. Never guess the result of backend work while \
+waiting."""
 
 
 def _live_persona() -> str:
@@ -138,14 +145,14 @@ def build_live_system_prompt(settings: Settings, extra_context: str | None = Non
     Assembled in the fixed section order of app/conversation_policy.py unless an
     operator supplies the whole prompt (which then owns the persona outright).
     """
-    if settings.system_prompt:
-        prompt = f"{settings.system_prompt}\n\n{_LIVE_POLICIES}"
-        if extra_context:
-            prompt = f"{prompt}\n\nContext for this call:\n{extra_context}"
-        return prompt
+    # An operator-supplied prompt replaces the persona only. The private behaviour
+    # rules, forbidden claims and opening style always apply, so it can never
+    # switch the conversation policy off.
+    persona = settings.system_prompt or _live_persona()
+    personality = "" if settings.system_prompt else build_personality_context()
     return build_structured_live_prompt(
-        persona=_live_persona(),
-        personality=build_personality_context(),
+        persona=persona,
+        personality=personality,
         policies=_LIVE_POLICIES,
         end_call_tool=END_CALL_TOOL,
         call_context=call_context,
@@ -258,6 +265,77 @@ def build_live_context() -> Any:
     return LLMContext(tools=build_end_call_tools())
 
 
+# --------------------------------------------------------------------------
+# Instruction integrity
+# --------------------------------------------------------------------------
+
+
+def lock_live_instructions(llm: Any, instructions: str, session_id: str = "-") -> Any:
+    """Make the session's instructions impossible to replace silently.
+
+    ``instructions`` is validated (required sections present, no legacy
+    directives). A later ``system_instruction`` settings update is dropped, and
+    whatever is about to be sent as the session's instructions is checked to still
+    contain the locked text; if it does not, the locked text is put back. Each
+    intervention is logged with a fingerprint, never the content.
+    """
+    problems = validate_live_instructions(instructions)
+    if problems:
+        live_log(session_id, "instructions failed validation", level="ERROR", problems="; ".join(problems))
+        raise RuntimeError("GPT-Live instructions are missing required policy: " + "; ".join(problems))
+    fingerprint = instructions_fingerprint(instructions)
+    llm._emysa_instruction_fingerprint = fingerprint  # noqa: SLF001 - read by tests and the session-start log
+    llm._emysa_instructions = instructions  # noqa: SLF001
+
+    original_update = getattr(llm, "_update_settings", None)
+    if callable(original_update):
+
+        async def _guarded_update(delta: Any) -> Any:
+            from pipecat.services.settings import NOT_GIVEN, is_given
+
+            incoming = getattr(delta, "system_instruction", NOT_GIVEN)
+            if is_given(incoming) and incoming != instructions:
+                live_log(
+                    session_id,
+                    "ignored a settings update that tried to replace the instructions",
+                    level="WARNING",
+                    lockedFingerprint=fingerprint,
+                    attemptedFingerprint=instructions_fingerprint(str(incoming)),
+                )
+                delta.system_instruction = NOT_GIVEN
+            return await original_update(delta)
+
+        llm._update_settings = _guarded_update  # noqa: SLF001
+
+    original_params = getattr(llm, "_invocation_params", None)
+    if callable(original_params):
+
+        def _guarded_params() -> Any:
+            params = original_params()
+            sent = params.get("instructions") if hasattr(params, "get") else None
+            if instructions not in str(sent or ""):
+                live_log(
+                    session_id,
+                    "session instructions diverged from the locked text; restored",
+                    level="ERROR",
+                    lockedFingerprint=fingerprint,
+                    sentFingerprint=instructions_fingerprint(str(sent or "")),
+                )
+                params["instructions"] = instructions
+            return params
+
+        llm._invocation_params = _guarded_params  # noqa: SLF001
+    return llm
+
+
+def audit_spoken_reply(session_id: str, reply: str) -> list[str]:
+    """Log (never rewrite) a spoken reply that breaks the conversation policy."""
+    found = audit_reply(reply)
+    if found:
+        live_log(session_id, "reply broke the conversation policy", level="WARNING", violations=",".join(found))
+    return found
+
+
 def build_live_service(
     settings: Settings,
     *,
@@ -301,6 +379,7 @@ def build_live_service(
     )
 
     sid = session_id or (state.session_id if state is not None else "-")
+    lock_live_instructions(llm, system_instruction, sid)
 
     async def _end_call(params: Any) -> None:
         if state is not None:
@@ -324,7 +403,7 @@ def build_live_service(
         async def _started(_service: Any, _session: Any) -> None:
             state.session_started = True
             state.session_started_at = time.monotonic()
-            live_log(sid, "session.created", id=getattr(_session, "id", "?"))
+            live_log(sid, "session.created", id=getattr(_session, "id", "?"), instructions=getattr(llm, "_emysa_instruction_fingerprint", "?"))
             live_log(sid, f"model={settings.live_model}")
             live_log(
                 sid,
@@ -433,6 +512,8 @@ def build_live_pipeline(
             clean = (text or "").strip()
             if clean and transcript is not None:
                 transcript.note(self._speaker, clean, interrupted=interrupted)
+            if clean and self._speaker == "ai":
+                audit_spoken_reply(st.session_id, clean)  # flags only; never rewrites speech
 
         async def process_frame(self, frame: Any, direction: FrameDirection) -> None:
             await super().process_frame(frame, direction)

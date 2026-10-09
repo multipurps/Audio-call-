@@ -1,6 +1,7 @@
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { minutesLeft, NO_MINUTES_MESSAGE } from '../lib/billing.js';
 import { resolveWhatsappStatus } from '../lib/whatsappStatus.js';
+import { attemptStateForProviderStatus } from '../lib/callAttempts.js';
 import { describeSocialCallEnd } from '../lib/socialCallEnd.js';
 import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsPlaceAICall, wacallsHangup } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
@@ -10,6 +11,7 @@ import {
   createCallRecord,
   markCallPlaced,
   markCallFailed,
+  recordAttemptEvent,
   findDuplicateActiveCall,
   appendTranscriptEntry,
   maybeGenerateCallSummary,
@@ -180,7 +182,7 @@ async function relayCallStatus(req, res, supabase) {
   if (incomingCallId) {
     let q = supabase
       .from('calls')
-      .select('id, user_id, contact_id, status, transcript, session_id, answered_at, created_at')
+      .select('id, user_id, contact_id, status, transcript, session_id, answered_at, created_at, platform_call_id')
       .eq('id', incomingCallId);
     if (bodyUserId) q = q.eq('user_id', bodyUserId);
     const { data } = await q.maybeSingle();
@@ -190,7 +192,7 @@ async function relayCallStatus(req, res, supabase) {
     if (call) break;
     let q = supabase
       .from('calls')
-      .select('id, user_id, contact_id, status, transcript, session_id, answered_at, created_at')
+      .select('id, user_id, contact_id, status, transcript, session_id, answered_at, created_at, platform_call_id')
       .eq('platform', platform)
       .eq('platform_call_id', candidate);
     if (bodyUserId) q = q.eq('user_id', bodyUserId);
@@ -208,7 +210,7 @@ async function relayCallStatus(req, res, supabase) {
   if (!call && bodySessionId && userId) {
     let q = supabase
       .from('calls')
-      .select('id, user_id, contact_id, status, transcript, session_id, answered_at, created_at')
+      .select('id, user_id, contact_id, status, transcript, session_id, answered_at, created_at, platform_call_id')
       .eq('user_id', userId)
       .eq('platform', platform)
       .eq('session_id', bodySessionId)
@@ -223,7 +225,7 @@ async function relayCallStatus(req, res, supabase) {
     if (!call && peerIdentifier) {
       const { data: looseRows } = await supabase
         .from('calls')
-        .select('id, user_id, contact_id, status, transcript, session_id, answered_at, created_at')
+        .select('id, user_id, contact_id, status, transcript, session_id, answered_at, created_at, platform_call_id')
         .eq('user_id', userId)
         .eq('platform', platform)
         .eq('session_id', bodySessionId)
@@ -237,7 +239,7 @@ async function relayCallStatus(req, res, supabase) {
   if (!call && peerIdentifier && userId) {
     const { data } = await supabase
       .from('calls')
-      .select('id, user_id, contact_id, status, transcript, session_id, answered_at, created_at')
+      .select('id, user_id, contact_id, status, transcript, session_id, answered_at, created_at, platform_call_id')
       .eq('user_id', userId)
       .eq('platform', platform)
       .eq('to_number', peerIdentifier)
@@ -246,6 +248,14 @@ async function relayCallStatus(req, res, supabase) {
       .limit(1)
       .maybeSingle();
     call = data;
+  }
+
+  // A report that names a provider call id belongs to THAT call only. If the row we
+  // landed on (by number / session fallback) is a different provider call, the event is
+  // from an earlier attempt: ignore it instead of letting it end or alter this one.
+  const reportedId = platformCallIdCandidates[0] || null;
+  if (call && reportedId && call.platform_call_id && !platformCallIdCandidates.includes(String(call.platform_call_id))) {
+    return res.status(200).json({ ok: true, callId: call.id, ignored: 'event from another attempt' });
   }
 
   // A late "ringing" report must never pull an answered/finished call back.
@@ -292,6 +302,8 @@ async function relayCallStatus(req, res, supabase) {
       if (appended) callUpdate.transcript = appended;
     }
     await supabase.from('calls').update(callUpdate).eq('id', call.id);
+    const attemptState = attemptStateForProviderStatus(rawCallStatus, { durationSeconds });
+    if (rawCallStatus !== 'transcript') await recordAttemptEvent(supabase, call.id, { state: attemptState, source: 'relay', code: String(rawCallStatus).toLowerCase().slice(0, 30) });
   }
 
   if (peerIdentifier) {
