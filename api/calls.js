@@ -228,7 +228,11 @@ async function monitorToken(req, res, supabase, userId) {
   const sessionId = callSessionId(call);
   if (!sessionId) {
     console.warn(`monitorToken: no bridge session for call=${callId} platform=${call.platform} hasPlatformCallId=${Boolean(call.platform_call_id)}`);
-    return res.status(409).json({ error: call.platform === 'phone' || call.platform === 'twilio' ? 'Listen-in is not enabled for phone calls yet' : 'This call has no live audio session yet (WhatsApp has not attached the assistant). Try again in a few seconds.', code: 'no-session' });
+    const platformLabel = ({ whatsapp: 'WhatsApp', telegram: 'Telegram', signal: 'Signal' })[call.platform];
+    const noSessionMsg = call.platform === 'phone' || call.platform === 'twilio'
+      ? 'Listen-in is not enabled for phone calls yet'
+      : `This call has no live audio session yet${platformLabel ? ` (${platformLabel} has not attached the assistant)` : ''}. Try again in a few seconds.`;
+    return res.status(409).json({ error: noSessionMsg, code: 'no-session' });
   }
 
   const secret = process.env.ASSISTANT_BRIDGE_SECRET;
