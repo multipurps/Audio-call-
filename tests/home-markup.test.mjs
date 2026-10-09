@@ -22,11 +22,11 @@ test('bottom nav is Home / Chat / Recent / Profile and every tab has a screen', 
 });
 
 test('Home keeps the agreed pieces and none of the removed ones', () => {
-  for (const keep of ['Emysa', 'Your calls. Your people. Your voice.', 'On your behalf', 'Balance', 'Add time', 'What should Emysa handle?', 'Call someone', 'Schedule a call', 'Follow up for me', 'Ask / find something', 'More', 'People']) {
+  for (const keep of ['Emysa', 'Your calls. Your people. Your voice.', 'Balance', 'Add time', 'What can Emysa do?', 'Call someone', 'Schedule a call', 'Follow up for me', 'Ask / find something', 'Import Chat', 'Recent']) {
     assert.ok(home.includes(keep), keep);
   }
-  assert.deepEqual([...home.matchAll(/data-action="([a-z]+)"/g)].map((m) => m[1]), ['call', 'schedule', 'followup', 'ask', 'more']);
-  for (const gone of ['Things Emysa can handle', 'callsList', 'recentChatsList', 'Recent calls', 'contactsList']) {
+  assert.deepEqual([...home.matchAll(/data-action="([a-z]+)"/g)].map((m) => m[1]), ['call', 'schedule', 'followup', 'ask', 'import']);
+  for (const gone of ['Things Emysa can handle', 'callsList', 'recentChatsList', 'Recent calls', 'contactsList', 'On your behalf', 'dashBehalfList', 'dashPeople"', 'What should Emysa handle?']) {
     assert.ok(!home.includes(gone), gone);
   }
 });
@@ -46,10 +46,11 @@ test('top-right of Home is Notifications (not Profile) and opens its sheet', () 
   assert.ok(app.includes("openSheet('sheet-notifications')"));
 });
 
-test('On your behalf is an empty scaffold: no invented items', () => {
-  const behalf = home.slice(home.indexOf('aria-label="On your behalf"'), home.indexOf('aria-label="People"'));
-  assert.ok(behalf.includes('id="dashBehalfList"'));
-  assert.ok(!/Scheduled|In progress|Completed|Sarah|Ayodele|Package/.test(behalf));
+test('Home is a static hero + services + standalone Recent row (no card box, no welcome text)', () => {
+  assert.ok(css.includes('#screen-home{overflow:hidden'));
+  const recent = home.slice(home.indexOf('aria-label="Recent"'), home.indexOf('id="screen-chat"'));
+  assert.ok(recent.includes('id="dashPeopleRow"') && !recent.includes('dashCard'));
+  assert.ok(!/Welcome/i.test(home));
 });
 
 test('Profile tab shows a ring and the profile picture only while active', () => {

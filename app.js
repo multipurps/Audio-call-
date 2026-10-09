@@ -3223,12 +3223,23 @@ let homeHeroLoadedAt = 0;
 // Hero GIF: one row in home_hero, uploaded from the admin panel. Nothing is
 // shown (no placeholder) until a GIF exists.
 async function loadHomeHero() {
+  const img = $('dashHeroMedia');
+  // Paint from the last known URL straight away (the browser/service-worker
+  // already has the file), then confirm with the database.
+  const cached = localStorage.getItem('emysa.heroUrl');
+  if (cached && !img.getAttribute('src')) { img.src = cached; img.hidden = false; }
   if (Date.now() - homeHeroLoadedAt < 60000) return;
   homeHeroLoadedAt = Date.now();
   const { data } = await supabase.from('home_hero').select('url').order('created_at', { ascending: false }).limit(1).maybeSingle();
-  const img = $('dashHeroMedia');
-  if (data?.url) { if (img.getAttribute('src') !== data.url) img.src = data.url; img.hidden = false; }
-  else { img.removeAttribute('src'); img.hidden = true; }
+  if (data?.url) {
+    try { localStorage.setItem('emysa.heroUrl', data.url); } catch {}
+    if (img.getAttribute('src') !== data.url) img.src = data.url;
+    img.hidden = false;
+  } else {
+    try { localStorage.removeItem('emysa.heroUrl'); } catch {}
+    img.removeAttribute('src');
+    img.hidden = true;
+  }
 }
 
 async function loadHomePeople() {
@@ -5168,6 +5179,7 @@ authBgVideoEl.addEventListener('ended', () => {
   const rows = data || [];
   authBgVideoUrls = rows.filter((r) => r.media_type === 'video').map((r) => r.url);
   authBgUrls = rows.filter((r) => r.media_type !== 'video').map((r) => r.url);
+  try { localStorage.setItem('emysa.authBgUrls', JSON.stringify(authBgUrls)); } catch {}
 
   if (authBgVideoUrls.length) {
     authBgVideoEl.classList.remove('hidden');
@@ -5183,4 +5195,37 @@ authBgVideoEl.addEventListener('ended', () => {
       showAuthBg(authBgUrls[authBgIndex]);
     }, 6000);
   }
+})();
+
+
+// ---------- Cookie consent + notification permission on install ----------
+// iOS only shows the notification prompt from a tap, so in an installed app the
+// consent button's tap is where we ask. If consent was already given (e.g. in the
+// browser before installing) the first tap anywhere in the installed app asks instead.
+const COOKIE_CONSENT_KEY = 'emysa.cookieConsent';
+
+function notificationsAskable() {
+  return isStandalonePWA() && 'Notification' in window && Notification.permission === 'default';
+}
+
+async function askNotificationsOnInstall() {
+  if (!notificationsAskable()) return;
+  try { await Notification.requestPermission(); } catch {}
+  // Subscribes if granted and signed in; after sign-in the normal app-open
+  // check does it, since permission is then already granted.
+  ensureNotificationsEnabled();
+}
+
+(function initCookieConsent() {
+  let consented = false;
+  try { consented = !!localStorage.getItem(COOKIE_CONSENT_KEY); } catch {}
+  const banner = $('cookieBanner');
+  $('cookiePrivacyLink').addEventListener('click', () => openSheet('sheet-privacy'));
+  $('cookieOk').addEventListener('click', () => {
+    try { localStorage.setItem(COOKIE_CONSENT_KEY, new Date().toISOString()); } catch {}
+    banner.classList.add('hidden');
+    askNotificationsOnInstall();
+  });
+  if (!consented) banner.classList.remove('hidden');
+  else if (notificationsAskable()) document.addEventListener('pointerup', askNotificationsOnInstall, { once: true });
 })();

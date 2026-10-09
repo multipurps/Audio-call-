@@ -949,7 +949,9 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .dashIconBtn{width:44px; height:44px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; color:var(--icon-color); background:var(--glass-bg); border:1px solid var(--glass-border);}
 
 .dashCard{background:var(--glass-bg); border:1px solid var(--glass-border); border-radius:24px;}
-.dashHero{position:relative; overflow:hidden; display:flex; flex-direction:column; min-height:clamp(420px, 118vw, 560px); margin:0 -18px; padding:0 18px 18px; border-radius:0 0 32px 32px; background:var(--glass-bg);}
+#screen-home{overflow:hidden; padding-bottom:calc(92px + env(safe-area-inset-bottom, 0px));}
+#screen-home.active{display:grid; grid-template-rows:minmax(300px, 1fr) auto auto auto;}
+.dashHero{position:relative; overflow:hidden; display:flex; flex-direction:column; min-height:0; margin:0 -18px; padding:0 18px 18px; border-radius:0 0 32px 32px; background:var(--glass-bg);}
 .dashHero::before{content:""; position:absolute; inset:0 0 auto 0; height:190px; z-index:1; pointer-events:none; background:linear-gradient(to bottom, rgba(0,0,0,.6), rgba(0,0,0,0));}
 .dashHero > .dashHeader{position:relative; z-index:2; flex:none;}
 .dashHero .dashIconBtn{background:rgba(var(--coffee-light-rgb),0.55); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);}
@@ -967,15 +969,15 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .dashAddBtn .ic{width:16px; height:16px; color:var(--accent);}
 .dashAddBtn:active, .dashAction:active, .dashPerson:active{opacity:.7;}
 
-.dashHeading{font-size:20px; font-weight:600; letter-spacing:-0.01em; margin:28px 0 12px 2px;}
+.dashHeading{font-size:20px; font-weight:600; letter-spacing:-0.01em; margin:20px 0 6px 2px;}
 .dashActions{display:grid; grid-template-columns:repeat(5, 1fr); gap:6px;}
 .dashAction{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:6px 3px; min-height:74px; color:var(--text); background:none; border:0; border-radius:0; box-shadow:none;}
 .dashAction .ic{width:30px; height:30px; color:var(--accent);}
 .dashAction span{font-size:12px; font-weight:500; line-height:1.15; text-align:center; overflow-wrap:break-word; max-width:100%;}
 
-.dashPeople{margin-top:16px; padding:16px 18px 18px;}
-.dashSectionHead{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
-.dashSectionTitle{display:flex; align-items:center; gap:8px; font-size:19px; font-weight:600;}
+.dashRecent{margin-top:10px; padding:0 2px;}
+.dashSectionHead{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
+.dashSectionTitle{display:flex; align-items:center; gap:8px; font-size:20px; font-weight:600; letter-spacing:-0.01em;}
 .dashSectionTitle .ic{color:var(--accent);}
 .dashLink{display:flex; align-items:center; gap:2px; font-size:15px; color:var(--dim);}
 .dashLink .ic{width:16px; height:16px;}
@@ -1056,3 +1058,9 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .contactCallBtn svg.phoneIc{width:28px; height:28px;}
 .dialCallBtn svg.phoneIc{width:44px; height:44px;}
 .iosRowGlyph svg.phoneIc{width:32px; height:32px;}
+
+/* Cookie consent: sits above the login/home screens, below sheets so the Privacy Policy can open over it. */
+.cookieBanner{position:absolute; left:0; right:0; bottom:0; z-index:120; padding:18px 18px calc(18px + env(safe-area-inset-bottom, 0px)); background:rgba(11,11,11,.94); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); border-top:1px solid var(--glass-border); border-radius:22px 22px 0 0; color:var(--text);}
+.cookieBanner.hidden{display:none;}
+.cookieBanner p{font-size:14px; line-height:1.5; margin:0 0 14px;}
+.cookieLink{display:inline; padding:0; background:none; border:0; color:var(--accent); font:inherit; text-decoration:underline; cursor:pointer;}

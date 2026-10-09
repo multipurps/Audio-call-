@@ -7,9 +7,31 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0b0b0b">
 <title>Emysa</title>
+<link rel="preconnect" href="https://esm.sh" crossorigin>
+<link rel="preconnect" href="https://gucblbvfzuraaozswfwd.supabase.co" crossorigin>
+<script>
+  // Start fetching the hero GIF and login-screen GIFs before app.js even loads.
+  // app.js saves their URLs here the first time it sees them; the service worker
+  // keeps the files themselves, so repeat opens are instant.
+  (function () {
+    try {
+      var urls = [];
+      var hero = localStorage.getItem('emysa.heroUrl');
+      if (hero) urls.push(hero);
+      var auth = JSON.parse(localStorage.getItem('emysa.authBgUrls') || '[]');
+      if (auth[0]) urls.push(auth[0]);
+      urls.forEach(function (u, i) {
+        var l = document.createElement('link');
+        l.rel = 'preload'; l.as = 'image'; l.href = u;
+        if (i === 0) l.setAttribute('fetchpriority', 'high');
+        document.head.appendChild(l);
+      });
+    } catch (e) {}
+  })();
+</script>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-10-08.1">
+<link rel="stylesheet" href="styles.css?v=2026-10-09.2">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -118,14 +140,15 @@
       });
       setTimeout(function () {
         var boot = document.getElementById('authBoot');
-        if (boot && boot.style.display !== 'none') showBootError('This is taking longer than usual. Check your connection.');
+        // A slow connection just keeps the splash up; only a device that is actually offline gets a message.
+        if (boot && boot.style.display !== 'none' && navigator.onLine === false) showBootError('You appear to be offline. Check your connection.');
       }, 7000);
       // Unlike a module <script src>, dynamic import() doesn't wait for the
       // DOM on its own — app.js expects elements to already exist, so this
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-10-08.1').catch(function (err) {
+        import('./app.js?v=2026-10-09.2').catch(function (err) {
           showBootError('Something went wrong. Check your connection and try again.', 'Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -366,7 +389,7 @@
 
     <div class="screen active" id="screen-home">
       <section class="dashHero" aria-label="Balance">
-        <img class="dashHeroMedia" id="dashHeroMedia" alt="" hidden>
+        <img class="dashHeroMedia" id="dashHeroMedia" alt="" hidden fetchpriority="high" decoding="async">
         <header class="dashHeader">
           <div class="dashBrand">
             <img class="dashLogo" src="icon-192.png" alt="">
@@ -397,9 +420,9 @@
         <button type="button" class="dashAction" data-action="import"><svg class="ic"><use href="#ic-import"/></svg><span>Import Chat</span></button>
       </div>
 
-      <section class="dashCard dashPeople" aria-label="People">
+      <section class="dashRecent" aria-label="Recent">
         <div class="dashSectionHead">
-          <span class="dashSectionTitle"><svg class="ic"><use href="#ic-people"/></svg>People</span>
+          <span class="dashSectionTitle">Recent</span>
           <button type="button" class="dashLink" id="dashPeopleAll">See all<svg class="ic"><use href="#ic-chevron"/></svg></button>
         </div>
         <div class="dashPeopleRow" id="dashPeopleRow"></div>
@@ -745,6 +768,11 @@
     <div class="sheetTitle">Notifications</div>
   </div>
   <div class="sheetBody" id="notificationsList"><p class="notifEmpty">No notifications yet.</p></div>
+</div>
+
+<div id="cookieBanner" class="cookieBanner hidden" role="dialog" aria-live="polite" aria-label="Cookies and privacy">
+  <p>By using Emysa, you consent to our use of first- and third-party cookies and similar technologies, such as local storage, to keep you signed in, remember your settings, enhance your experience, process payments, conduct analytics, and understand how the app is used. You also consent to our sharing of information about your use of Emysa with the service providers that help us run it. Please see our <button type="button" class="cookieLink" id="cookiePrivacyLink">Privacy Policy</button>.</p>
+  <button type="button" class="primaryBtn" id="cookieOk">OK</button>
 </div>
 
 <div class="sheetScreen hidden" id="sheet-terms">
