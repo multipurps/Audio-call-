@@ -27,6 +27,7 @@
   <nav class="menu" id="menu" aria-label="Main navigation"><a href="#how">How it works</a><a href="#voice">Hear Emysa</a><a href="#install">Install</a><button type="button" class="install-action">Install the app</button></nav>
   <main id="main">
     <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-bg" aria-hidden="true"><div class="bg-a"></div><div class="bg-b"></div><video class="bg-v" muted loop playsinline preload="auto"></video></div>
       <div class="hero-copy">
         <p class="eyebrow hero-eyebrow"><span class="signal-dot"></span> ANOTHER WAY TO SHOW UP</p>
         <h1 id="hero-title">Your presence,<br><em>even when</em><br>you’re not there<span class="period">.</span></h1>
@@ -34,19 +35,16 @@
           <div class="hero-actions"><button class="button button-light install-action" type="button">Install Emysa <span aria-hidden="true">↗</span></button><a class="button button-outline" href="#how">Explore Emysa <span aria-hidden="true">↓</span></a></div>
         </div>
       </div>
-      <div class="hero-visual scene" data-background="hero_background" data-overlay="hero_overlay" aria-label="Emysa product visual">
-        <div class="scene-base hero-base"><div class="scene-orbit">E</div><div class="scene-index">01 / PRESENCE</div><div class="scene-caption">THE CALL GOES ON.<br>YOU GET YOUR TIME BACK.</div></div>
-        <div class="scene-overlay fallback-screen hero-screen" aria-label="Illustrative Emysa call preview">
-          <div class="phone-top"><span>9:41</span><span>●●●  ▰</span></div><div class="mock-logo"><img src="/icon-192.png" alt="" width="32" height="32"> Emysa</div>
+      <div class="hero-card scene" data-background="unused_hero_background" data-overlay="hero_overlay" aria-label="Emysa app interface">
+        <div class="scene-overlay fallback-screen hero-screen" aria-label="Emysa call preview">
+          <div class="mock-logo"><img src="/icon-192.png" alt="" width="32" height="32"> Emysa</div>
           <div class="mock-context">CALL IN PROGRESS <span class="signal-dot"></span></div>
           <div class="mock-name">Calling for you.</div>
           <div class="mock-line">“Ask if they have a table for four at 7:30.”</div>
           <div class="mock-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
           <div class="mock-foot">Emysa is speaking for you <span>↗</span></div>
         </div>
-        <p class="visual-disclaimer">Interface preview · real call flow</p>
       </div>
-      <a class="hero-scroll" href="#how">SCROLL TO DISCOVER <span aria-hidden="true">↓</span></a>
     </section>
 
     <section class="manifesto section-reveal" id="how" aria-labelledby="how-title">

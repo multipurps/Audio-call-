@@ -92,22 +92,7 @@ async function loadMedia() {
     }
   } catch { /* Deliberate local fallbacks stay visible if content API is unavailable. */ }
 }
-loadMedia().then(async () => {
-  const hero = document.querySelector('.hero-visual .scene-base');
-  if (!hero || mediaBySlot.get('hero_background')?.length) return;
-  try {
-    const KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1Y2JsYnZmenVyYWFvenN3ZndkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0NzQ0ODQsImV4cCI6MjA5MTA1MDQ4NH0.OCsEC_FfOJmoL5sQWP8zYnw9SmWuy4xggfcpIIxQw-c';
-    const r = await fetch('https://gucblbvfzuraaozswfwd.supabase.co/rest/v1/auth_backgrounds?select=url,media_type&order=created_at.asc', { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } });
-    const rows = r.ok ? await r.json() : [];
-    const pick = rows.find((x) => allowedMedia(x.url));
-    if (!pick) return;
-    let el;
-    if (pick.media_type === 'video') { el = document.createElement('video'); el.muted = true; el.loop = true; el.autoplay = true; el.playsInline = true; }
-    else { el = document.createElement('img'); el.alt = ''; el.className = 'scene-bg'; }
-    el.src = allowedMedia(pick.url);
-    el.addEventListener(pick.media_type === 'video' ? 'loadeddata' : 'load', () => { hero.replaceChildren(el); hero.classList.add('media-loaded'); }, { once: true });
-  } catch {}
-});
+loadMedia();
 
 if ('IntersectionObserver' in window && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
   document.documentElement.classList.add('js-reveal');
@@ -234,3 +219,25 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape') setMenu(false); });
 // Fit the outlined footer wordmark to the full width
 const fit = () => { const w = document.getElementById('footMark'), s = w.firstElementChild; s.style.fontSize = '100px'; s.style.fontSize = (100 * w.clientWidth / s.getBoundingClientRect().width) + 'px'; };
 document.fonts.ready.then(fit); addEventListener('resize', fit);
+
+// Hero background: the login-screen backgrounds (video first, then crossfading images), no overlay
+(async () => {
+  const KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1Y2JsYnZmenVyYWFvenN3ZndkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0NzQ0ODQsImV4cCI6MjA5MTA1MDQ4NH0.OCsEC_FfOJmoL5sQWP8zYnw9SmWuy4xggfcpIIxQw-c';
+  let rows = [];
+  try {
+    const r = await fetch('https://gucblbvfzuraaozswfwd.supabase.co/rest/v1/auth_backgrounds?select=url,media_type&order=created_at.asc', { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } });
+    rows = r.ok ? await r.json() : [];
+  } catch {}
+  rows = rows.filter((x) => allowedMedia(x.url));
+  const vids = rows.filter((x) => x.media_type === 'video').map((x) => allowedMedia(x.url));
+  const imgs = rows.filter((x) => x.media_type !== 'video').map((x) => allowedMedia(x.url));
+  if (vids.length) {
+    const v = document.querySelector('.bg-v'); let i = 0;
+    const next = () => { v.src = vids[i++ % vids.length]; v.loop = vids.length === 1; v.play().catch(() => {}); };
+    v.addEventListener('ended', next); v.addEventListener('playing', () => v.classList.add('on'), { once: true }); next();
+  } else if (imgs.length) {
+    const layers = [document.querySelector('.bg-a'), document.querySelector('.bg-b')]; let i = 0, a = 0;
+    const show = () => { const n = 1 - a; layers[n].style.backgroundImage = `url('${imgs[i % imgs.length]}')`; layers[n].classList.add('on'); layers[a].classList.remove('on'); a = n; i++; };
+    show(); if (imgs.length > 1) setInterval(show, 6000);
+  }
+})();
