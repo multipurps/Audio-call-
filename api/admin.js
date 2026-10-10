@@ -354,7 +354,7 @@ const LANDING_SLOTS = new Set([
   'conversation_background', 'conversation_overlay', 'call_screenshots',
   'voice_orb', 'feature_media', 'demo_video', 'live_call_video',
 ]);
-const LANDING_GALLERIES = new Set(['call_screenshots', 'feature_media']);
+const LANDING_GALLERIES = new Set(['call_screenshots', 'feature_media', 'hero_overlay']);
 const LANDING_TYPES = { 'image/gif': 'gif', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/webm': 'webm' };
 function validLandingType(slot, type) {
   return LANDING_SLOTS.has(slot) && !!LANDING_TYPES[type] &&

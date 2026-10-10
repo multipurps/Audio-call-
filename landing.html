@@ -13,9 +13,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300;400;500;600&family=Krona+One&display=swap">
   <link rel="stylesheet" href="/vendor/adhs/adhs.css">
-  <link rel="stylesheet" href="/landing.css?v=2026-10-10.4">
+  <link rel="stylesheet" href="/landing.css?v=2026-10-10.5">
   <script src="/vendor/adhs/adhs.js" defer></script>
-  <script src="/landing.js?v=2026-10-10.4" defer></script>
+  <script src="/landing.js?v=2026-10-10.5" defer></script>
   <title>Emysa — Your presence, even when you're not there.</title>
 </head>
 <body>
@@ -34,18 +34,18 @@
         <div class="hero-bottom"><p>Give Emysa your message and your instructions. It calls, asks the questions, and carries the conversation <strong>on your behalf.</strong></p>
           <div class="hero-actions"><button class="button button-light install-action" type="button">Install Emysa <span aria-hidden="true">↗</span></button><a class="button button-outline" href="#how">Explore Emysa <span aria-hidden="true">↓</span></a></div>
         </div>
-        <div class="hero-voice" id="voice"><div class="audio-controls"><button type="button" id="audioToggle" aria-label="Play Emysa's introduction">▶</button><div class="audio-meta"><span id="audioState" role="status">Hear Emysa introduce itself</span><div class="audio-time"><span id="audioCurrent">0:00</span><span id="audioDuration">0:00</span></div><input type="range" id="audioSeek" aria-label="Introduction playback position" value="0" min="0" max="100"></div></div><audio id="introductionAudio" preload="auto" src="/assets/intro/intro.mp3"></audio><details class="transcript" open><summary>Live transcript <span aria-hidden="true">↗</span></summary><div id="transcriptText" class="transcript-text">Loading transcript…</div></details></div>
+        <div class="intro" id="voice"><div class="introHead"><i class="introLive"></i><span>EMYSA</span><span class="introBars" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div><div class="introLog" id="introLog" aria-live="polite"></div><button type="button" class="introSkip" id="introSkip">Skip</button></div>
       </div>
-      <div class="hero-card scene" data-background="unused_hero_background" data-overlay="hero_overlay" aria-label="Emysa app interface">
-        <div class="scene-overlay fallback-screen hero-screen" aria-label="Emysa call preview">
-          <div class="mock-logo"><img src="/icon-192.png" alt="" width="32" height="32"> Emysa</div>
-          <div class="mock-context">CALL IN PROGRESS <span class="signal-dot"></span></div>
-          <div class="mock-name">Calling for you.</div>
-          <div class="mock-line">“Ask if they have a table for four at 7:30.”</div>
-          <div class="mock-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-          <div class="mock-foot">Emysa is speaking for you <span>↗</span></div>
-        </div>
-      </div>
+    </section>
+
+    <section class="appshots section-reveal" aria-label="Emysa app screenshots">
+      <div class="shots" id="shots"><figure class="shot"><div class="fallback-screen hero-screen" aria-label="Emysa call preview">
+        <div class="mock-logo"><img src="/icon-192.png" alt="" width="32" height="32"> Emysa</div>
+        <div class="mock-context">CALL IN PROGRESS <span class="signal-dot"></span></div>
+        <div class="mock-name">Calling for you.</div>
+        <div class="mock-line">“Ask if they have a table for four at 7:30.”</div>
+        <div class="mock-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="mock-foot">Emysa is speaking for you <span>↗</span></div></div></figure></div>
     </section>
 
     <section class="manifesto section-reveal" id="how" aria-labelledby="how-title">

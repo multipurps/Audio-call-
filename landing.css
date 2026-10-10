@@ -78,3 +78,31 @@ footer{display:block;padding:clamp(50px,6vw,90px) clamp(22px,4vw,72px) 0;overflo
 .foot-meta{display:flex;justify-content:space-between;gap:30px;flex-wrap:wrap;border-top:1px solid #ffffff1f;padding:22px 0 28px;margin-bottom:40px;font-size:12px;color:#8d8a84;letter-spacing:.04em}.foot-meta span:last-child{max-width:520px}
 @media(max-width:820px){.foot-grid{grid-template-columns:1fr 1fr}.foot-about{grid-column:1/-1}}
 @media(max-width:600px){.foot-grid{grid-template-columns:1fr}}
+
+/* Black throughout */
+body,.manifesto,.details,.end,.interlude,.gallery,.livecall{background:#0b0b0b!important;color:#eeeae1}
+.manifesto-grid p,.details-list p,.step-strip small,.end>p,.end>small{color:#a7a49e}
+.manifesto-grid strong{color:#eeeae1}.step-strip{border-top-color:#ffffff24}.step-strip>div{border-color:#ffffff24}
+.details-list>div,.details-list>div:last-child{border-color:#ffffff24}
+.manifesto,.details,.end,.interlude,.showcase{border-top:1px solid #ffffff14}
+.interlude{min-height:0;padding:clamp(80px,12vw,170px) clamp(22px,4vw,72px)}.interlude span{display:none}
+.button-dark{background:#eeeae1;color:#0b0b0b}.button-dark:hover{background:#ec674a}
+/* Hero: gif only inside the hero, text and typed transcript directly on it */
+.hero{display:block;min-height:calc(100svh - 82px);padding:clamp(40px,8vh,90px) clamp(22px,4vw,72px) clamp(36px,6vh,70px);display:flex;align-items:flex-end}
+.hero-copy{max-width:900px;gap:26px}
+.intro{max-width:560px;margin-top:14px;font:500 17px/1.45 ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:#ffe9e6}
+.introHead{display:flex;align-items:center;gap:8px;font:600 11px/1 ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:.2em;color:rgba(255,200,200,.8)}
+.introLive{width:7px;height:7px;border-radius:50%;background:#ff3b4e;box-shadow:0 0 10px #ff3b4e;animation:introPulse 1.4s ease-in-out infinite}
+.introBars{margin-left:auto;display:flex;gap:3px;align-items:flex-end;height:12px}.introBars i{width:3px;height:30%;background:rgba(255,160,160,.85);border-radius:2px;animation:introBar .9s ease-in-out infinite}
+.introBars i:nth-child(2){animation-delay:.15s}.introBars i:nth-child(3){animation-delay:.3s}.introBars i:nth-child(4){animation-delay:.45s}.intro.silent .introBars i{animation-play-state:paused;height:20%}
+.introLog{min-height:112px;display:flex;flex-direction:column;justify-content:flex-end;gap:6px;margin-top:12px;text-shadow:0 0 14px rgba(255,90,90,.4),0 2px 18px #000;word-break:break-word}
+.introLine{opacity:.3;transition:opacity .4s}.introLine.prev{opacity:.55}.introLine.cur{opacity:1}.introPrompt{color:#ff5a6a;margin-right:8px}
+.introCaret{display:inline-block;margin-left:5px;color:#ff5a6a;animation:introBlink 1s steps(1) infinite}
+.introSkip{background:none;border:0;color:rgba(255,220,220,.6);font:500 12px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;padding:8px 0;margin-top:4px}
+@keyframes introBlink{0%,55%{opacity:1}56%,100%{opacity:0}}@keyframes introPulse{50%{opacity:.35}}@keyframes introBar{0%,100%{height:25%}50%{height:100%}}
+/* App screenshots: every upload, each filling its own large card, swipe or scroll sideways */
+.appshots{padding:clamp(60px,9vw,130px) 0;background:#0b0b0b;border-top:1px solid #ffffff14}
+.shots{display:flex;gap:clamp(14px,2vw,28px);overflow-x:auto;scroll-snap-type:x mandatory;padding:0 clamp(22px,4vw,72px);-webkit-overflow-scrolling:touch;scrollbar-width:none}.shots::-webkit-scrollbar{display:none}
+.shots:has(.shot:only-child){justify-content:center}
+.shot{flex:0 0 min(80vw,400px);aspect-ratio:9/19;margin:0;scroll-snap-align:center;position:relative;overflow:hidden;border-radius:34px;border:1px solid #eeeae13d;background:#101012;box-shadow:0 40px 90px #000a}
+.shot img,.shot .fallback-screen{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border:0;border-radius:0;max-height:none;transform:none;padding:30px 26px}.shot img{padding:0}

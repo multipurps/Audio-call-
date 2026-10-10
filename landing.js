@@ -79,6 +79,10 @@ async function loadMedia() {
         gallery.append(figure);
       });
     }
+    const shots = mediaBySlot.get('hero_overlay') || [];
+    if (shots.length) {
+      document.getElementById('shots').replaceChildren(...shots.map((row, i) => { const f = document.createElement('figure'); f.className = 'shot'; const im = document.createElement('img'); im.src = allowedMedia(row.url); im.alt = `Emysa app screenshot ${i + 1}`; im.loading = i ? 'lazy' : 'eager'; im.decoding = 'async'; f.append(im); return f; }));
+    }
     const live = mediaBySlot.get('live_call_video')?.[0];
     if (live) {
       const lv = document.createElement('video');
@@ -112,55 +116,37 @@ if ('IntersectionObserver' in window && !matchMedia('(prefers-reduced-motion: re
   document.querySelectorAll('.section-reveal').forEach((node) => observer.observe(node));
 }
 
-const audio = document.getElementById('introductionAudio');
-const toggle = document.getElementById('audioToggle');
-const status = document.getElementById('audioState');
-const progress = document.getElementById('audioSeek');
-const orbStage = document.getElementById('orbStage');
-const time = (value) => Number.isFinite(value) ? `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}` : '0:00';
-const updateAudio = () => {
-  document.getElementById('audioCurrent').textContent = time(audio.currentTime);
-  document.getElementById('audioDuration').textContent = time(audio.duration);
-  if (Number.isFinite(audio.duration) && audio.duration > 0) progress.value = String(Math.round(audio.currentTime / audio.duration * 100));
-  const playing = !audio.paused && !audio.ended;
-  orbStage?.classList.toggle('playing', playing);
-  const oi = document.getElementById('orbIndicator'); if (oi) oi.textContent = playing ? 'PLAYING' : 'READY';
-  toggle.textContent = playing ? 'Ⅱ' : '▶';
-  toggle.setAttribute('aria-label', playing ? "Pause Emysa's introduction" : "Play Emysa's introduction");
-  if (playing) status.textContent = 'Now playing';
-};
-for (const event of ['play', 'pause', 'timeupdate', 'loadedmetadata', 'durationchange']) audio.addEventListener(event, updateAudio);
-audio.addEventListener('ended', () => {
-  try { localStorage.setItem('emysa_intro_seen', '1'); } catch {}
-  status.textContent = 'Introduction finished. Play again any time.';
-  updateAudio();
-});
-audio.addEventListener('error', () => { status.textContent = 'Audio could not load. Please try again later.'; });
-const play = async () => {
-  try { await audio.play(); }
-  catch { status.textContent = 'Tap play to listen to Emysa.'; updateAudio(); }
-};
-toggle.addEventListener('click', () => { if (audio.paused) play(); else audio.pause(); });
-progress.addEventListener('input', () => {
-  if (Number.isFinite(audio.duration)) audio.currentTime = Number(progress.value) / 100 * audio.duration;
-});
-// Autoplay on load. Browsers block sound until the visitor interacts, so if the
-// attempt is refused the introduction starts on the first touch, click, key or scroll.
-audio.play().catch(() => {
-  const go = () => { audio.play().catch(() => {}); ['pointerdown', 'keydown', 'touchstart', 'wheel'].forEach((t) => removeEventListener(t, go)); };
-  ['pointerdown', 'keydown', 'touchstart', 'wheel'].forEach((t) => addEventListener(t, go, { passive: true }));
-});
-fetch('/assets/intro/intro.json').then((r) => { if (!r.ok) throw Error('Transcript unavailable'); return r.json(); })
-  .then((data) => {
-    const wrap = document.getElementById('transcriptText');
-    wrap.replaceChildren();
-    for (const line of data.lines || []) {
-      const p = document.createElement('p');
-      p.textContent = line.text;
-      p.dataset.start = line.words?.[0]?.start ?? 0; p.dataset.end = line.words?.at(-1)?.end ?? 0;
-      wrap.append(p);
-    }
-  }).catch(() => { document.getElementById('transcriptText').textContent = 'Transcript could not be loaded right now.'; });
+// Typed voice transcript, same behaviour as the Get Started screen: each word types across the time it is spoken.
+(async () => {
+  const stage = document.getElementById('voice'), log = document.getElementById('introLog'), skipBtn = document.getElementById('introSkip');
+  let script; try { script = await (await fetch('/assets/intro/intro.json')).json(); } catch { stage.hidden = true; return; }
+  const lines = script.lines, first = lines.map((l) => l.words[0].start), lastEnd = lines.at(-1).words.at(-1).end;
+  const rows = lines.map(() => { const r = document.createElement('div'); r.className = 'introLine'; r.innerHTML = '<span class="introPrompt">&gt;</span><span class="txt"></span>'; return r; });
+  const caret = Object.assign(document.createElement('span'), { className: 'introCaret', textContent: '•' });
+  let cur = -1, raf = 0, done = false;
+  const render = (t) => {
+    let li = -1; while (li + 1 < lines.length && first[li + 1] <= t) li++;
+    if (li < 0) return;
+    if (li !== cur) { cur = li; log.innerHTML = ''; for (let k = Math.max(0, li - 2); k <= li; k++) { rows[k].classList.toggle('cur', k === li); rows[k].classList.toggle('prev', k === li - 1); log.appendChild(rows[k]); } }
+    const parts = []; for (const w of lines[li].words) { if (t < w.start) break; const p = t >= w.end ? 1 : Math.max(.15, (t - w.start) / Math.max(.05, w.end - w.start)); parts.push(w.text.slice(0, Math.max(1, Math.ceil(w.text.length * p)))); }
+    for (let k = Math.max(0, li - 2); k < li; k++) rows[k].lastChild.textContent = lines[k].text;
+    rows[li].lastChild.textContent = parts.join(' '); rows[li].appendChild(caret); stage.classList.toggle('silent', t > lastEnd);
+  };
+  const audio = new Audio(script.audio.startsWith('/') ? script.audio : '/' + script.audio); audio.playsInline = true; audio.preload = 'auto';
+  const tick = () => { if (done) return; render(audio.currentTime); raf = requestAnimationFrame(tick); };
+  const start = () => audio.play().then(() => { raf = requestAnimationFrame(tick); });
+  const finish = () => { done = true; cancelAnimationFrame(raf); audio.pause(); cur = -1; render(lastEnd + 1); caret.remove(); stage.classList.add('silent'); skipBtn.textContent = 'Replay'; };
+  audio.addEventListener('ended', () => setTimeout(finish, 700), { once: true });
+  skipBtn.addEventListener('click', () => { if (done) { done = false; audio.currentTime = 0; skipBtn.textContent = 'Skip'; start().catch(() => {}); } else finish(); });
+  log.innerHTML = '<div class="introLine cur"><span class="introPrompt">&gt;</span><span class="txt"></span></div>'; log.firstChild.appendChild(caret);
+  // Autoplay now. iPhone only unlocks sound on a real tap (click/touchend), so retry on those until it starts.
+  start().catch(() => {
+    const evs = ['click', 'touchend', 'keydown'];
+    const cleanup = () => evs.forEach((e) => document.removeEventListener(e, retry, true));
+    const retry = () => { if (done) return cleanup(); start().then(cleanup).catch(() => {}); };
+    evs.forEach((e) => document.addEventListener(e, retry, true));
+  });
+})();
 
 // add-to-homescreen v4.6.0: create on page load; .show() only on intent.
 // It handles iOS versions, iPad, social in-app browsers and desktop Safari.
@@ -215,9 +201,6 @@ async function install() {
 document.querySelectorAll('.install-action').forEach((button) => button.addEventListener('click', install));
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 
-audio.addEventListener('timeupdate', () => {
-  document.querySelectorAll('#transcriptText p[data-start]').forEach((p) => { const on = audio.currentTime >= p.dataset.start - .2 && audio.currentTime <= +p.dataset.end + .5; p.classList.toggle('now', on); if (on && !p.classList.contains('seen')) { p.classList.add('seen'); const box = p.parentElement; box.scrollTo({ top: p.offsetTop - box.offsetTop - 8, behavior: 'smooth' }); } });
-});
 // Menu, sticky header controls
 const burger = document.getElementById('burger'), menu = document.getElementById('menu');
 const setMenu = (o) => { menu.classList.toggle('open', o); burger.setAttribute('aria-expanded', o); document.body.style.overflow = o ? 'hidden' : ''; };

@@ -429,7 +429,7 @@ function showBootError(err, offerReset = false) {
 // All slot definitions are intentionally explicit; no arbitrary URL or path input.
 const LANDING_SLOTS = [
   ['hero_background', 'Hero background', 'Animated GIF or image behind the hero screenshot'],
-  ['hero_overlay', 'Hero screenshot', 'Screenshot layered over the background'],
+  ['hero_overlay', 'Hero screenshot', 'App screenshots shown full-size in cards under the hero; upload several, use arrows to reorder'],
   ['objective_background', 'Objective scene background', 'Large exposed GIF or image'],
   ['objective_overlay', 'Objective screenshot', 'Screenshot above the scene'],
   ['conversation_background', 'Conversation scene background', 'Large exposed GIF or image'],
@@ -440,7 +440,7 @@ const LANDING_SLOTS = [
   ['demo_video', 'Optional demonstration video', 'Muted, inline video; MP4 or WebM'],
   ['live_call_video', 'Live call sample video', 'Shown with sound controls in the live-call section; MP4 or WebM, up to 50 MB'],
 ];
-const GALLERIES = new Set(['call_screenshots', 'feature_media']);
+const GALLERIES = new Set(['call_screenshots', 'feature_media', 'hero_overlay']);
 let landingRows = [];
 async function loadLandingMedia() {
   const area = $('landingSlots');
