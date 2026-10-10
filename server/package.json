@@ -5,12 +5,12 @@
   "type": "module",
   "main": "patter-relay.js",
   "scripts": {
-    "start": "node patter-relay.js"
+    "start": "node patter-relay.js",
+    "postinstall": "cd .. && npm install --omit=dev --no-audit --no-fund"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
     "getpatter": "^0.7.0",
-    "web-push": "^3.6.7",
     "ws": "^8.18.0"
   }
 }
