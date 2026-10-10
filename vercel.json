@@ -7,7 +7,6 @@
     "api/memories.js": { "maxDuration": 60 }
   },
   "rewrites": [
-    { "source": "/", "destination": "/landing.html" },
     { "source": "/api/bachs-webhook", "destination": "/api/referrals?action=webhook" }
   ],
   "headers": [

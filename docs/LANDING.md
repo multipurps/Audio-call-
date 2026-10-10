@@ -1,7 +1,8 @@
 # Public landing page / deployment notes
 
-- On Vercel, `/` serves `landing.html`; `/landing.html` also works directly.
-  The existing authenticated application and login remain at `/index.html`.
+- The landing page is served at `/landing.html` only. `/` still serves the app (`/index.html`).
+  To make it the main page later, add `{ "source": "/", "destination": "/landing.html" }` as the first entry in `rewrites` in `vercel.json`
+  (and update `scripts/build-check.mjs` and `tests/landing.test.mjs`, which currently require that route to be absent).
   The PWA manifest starts at `/index.html`; there is **one** manifest and one
   root service worker. OAuth and email confirmation redirects now return to
   `/index.html`, not `/`, so the landing route cannot intercept the session.

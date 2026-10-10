@@ -6,7 +6,7 @@ const read = (f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
 test('the public route preserves the existing authenticated app and install target', () => {
   const vercel = JSON.parse(read('vercel.json'));
   const manifest = JSON.parse(read('manifest.json'));
-  assert.deepEqual(vercel.rewrites[0], { source: '/', destination: '/landing.html' });
+  assert.ok(!vercel.rewrites.some((r) => r.source === '/'), '/ must keep serving the app until the landing page is promoted');
   assert.equal(manifest.start_url, '/index.html');
   assert.equal(manifest.scope, '/');
   assert.match(read('app.js'), /redirectTo: window.location.origin \+ '\/index.html'/);
