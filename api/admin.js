@@ -9,12 +9,18 @@ import { getServiceClient, requireAdmin } from '../lib/supabaseAdmin.js';
 // nothing about who can call what.
 export default async function handler(req, res) {
   const supabase = getServiceClient();
+  // Only this curated projection is public. Every mutation still requires ADMIN_EMAIL.
+  if (req.query?.action === 'landing-media' && req.method === 'GET') return listLandingMedia(req, res, supabase);
   const admin = await requireAdmin(req, supabase);
   if (!admin) return res.status(403).json({ error: 'Not authorized' });
 
   const action = req.query?.action || req.body?.action;
 
   switch (action) {
+    case 'create-landing-upload': return createLandingUpload(req, res, supabase);
+    case 'confirm-landing-upload': return confirmLandingUpload(req, res, supabase);
+    case 'delete-landing-media': return deleteLandingMedia(req, res, supabase);
+    case 'reorder-landing-media': return reorderLandingMedia(req, res, supabase);
     case 'list-users': return listUsers(req, res, supabase);
     case 'set-approval': return setApproval(req, res, supabase);
     case 'create-background-upload': return createBackgroundUpload(req, res, supabase);
@@ -339,4 +345,101 @@ async function rates(req, res, supabase) {
   const mins = rows.reduce((a, p) => a + Number(p.minutes), 0);
   const amt = rows.reduce((a, p) => a + Number(p.amount), 0);
   return res.status(200).json({ rates: await getRates(supabase), currency: cur, pricePerMin: mins ? amt / mins : 0 });
+}
+
+// The client and server share the same fixed slot vocabulary. Multiple items
+// are allowed only in the galleries. All other slots replace their old asset.
+const LANDING_SLOTS = new Set([
+  'hero_background', 'hero_overlay', 'objective_background', 'objective_overlay',
+  'conversation_background', 'conversation_overlay', 'call_screenshots',
+  'voice_orb', 'feature_media', 'demo_video',
+]);
+const LANDING_GALLERIES = new Set(['call_screenshots', 'feature_media']);
+const LANDING_TYPES = { 'image/gif': 'gif', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/webm': 'webm' };
+function validLandingType(slot, type) {
+  return LANDING_SLOTS.has(slot) && !!LANDING_TYPES[type] &&
+    (slot === 'voice_orb' ? type === 'image/gif' :
+      slot === 'demo_video' ? type.startsWith('video/') : !type.startsWith('video/'));
+}
+async function listLandingMedia(req, res, supabase) {
+  const { data, error } = await supabase.from('landing_media')
+    .select('id,slot,url,media_type,sort_order').order('sort_order').order('created_at');
+  if (error) return res.status(500).json({ error: 'Landing media unavailable. Apply sql/032_landing_media.sql.' });
+  const media = data || [];
+  // Reuse the existing Home GIF until the admin sets a dedicated landing hero.
+  if (!media.some((row) => row.slot === 'hero_background')) {
+    const { data: home } = await supabase.from('home_hero').select('url').order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (home?.url) media.unshift({ slot: 'hero_background', url: home.url, media_type: 'image/gif', sort_order: 0 });
+  }
+  res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+  return res.status(200).json({ media });
+}
+async function createLandingUpload(req, res, supabase) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { slot, mimeType, size } = req.body || {};
+  const max = mimeType?.startsWith('video/') ? 50 * 1024 * 1024 : 20 * 1024 * 1024;
+  if (!validLandingType(slot, mimeType) || !Number.isSafeInteger(size) || size < 1 || size > max)
+    return res.status(400).json({ error: `Invalid slot, type or size (images ≤20 MB; video ≤50 MB).` });
+  const path = `landing/${slot}/${randomUUID()}.${LANDING_TYPES[mimeType]}`;
+  const { data, error } = await supabase.storage.from('app-assets').createSignedUploadUrl(path);
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ path: data.path, token: data.token });
+}
+async function confirmLandingUpload(req, res, supabase) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { slot, mimeType, path } = req.body || {};
+  if (!validLandingType(slot, mimeType) || typeof path !== 'string' ||
+      !new RegExp(`^landing/${slot}/[0-9a-f-]{36}\.${LANDING_TYPES[mimeType]}$`).test(path))
+    return res.status(400).json({ error: 'Invalid asset path' });
+  // Confirm that a file was actually uploaded, not merely a URL supplied by a caller.
+  const { data: files, error: listError } = await supabase.storage.from('app-assets')
+    .list(`landing/${slot}`, { search: path.split('/').pop() });
+  const file = files?.find((f) => f.name === path.split('/').pop());
+  if (listError || !file) return res.status(400).json({ error: 'Upload not found in storage' });
+  const meta = file.metadata || {};
+  const max = mimeType.startsWith('video/') ? 50 * 1024 * 1024 : 20 * 1024 * 1024;
+  if (Number(meta.size) > max || (meta.mimetype && meta.mimetype !== mimeType))
+    return res.status(400).json({ error: 'Uploaded file type or size does not match the request' });
+  const { data: old, error: oldError } = await supabase.from('landing_media').select('id,storage_path,sort_order').eq('slot', slot).order('sort_order');
+  if (oldError) return res.status(500).json({ error: oldError.message });
+  if (old?.some((r) => r.storage_path === path)) return res.status(409).json({ error: 'Already saved' });
+  const { data: pub } = supabase.storage.from('app-assets').getPublicUrl(path);
+  const { data: row, error } = await supabase.from('landing_media').insert({
+    slot, storage_path: path, url: pub.publicUrl, media_type: mimeType,
+    sort_order: LANDING_GALLERIES.has(slot) ? Math.max(-1, ...(old || []).map((r) => r.sort_order)) + 1 : 0,
+  }).select('id,slot,url,media_type,sort_order').single();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!LANDING_GALLERIES.has(slot) && old?.length) {
+    const { error: delError } = await supabase.from('landing_media').delete().in('id', old.map((r) => r.id));
+    if (!delError) await supabase.storage.from('app-assets').remove(old.map((r) => r.storage_path));
+  }
+  return res.status(200).json({ row });
+}
+async function deleteLandingMedia(req, res, supabase) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { id } = req.body || {};
+  if (typeof id !== 'string') return res.status(400).json({ error: 'ID required' });
+  const { data: row, error: fetchError } = await supabase.from('landing_media').select('storage_path').eq('id', id).maybeSingle();
+  if (fetchError) return res.status(500).json({ error: fetchError.message });
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  const { error } = await supabase.from('landing_media').delete().eq('id', id);
+  if (error) return res.status(500).json({ error: error.message });
+  await supabase.storage.from('app-assets').remove([row.storage_path]);
+  return res.status(200).json({ ok: true });
+}
+async function reorderLandingMedia(req, res, supabase) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { slot, ids } = req.body || {};
+  if (!LANDING_GALLERIES.has(slot) || !Array.isArray(ids) || ids.length > 100 ||
+      ids.some((id) => typeof id !== 'string') || new Set(ids).size !== ids.length)
+    return res.status(400).json({ error: 'Invalid order' });
+  const { data: rows, error } = await supabase.from('landing_media').select('id').eq('slot', slot);
+  if (error) return res.status(500).json({ error: error.message });
+  if (rows.length !== ids.length || rows.some((r) => !ids.includes(r.id)))
+    return res.status(400).json({ error: 'Order must contain every item in the slot' });
+  for (let i = 0; i < ids.length; i++) {
+    const { error: updateError } = await supabase.from('landing_media').update({ sort_order: i }).eq('id', ids[i]).eq('slot', slot);
+    if (updateError) return res.status(500).json({ error: updateError.message });
+  }
+  return res.status(200).json({ ok: true });
 }

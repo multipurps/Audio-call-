@@ -189,16 +189,16 @@ $('signupSubmit').addEventListener('click', async () => {
   const password = $('signupPassword').value;
   if (!fullName || !email || !password) { $('signupHint').textContent = 'Fill in your name, email and password.'; return; }
   $('signupHint').textContent = 'Working...';
-  const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } });
+  const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName }, emailRedirectTo: window.location.origin + '/index.html' } });
   if (error) { $('signupHint').textContent = error.message; return; }
   $('signupHint').textContent = 'Check your email to confirm, then wait for approval.';
 });
 
-$('loginGoogle').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } }));
-$('signupGoogle').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } }));
+$('loginGoogle').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin + '/index.html' } }));
+$('signupGoogle').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin + '/index.html' } }));
 // Apple sign-in needs the Apple provider enabled in Supabase Auth settings to actually work.
-$('loginApple').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'apple', options: { redirectTo: window.location.origin } }));
-$('signupApple').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'apple', options: { redirectTo: window.location.origin } }));
+$('loginApple').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'apple', options: { redirectTo: window.location.origin + '/index.html' } }));
+$('signupApple').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'apple', options: { redirectTo: window.location.origin + '/index.html' } }));
 
 $('signOutBtn').addEventListener('click', () => supabase.auth.signOut());
 $('pendingSignOut').addEventListener('click', () => supabase.auth.signOut());

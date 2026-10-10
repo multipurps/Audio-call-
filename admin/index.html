@@ -38,6 +38,13 @@
   .aField{margin-bottom:10px;} .aField label{display:block; font-size:12px; color:var(--mute); margin-bottom:4px;}
   .aHint{font-size:12.5px; color:var(--mute); margin-top:8px; min-height:16px;}
   .aPos{color:#0f9d68;} .aNeg{color:#d6453d;}
+  .landingSlots{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-top:12px;}
+  .landingSlot{border:1px solid var(--line);border-radius:14px;padding:12px;min-width:0;}
+  .landingSlot h3{font-size:14px;margin:0 0 6px;}
+  .landingSlot p{font-size:12px;color:var(--mute);margin:0 0 10px;}
+  .landingItem{display:flex;gap:8px;align-items:center;border-top:1px solid var(--line);padding:8px 0;}
+  .landingItem img,.landingItem video{width:70px;height:70px;object-fit:contain;background:#161616;border-radius:6px;flex:none;}
+  .landingItem .aBtn{margin:2px;}
   .aBg{display:grid; grid-template-columns:repeat(3,1fr); gap:8px;}
   .aBg .bgCard{position:relative; border-radius:12px; overflow:hidden; aspect-ratio:9/16; background:var(--card);}
   .aBg img,.aBg video{width:100%; height:100%; object-fit:cover; display:block;}
@@ -105,6 +112,10 @@
         <button class="aBtn ghost" id="removeHeroBtn" style="margin-top:10px;display:none;">Remove GIF</button>
         <input type="file" id="heroFileInput" accept="image/gif" style="display:none;">
         <div class="aHint" id="heroUploadStatus"></div></div>
+      <div class="aCard" style="margin-top:12px;"><div class="l">Public landing page media</div>
+        <div class="aHint">Each scene has a separate background and screenshot. Backgrounds stay visible behind overlays. Single slots replace on upload; galleries can be reordered.</div>
+        <div id="landingSlots" class="landingSlots"></div><div id="landingStatus" class="aHint" role="status"></div>
+        <a href="../landing.html" target="_blank" rel="noopener" style="color:var(--accent);">View landing page ↗</a></div>
       <div class="aCard" style="margin-top:12px;"><div class="l" style="margin-bottom:8px;">Send announcement</div>
         <div class="aField"><input type="text" id="announceTitle" placeholder="Title"></div>
         <div class="aField"><input type="text" id="announceBody" placeholder="Message"></div>
@@ -143,7 +154,7 @@
   // standalone app. Tying the import to a version string that changes
   // every deploy forces a genuinely new request each time instead of
   // silently continuing to run whatever was cached from before.
-  import(`./admin.js?v=2026-10-06.2`).catch((err) => showBootFailure('Failed to load admin.js', err));
+  import(`./admin.js?v=2026-10-10.1`).catch((err) => showBootFailure('Failed to load admin.js', err));
 </script>
 <script>
   if ('serviceWorker' in navigator) {
