@@ -2186,7 +2186,51 @@ function resetCallAudioBtn() {
   btn.setAttribute('aria-label', 'Listen in to the call (hear both sides)');
 }
 
+// Speaker tapped before the call has a live audio session: no error, the button just
+// stays on and listen-in starts by itself the moment the session exists.
+let callMonitorArmed = null;
+
+function cancelArmedMonitor({ keepCtx = false } = {}) {
+  const armed = callMonitorArmed;
+  callMonitorArmed = null;
+  if (!armed) return;
+  clearTimeout(armed.timer);
+  if (!keepCtx) { try { armed.ctx?.close(); } catch {} }
+  resetCallAudioBtn();
+}
+
+function armCallMonitor(callId, ctx) {
+  cancelArmedMonitor();
+  const armed = { callId, ctx, timer: null, attempts: 0 };
+  callMonitorArmed = armed;
+  $('callAudioBtn').classList.add('active');
+  $('callAudioBtn').setAttribute('aria-label', 'Speaker on - will start when the call connects (tap to turn off)');
+  const poll = async () => {
+    if (callMonitorArmed !== armed) return;
+    if (activeCallScreenId !== callId || armed.attempts++ > 150) { cancelArmedMonitor(); return; }
+    let payload = null;
+    let ok = false;
+    try {
+      const resp = await authedFetch('/api/calls?action=monitor-token', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callId }),
+      });
+      payload = await resp.json().catch(() => ({}));
+      ok = resp.ok && Boolean(payload?.url);
+    } catch {}
+    if (callMonitorArmed !== armed) return;
+    if (ok) {
+      cancelArmedMonitor({ keepCtx: true });
+      try { startCallMonitor(payload.url, callId, ctx); } catch { try { ctx.close(); } catch {} }
+      return;
+    }
+    if (payload?.code === 'not-live') { cancelArmedMonitor(); return; } // call ended
+    armed.timer = setTimeout(poll, 2000);
+  };
+  armed.timer = setTimeout(poll, 1500);
+}
+
 function stopCallMonitor() {
+  cancelArmedMonitor();
   const mon = callMonitor;
   callMonitor = null;
   if (!mon) return;
@@ -2198,6 +2242,7 @@ function stopCallMonitor() {
 }
 
 async function toggleCallMonitor() {
+  if (callMonitorArmed) { cancelArmedMonitor(); return; }
   if (callMonitor) {
     if (callMonitor.state === 'live') {
       // Local monitor mute only — Emysa keeps speaking to the recipient.
@@ -2244,6 +2289,10 @@ async function toggleCallMonitor() {
     });
     payload = await resp.json().catch(() => ({}));
     if (!resp.ok) {
+      if (payload?.code === 'no-session') { // not connected yet: arm silently, no error text
+        if (activeCallScreenId === callId) armCallMonitor(callId, ctx); else abandonCtx();
+        return;
+      }
       abandonCtx();
       setCallStatePill('connecting', userError(payload?.error, 'Listen-in isn\u2019t available right now'));
       return;
