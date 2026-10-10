@@ -290,7 +290,11 @@ async def _handle_monitor(session_id: str, websocket: WebSocket, state: ServiceS
         stats = await run_monitor_socket(
             websocket, hub=get_hub(), session_id=session_id, audio=want_audio
         )
-        logger.info("monitor session ended", extra={"sessionId": session_id, **stats})
+        logger.info(
+            "monitor session ended audio=%s frames_sent=%s frames_dropped=%s"
+            % (want_audio, stats.get("frames"), stats.get("dropped")),
+            extra={"sessionId": session_id, **stats},
+        )
     except WebSocketDisconnect:
         logger.info("monitor websocket disconnected", extra={"sessionId": session_id})
     except Exception as exc:  # noqa: BLE001 - monitoring must never crash the service

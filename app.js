@@ -996,19 +996,10 @@ function appendCallTranscriptLine(speaker, content) {
   const normalizedSpeaker = (speaker === 'ai' || speaker === 'assistant') ? 'ai' : 'user';
   const el = document.createElement('div');
   el.className = `transcriptLine ${normalizedSpeaker}`;
-  const dot = document.createElement('div');
-  dot.className = 'transcriptDot';
-  if (normalizedSpeaker === 'ai') {
-    dot.appendChild(createSafeAvatarImg('icon-192.png'));
-  } else if (userAvatarUrl) {
-    dot.appendChild(createSafeAvatarImg(userAvatarUrl));
-  } else {
-    dot.textContent = (currentUser?.email || '?')[0].toUpperCase();
-  }
   const bubble = document.createElement('div');
   bubble.className = 'transcriptBubble';
   bubble.textContent = content || '';
-  el.append(dot, bubble);
+  el.append(bubble);
   panel.appendChild(el);
   panel.scrollTop = panel.scrollHeight;
 }
@@ -2265,6 +2256,9 @@ async function toggleCallMonitor() {
   // await) is too late - it stays suspended and the monitor is silent even
   // though the socket is connected. So create and resume it right here,
   // synchronously, and hand it to startCallMonitor.
+  // iOS: Web Audio is silenced by the hardware silent switch unless the page declares a
+  // playback audio session. Must run inside the tap, before the AudioContext is created.
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   if (!AudioCtx) {
     setCallStatePill('connecting', 'Audio not supported on this device');
@@ -2603,15 +2597,10 @@ function renderTranscript(history) {
     const roleClass = isAi ? 'ai' : 'caller';
     const el = document.createElement('div');
     el.className = `transcriptLine ${roleClass}`;
-    const dot = document.createElement('div');
-    dot.className = 'transcriptDot';
-    if (isAi) {
-      dot.appendChild(createSafeAvatarImg('icon-192.png'));
-    }
     const bubble = document.createElement('div');
     bubble.className = 'transcriptBubble';
     bubble.textContent = line?.content || line?.text || '';
-    el.append(dot, bubble);
+    el.append(bubble);
     panel.appendChild(el);
   }
   panel.scrollTop = panel.scrollHeight;

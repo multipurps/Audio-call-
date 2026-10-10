@@ -205,7 +205,13 @@ class MonitorHub:
         for sub in list(room):
             if sub.closed:
                 room.discard(sub)
-        if len(room) >= self._max_subscribers:
+        # Only listeners that receive audio count toward the cap. A captions-only socket
+        # (audio=False) is cheap, and counting it used to crowd out the audio monitor
+        # (the captions socket + a reconnect + the audio socket = three).
+        if audio:
+            if sum(1 for sub in room if sub.audio) >= self._max_subscribers:
+                return None
+        elif sum(1 for sub in room if not sub.audio) >= 4:
             return None
         sub = MonitorSubscriber(session_id, audio=audio)
         room.add(sub)
