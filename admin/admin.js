@@ -248,6 +248,7 @@ async function loadCosts() {
 
 // ---------- welcome/login/signup background gallery (images + video) ----------
 async function loadBackgrounds() {
+  loadLandingMedia();
   const { data } = await supabase.from('auth_backgrounds').select('id,url,media_type').order('created_at', { ascending: false });
   const grid = $('bgGrid');
   grid.innerHTML = (data || []).map((row) => `
@@ -423,3 +424,82 @@ function showBootError(err, offerReset = false) {
     location.reload();
   });
 }
+
+// Landing assets use the existing signed-upload pipeline and app-assets bucket.
+// All slot definitions are intentionally explicit; no arbitrary URL or path input.
+const LANDING_SLOTS = [
+  ['hero_background', 'Hero background', 'Animated GIF or image behind the hero screenshot'],
+  ['hero_overlay', 'Hero screenshot', 'Screenshot layered over the background'],
+  ['objective_background', 'Objective scene background', 'Large exposed GIF or image'],
+  ['objective_overlay', 'Objective screenshot', 'Screenshot above the scene'],
+  ['conversation_background', 'Conversation scene background', 'Large exposed GIF or image'],
+  ['conversation_overlay', 'Conversation screenshot', 'Screenshot above the scene'],
+  ['call_screenshots', 'Call interface screenshots', 'Multiple images; use arrows to reorder'],
+  ['voice_orb', 'Voice introduction orb', 'Animated GIF only; shown at its natural aspect ratio'],
+  ['feature_media', 'Additional feature media', 'Multiple GIFs or images; use arrows to reorder'],
+  ['demo_video', 'Optional demonstration video', 'Muted, inline video; MP4 or WebM'],
+];
+const GALLERIES = new Set(['call_screenshots', 'feature_media']);
+let landingRows = [];
+async function loadLandingMedia() {
+  const area = $('landingSlots');
+  try {
+    landingRows = (await api('landing-media')).media;
+    area.innerHTML = LANDING_SLOTS.map(([key, name, hint]) => {
+      const rows = landingRows.filter((r) => r.slot === key);
+      return `<div class="landingSlot" data-slot="${key}"><h3>${name}</h3><p>${hint}</p>
+        ${rows.map((r, i) => `<div class="landingItem" data-id="${r.id}">
+          ${r.media_type.startsWith('video/') ? `<video src="${esc(r.url)}" muted playsinline controls preload="none"></video>` : `<img src="${esc(r.url)}" alt="${name} preview" loading="lazy">`}
+          <div><div class="aHint">${r.media_type}</div>
+            ${GALLERIES.has(key) ? `<button class="aBtn ghost sm" data-act="up" aria-label="Move ${name} up" ${i === 0 ? 'disabled' : ''}>↑</button><button class="aBtn ghost sm" data-act="down" aria-label="Move ${name} down" ${i === rows.length - 1 ? 'disabled' : ''}>↓</button>` : ''}
+            <button class="aBtn ghost sm" data-act="remove" aria-label="Remove ${name}">Remove</button></div></div>`).join('') || '<div class="aHint">No asset yet — landing uses a designed fallback.</div>'}
+        <button class="aBtn ghost sm" data-act="upload">${rows.length && !GALLERIES.has(key) ? 'Replace' : 'Upload'}</button>
+        <input type="file" hidden accept="${key === 'voice_orb' ? 'image/gif' : key === 'demo_video' ? 'video/mp4,video/webm' : 'image/gif,image/png,image/jpeg,image/webp'}"></div>`;
+    }).join('');
+  } catch (err) { area.textContent = `Could not load landing media: ${err.message}`; }
+}
+$('landingSlots').addEventListener('click', async (event) => {
+  const btn = event.target.closest('button[data-act]');
+  if (!btn) return;
+  const slotEl = btn.closest('[data-slot]');
+  const slot = slotEl.dataset.slot;
+  const status = $('landingStatus');
+  if (btn.dataset.act === 'upload') { slotEl.querySelector('input[type=file]').click(); return; }
+  btn.disabled = true;
+  status.textContent = 'Saving…';
+  try {
+    if (btn.dataset.act === 'remove') await api('delete-landing-media', { method: 'POST', body: { id: btn.closest('[data-id]').dataset.id } });
+    else {
+      const rows = landingRows.filter((r) => r.slot === slot);
+      const index = rows.findIndex((r) => r.id === btn.closest('[data-id]').dataset.id);
+      const other = index + (btn.dataset.act === 'up' ? -1 : 1);
+      [rows[index], rows[other]] = [rows[other], rows[index]];
+      await api('reorder-landing-media', { method: 'POST', body: { slot, ids: rows.map((r) => r.id) } });
+    }
+    status.textContent = 'Saved.';
+    await loadLandingMedia();
+  } catch (err) { status.textContent = err.message; btn.disabled = false; }
+});
+$('landingSlots').addEventListener('change', async (event) => {
+  if (event.target.type !== 'file') return;
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  const slot = event.target.closest('[data-slot]').dataset.slot;
+  const status = $('landingStatus');
+  const allowed = slot === 'voice_orb' ? ['image/gif'] : slot === 'demo_video' ? ['video/mp4', 'video/webm'] : ['image/gif', 'image/png', 'image/jpeg', 'image/webp'];
+  const limit = slot === 'demo_video' ? 50 : 20;
+  if (!allowed.includes(file.type) || !file.size || file.size > limit * 1024 * 1024) {
+    status.textContent = `Choose a supported file under ${limit} MB.`; return;
+  }
+  status.textContent = 'Preparing upload…';
+  try {
+    const { path, token } = await api('create-landing-upload', { method: 'POST', body: { slot, mimeType: file.type, size: file.size } });
+    status.textContent = `Uploading ${file.name}…`;
+    const { error } = await supabase.storage.from('app-assets').uploadToSignedUrl(path, token, file, { contentType: file.type });
+    if (error) throw error;
+    await api('confirm-landing-upload', { method: 'POST', body: { slot, mimeType: file.type, path } });
+    status.textContent = 'Saved. The public page will update shortly.';
+    await loadLandingMedia();
+  } catch (err) { status.textContent = `Upload failed: ${err.message}`; }
+});

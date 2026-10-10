@@ -10,7 +10,8 @@
   },
   "scripts": {
     "test": "node --experimental-vm-modules --experimental-test-module-mocks --test tests/*.test.mjs",
-    "test:mobile": "node --experimental-vm-modules tests/mobile.mjs"
+    "test:mobile": "node --experimental-vm-modules tests/mobile.mjs",
+    "build": "node scripts/build-check.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
