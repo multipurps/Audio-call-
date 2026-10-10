@@ -438,6 +438,7 @@ const LANDING_SLOTS = [
   ['voice_orb', 'Voice introduction orb', 'Animated GIF only; shown at its natural aspect ratio'],
   ['feature_media', 'Additional feature media', 'Multiple GIFs or images; use arrows to reorder'],
   ['demo_video', 'Optional demonstration video', 'Muted, inline video; MP4 or WebM'],
+  ['live_call_video', 'Live call sample video', 'Shown with sound controls in the live-call section; MP4 or WebM, up to 50 MB'],
 ];
 const GALLERIES = new Set(['call_screenshots', 'feature_media']);
 let landingRows = [];
@@ -454,7 +455,7 @@ async function loadLandingMedia() {
             ${GALLERIES.has(key) ? `<button class="aBtn ghost sm" data-act="up" aria-label="Move ${name} up" ${i === 0 ? 'disabled' : ''}>↑</button><button class="aBtn ghost sm" data-act="down" aria-label="Move ${name} down" ${i === rows.length - 1 ? 'disabled' : ''}>↓</button>` : ''}
             <button class="aBtn ghost sm" data-act="remove" aria-label="Remove ${name}">Remove</button></div></div>`).join('') || '<div class="aHint">No asset yet — landing uses a designed fallback.</div>'}
         <button class="aBtn ghost sm" data-act="upload">${rows.length && !GALLERIES.has(key) ? 'Replace' : 'Upload'}</button>
-        <input type="file" hidden accept="${key === 'voice_orb' ? 'image/gif' : key === 'demo_video' ? 'video/mp4,video/webm' : 'image/gif,image/png,image/jpeg,image/webp'}"></div>`;
+        <input type="file" hidden accept="${key === 'voice_orb' ? 'image/gif' : isVideoSlot(key) ? 'video/mp4,video/webm' : 'image/gif,image/png,image/jpeg,image/webp'}"></div>`;
     }).join('');
   } catch (err) { area.textContent = `Could not load landing media: ${err.message}`; }
 }
@@ -487,8 +488,8 @@ $('landingSlots').addEventListener('change', async (event) => {
   if (!file) return;
   const slot = event.target.closest('[data-slot]').dataset.slot;
   const status = $('landingStatus');
-  const allowed = slot === 'voice_orb' ? ['image/gif'] : slot === 'demo_video' ? ['video/mp4', 'video/webm'] : ['image/gif', 'image/png', 'image/jpeg', 'image/webp'];
-  const limit = slot === 'demo_video' ? 50 : 20;
+  const allowed = slot === 'voice_orb' ? ['image/gif'] : isVideoSlot(slot) ? ['video/mp4', 'video/webm'] : ['image/gif', 'image/png', 'image/jpeg', 'image/webp'];
+  const limit = isVideoSlot(slot) ? 50 : 20;
   if (!allowed.includes(file.type) || !file.size || file.size > limit * 1024 * 1024) {
     status.textContent = `Choose a supported file under ${limit} MB.`; return;
   }
@@ -503,3 +504,5 @@ $('landingSlots').addEventListener('change', async (event) => {
     await loadLandingMedia();
   } catch (err) { status.textContent = `Upload failed: ${err.message}`; }
 });
+
+function isVideoSlot(s) { return s === 'demo_video' || s === 'live_call_video'; }

@@ -79,6 +79,14 @@ async function loadMedia() {
         gallery.append(figure);
       });
     }
+    const live = mediaBySlot.get('live_call_video')?.[0];
+    if (live) {
+      const lv = document.createElement('video');
+      lv.src = allowedMedia(live.url); lv.controls = true; lv.playsInline = true; lv.preload = 'metadata';
+      lv.setAttribute('aria-label', 'Emysa live call sample');
+      document.getElementById('liveCall').append(lv);
+      document.getElementById('live-call').hidden = false;
+    }
     const video = mediaBySlot.get('demo_video')?.[0];
     if (video) {
       const el = document.createElement('video');
@@ -115,8 +123,8 @@ const updateAudio = () => {
   document.getElementById('audioDuration').textContent = time(audio.duration);
   if (Number.isFinite(audio.duration) && audio.duration > 0) progress.value = String(Math.round(audio.currentTime / audio.duration * 100));
   const playing = !audio.paused && !audio.ended;
-  orbStage.classList.toggle('playing', playing);
-  document.getElementById('orbIndicator').textContent = playing ? 'PLAYING' : 'READY';
+  orbStage?.classList.toggle('playing', playing);
+  const oi = document.getElementById('orbIndicator'); if (oi) oi.textContent = playing ? 'PLAYING' : 'READY';
   toggle.textContent = playing ? 'Ⅱ' : '▶';
   toggle.setAttribute('aria-label', playing ? "Pause Emysa's introduction" : "Play Emysa's introduction");
   if (playing) status.textContent = 'Now playing';
@@ -208,7 +216,7 @@ document.querySelectorAll('.install-action').forEach((button) => button.addEvent
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 
 audio.addEventListener('timeupdate', () => {
-  document.querySelectorAll('#transcriptText p[data-start]').forEach((p) => p.classList.toggle('now', audio.currentTime >= p.dataset.start - .2 && audio.currentTime <= +p.dataset.end + .5));
+  document.querySelectorAll('#transcriptText p[data-start]').forEach((p) => { const on = audio.currentTime >= p.dataset.start - .2 && audio.currentTime <= +p.dataset.end + .5; p.classList.toggle('now', on); if (on && !p.classList.contains('seen')) { p.classList.add('seen'); const box = p.parentElement; box.scrollTo({ top: p.offsetTop - box.offsetTop - 8, behavior: 'smooth' }); } });
 });
 // Menu, sticky header controls
 const burger = document.getElementById('burger'), menu = document.getElementById('menu');

@@ -352,14 +352,14 @@ async function rates(req, res, supabase) {
 const LANDING_SLOTS = new Set([
   'hero_background', 'hero_overlay', 'objective_background', 'objective_overlay',
   'conversation_background', 'conversation_overlay', 'call_screenshots',
-  'voice_orb', 'feature_media', 'demo_video',
+  'voice_orb', 'feature_media', 'demo_video', 'live_call_video',
 ]);
 const LANDING_GALLERIES = new Set(['call_screenshots', 'feature_media']);
 const LANDING_TYPES = { 'image/gif': 'gif', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/webm': 'webm' };
 function validLandingType(slot, type) {
   return LANDING_SLOTS.has(slot) && !!LANDING_TYPES[type] &&
     (slot === 'voice_orb' ? type === 'image/gif' :
-      slot === 'demo_video' ? type.startsWith('video/') : !type.startsWith('video/'));
+      (slot === 'demo_video' || slot === 'live_call_video') ? type.startsWith('video/') : !type.startsWith('video/'));
 }
 async function listLandingMedia(req, res, supabase) {
   const { data, error } = await supabase.from('landing_media')
