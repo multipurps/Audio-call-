@@ -3,6 +3,7 @@ import { decodeMonitorFrame } from './lib/monitorFrame.js';
 import { floatToPcm16k, decodeAppCallFrame, describeAppCallMessage, describeAppCallClose, describeMicError } from './lib/appCallAudio.js';
 import { primeAudioSession, createCallOutput, watchLifecycle, pickOutputMode, micNeedsRestart } from './lib/appCallOutput.js';
 import { describeMonitorMessage, describeMonitorClose, noAudioMessage, MONITOR_NO_AUDIO_MS } from './lib/monitorStatus.js';
+import { DEFAULT_MOOD, selectMood, toggleArgue, argueVisible, moodButtonLabel, moodPayload, moodChipVisible } from './lib/moodPicker.js';
 import { answeredCallPill, assistantCallPill, listenInPill, liveCallView, endedCallLabel, formatCallTimer, TERMINAL_STATUSES } from './lib/callStatus.js';
 import { userError, friendlyAccountName } from './lib/userFacing.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -766,7 +767,8 @@ async function sendChatMessage(text, onReply, source = 'text', channel = null) {
   const resp = await authedFetch(target?.channel === 'phone' ? '/api/assistant?action=prepareCall' : '/api/assistant?action=send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, sessionId: currentChatSessionId, source, channel: target?.channel || channel || currentCallChannel(), target }),
+    // The mood is only ever sent with what the user typed, never with a spoken in-call message.
+    body: JSON.stringify({ text, sessionId: currentChatSessionId, source, channel: target?.channel || channel || currentCallChannel(), target, ...(isCall ? {} : moodPayload(moodState)) }),
   });
   // A crashed or timed-out function returns plain text/HTML, and Safari's
   // resp.json() then throws "The string did not match the expected pattern".
@@ -874,6 +876,7 @@ async function sendBrief() {
   $('briefInput').style.height = 'auto';
   try {
     await sendChatMessage(text, null, 'text', currentCallChannel());
+    resetMood(); // the mood belongs to this message; the next one starts natural
   } catch (err) {
     if (revision === chatRevision) {
       $('briefInput').value = text;
@@ -899,6 +902,46 @@ $('briefInput').addEventListener('input', () => {
   resizeBriefInput();
   syncHomeChatPadding();
 });
+// ---- call mood: a floating chip while typing; tap for the moods, Angry reveals Argue ----
+let moodState = { ...DEFAULT_MOOD };
+let moodMenuOpen = false;
+
+function renderMood() {
+  const btn = $('moodBtn');
+  btn.classList.toggle('set', moodState.mood !== 'natural');
+  $('moodBtnLabel').textContent = moodButtonLabel(moodState);
+  btn.setAttribute('aria-expanded', moodMenuOpen ? 'true' : 'false');
+  $('moodMenu').hidden = !moodMenuOpen;
+  document.querySelectorAll('#moodMenu .moodItem').forEach((el) => {
+    el.setAttribute('aria-checked', el.dataset.mood === moodState.mood ? 'true' : 'false');
+  });
+  const row = $('moodArgueRow');
+  row.hidden = !argueVisible(moodState);
+  row.setAttribute('aria-checked', moodState.argue ? 'true' : 'false');
+  const input = $('briefInput');
+  $('moodFloat').classList.toggle('visible', moodChipVisible({
+    focused: document.activeElement === input, hasText: input.value.trim().length > 0, menuOpen: moodMenuOpen,
+  }));
+}
+function resetMood() { moodState = { ...DEFAULT_MOOD }; moodMenuOpen = false; renderMood(); }
+
+// pointerdown is cancelled on the chip and menu so tapping them never blurs the text box
+// (which would drop the keyboard and make the whole bar jump).
+['moodBtn', 'moodMenu'].forEach((id) => $(id).addEventListener('pointerdown', (e) => e.preventDefault()));
+$('moodBtn').addEventListener('click', () => { moodMenuOpen = !moodMenuOpen; renderMood(); });
+document.querySelectorAll('#moodMenu .moodItem').forEach((el) => el.addEventListener('click', () => {
+  moodState = selectMood(moodState, el.dataset.mood);
+  moodMenuOpen = moodState.mood === 'angry'; // Angry stays open so Argue is right there
+  renderMood();
+}));
+$('moodArgueRow').addEventListener('click', () => { moodState = toggleArgue(moodState); renderMood(); });
+document.addEventListener('pointerdown', (e) => {
+  if (moodMenuOpen && !e.target.closest('#moodFloat')) { moodMenuOpen = false; renderMood(); }
+});
+['focus', 'input'].forEach((ev) => $('briefInput').addEventListener(ev, renderMood));
+$('briefInput').addEventListener('blur', () => setTimeout(renderMood, 150));
+renderMood();
+
 function resizeBriefInput() {
   const el = $('briefInput');
   el.style.height = 'auto';
@@ -3257,7 +3300,6 @@ function relTimeShort(iso) {
 function renderBalance() {
   $('dashMinutes').textContent = homeBalance ? formatMinutes(homeBalance.remaining) : '–';
   $('dashBalanceSub').textContent = homeBalance?.pending ? 'confirming payment…' : 'remaining';
-  if (typeof renderPremiumEntry === 'function') renderPremiumEntry();
 }
 
 async function loadBalance() {
@@ -3431,30 +3473,24 @@ function formatPlainPrice(amount, currency) {
 }
 
 function renderAddTime() {
-  // The server sends the pack list (minutes + price) and charges by position, so
-  // the price shown here is only ever the server's.
-  const packs = homeBalance?.packs;
-  const ready = Boolean(homeBalance?.payments && Array.isArray(packs) && packs.length);
+  const unit = homeBalance?.unit;
+  const ready = Boolean(homeBalance?.payments && unit);
   const out = homeBalance && homeBalance.remaining < 1;
   $('addTimeLead').textContent = out ? "You're out of call time.\nTop up to keep Emysa making calls for you." : 'Top up to keep Emysa making calls for you.';
+  $('addTimeQty').textContent = `${addTimeQty}×`;
+  $('addTimeMinus').disabled = addTimeQty <= 1;
+  $('addTimePlus').disabled = !ready || addTimeQty >= unit.maxQty;
   if (!ready) {
-    $('addTimeQty').textContent = '';
-    $('addTimeMinus').disabled = true;
-    $('addTimePlus').disabled = true;
     $('addTimeBig').textContent = '–';
     $('addTimeBuy').textContent = 'Purchase';
     $('addTimeBuy').disabled = true;
     $('addTimeStatus').textContent = homeBalance ? 'Adding time is not available yet.' : 'Could not load. Check your connection and try again.';
     return;
   }
-  addTimeQty = Math.min(Math.max(1, addTimeQty), packs.length);
-  const pack = packs[addTimeQty - 1];
-  const labels = callTimeLabels(pack.minutes);
-  $('addTimeQty').textContent = `${addTimeQty} / ${packs.length}`;
-  $('addTimeMinus').disabled = addTimeQty <= 1;
-  $('addTimePlus').disabled = addTimeQty >= packs.length;
+  const labels = callTimeLabels(unit.minutes * addTimeQty);
+  const total = unit.prices ? Number(unit.prices[addTimeQty - 1]) : (Math.round(Number(unit.amount) * 100) * addTimeQty) / 100;
   $('addTimeBig').textContent = labels.big;
-  $('addTimeBuy').textContent = `Purchase ${labels.buy} · ${formatPlainPrice(Number(pack.amount), homeBalance.currency)}`;
+  $('addTimeBuy').textContent = `Purchase ${labels.buy} · ${formatPlainPrice(total, unit.currency)}`;
   $('addTimeBuy').disabled = false;
 }
 
@@ -3464,20 +3500,19 @@ async function openAddTime() {
   $('addTimeOpen').classList.add('hidden');
   $('addTimeScreen').classList.remove('hidden');
   renderAddTime();
-  if (!homeBalance?.packs) { await loadBalance(); renderAddTime(); }
+  if (!homeBalance?.unit) { await loadBalance(); renderAddTime(); }
 }
 function closeAddTime() { $('addTimeScreen').classList.add('hidden'); }
 
-// One payment launcher for both add-time and premium: the server decides the price from
-// the quantity or plan it is given, and credits only after Bachs confirms.
-async function launchCheckout(body, { buy, status, link }) {
+async function startCheckout() {
+  const buy = $('addTimeBuy');
   buy.disabled = true;
-  status.textContent = 'Opening secure payment…';
+  $('addTimeStatus').textContent = 'Opening secure payment…';
   try {
     const resp = await authedFetch('/api/referrals?action=checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ quantity: addTimeQty }),
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || !data.url) throw new Error(data.error || 'Could not open payment. Try again.');
@@ -3487,93 +3522,24 @@ async function launchCheckout(body, { buy, status, link }) {
     const opened = window.open(data.url, '_blank');
     if (opened) {
       try { opened.opener = null; } catch {}
-      status.textContent = '';
+      $('addTimeStatus').textContent = '';
     } else {
       // The browser blocked the window (the request finished after the tap).
       // A real tap on a link always works, including in an installed PWA.
-      link.href = data.url;
-      link.classList.remove('hidden');
-      status.textContent = 'Tap to continue to payment.';
+      $('addTimeOpen').href = data.url;
+      $('addTimeOpen').classList.remove('hidden');
+      $('addTimeStatus').textContent = 'Tap to continue to payment.';
     }
     watchPayment();
   } catch (err) {
-    status.textContent = err.message || 'Could not open payment. Try again.';
+    $('addTimeStatus').textContent = err.message || 'Could not open payment. Try again.';
   } finally {
     buy.disabled = false;
   }
 }
-const startCheckout = () => launchCheckout({ quantity: addTimeQty }, { buy: $('addTimeBuy'), status: $('addTimeStatus'), link: $('addTimeOpen') });
-
-// ---------- Premium ----------
-let premiumMonths = 12;
-const monthsLabel = (m) => (m === 12 ? '12 months' : m === 1 ? '1 month' : `${m} months`);
-const formatDay = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-
-function renderPremiumEntry() {
-  const plans = homeBalance?.plans;
-  const on = Boolean(homeBalance?.payments && plans?.length);
-  const premium = Boolean(homeBalance?.premium);
-  $('dashUpgrade').classList.toggle('hidden', !on || premium);
-  const card = $('addTimeUpgrade');
-  card.classList.toggle('hidden', !on);
-  $('addTimeUpgradeTitle').textContent = premium ? 'Premium' : 'Upgrade to Premium';
-  $('addTimeUpgradeSub').textContent = premium ? `Active until ${formatDay(homeBalance.premiumUntil)}. Tap to extend` : 'Your credits never expire';
-  $('addTimeExpiry').textContent = premium
-    ? 'Your credits never expire.'
-    : homeBalance?.creditExpiresAt ? `Your credits expire on ${formatDay(homeBalance.creditExpiresAt)}.` : 'Credits expire one month after you add them.';
-}
-
-function renderPlans() {
-  const plans = homeBalance?.plans || [];
-  const list = $('planList');
-  list.textContent = '';
-  for (const p of plans) {
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = `planCard${p.months === premiumMonths ? ' selected' : ''}`;
-    const name = document.createElement('span');
-    name.className = 'planName';
-    name.textContent = monthsLabel(p.months);
-    const price = document.createElement('span');
-    price.className = 'planPrice';
-    price.textContent = formatPlainPrice(p.amount, p.currency);
-    const sub = document.createElement('span');
-    sub.className = 'planSub';
-    sub.textContent = 'One payment';
-    card.append(name, price, sub);
-    if (p.percentOff > 0) {
-      const tag = document.createElement('span');
-      tag.className = 'planTag';
-      tag.textContent = `${p.percentOff}% OFF`;
-      card.appendChild(tag);
-    }
-    card.addEventListener('click', () => { premiumMonths = p.months; renderPlans(); });
-    list.appendChild(card);
-  }
-  const chosen = plans.find((p) => p.months === premiumMonths);
-  $('premiumBuy').disabled = !chosen;
-  $('premiumBuy').textContent = chosen ? `${homeBalance.premium ? 'Extend' : 'Upgrade'} · ${formatPlainPrice(chosen.amount, chosen.currency)}` : 'Upgrade';
-  $('premiumLead').textContent = homeBalance?.premium ? `Premium until ${formatDay(homeBalance.premiumUntil)}` : 'Unlock Premium';
-}
-
-async function openPremium() {
-  $('premiumStatus').textContent = '';
-  $('premiumOpen').classList.add('hidden');
-  $('premiumScreen').classList.remove('hidden');
-  if (!homeBalance?.plans) await loadBalance();
-  renderPlans();
-}
-const closePremium = () => $('premiumScreen').classList.add('hidden');
-
-$('premiumBuy').addEventListener('click', () => launchCheckout({ plan: premiumMonths }, { buy: $('premiumBuy'), status: $('premiumStatus'), link: $('premiumOpen') }));
-$('premiumClose').addEventListener('click', closePremium);
-$('premiumTerms').addEventListener('click', () => openSheet('sheet-terms'));
-$('premiumPrivacy').addEventListener('click', () => openSheet('sheet-privacy'));
-$('dashUpgrade').addEventListener('click', openPremium);
-$('addTimeUpgrade').addEventListener('click', openPremium);
 
 $('addTimeMinus').addEventListener('click', () => { if (addTimeQty > 1) { addTimeQty -= 1; renderAddTime(); } });
-$('addTimePlus').addEventListener('click', () => { if (homeBalance?.packs && addTimeQty < homeBalance.packs.length) { addTimeQty += 1; renderAddTime(); } });
+$('addTimePlus').addEventListener('click', () => { if (homeBalance?.unit && addTimeQty < homeBalance.unit.maxQty) { addTimeQty += 1; renderAddTime(); } });
 $('addTimeBuy').addEventListener('click', startCheckout);
 $('addTimeClose').addEventListener('click', closeAddTime);
 $('addTimeTerms').addEventListener('click', () => openSheet('sheet-terms'));
@@ -3587,11 +3553,7 @@ async function verifyPayment() {
   const before = homeBalance?.remaining;
   homeBalance = { ...(homeBalance || {}), ...data, payments: true };
   renderBalance();
-  if (data.planActivated) {
-    showToast('Premium is on');
-    closePremium();
-    closeAddTime();
-  } else if (before != null && data.remaining > before) {
+  if (before != null && data.remaining > before) {
     showToast(`${formatMinutes(data.remaining - before)} added`);
     closeAddTime();
   }

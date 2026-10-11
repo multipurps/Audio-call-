@@ -230,6 +230,9 @@ class CallContext:
     user_name: str = ""
     #: The person's country from their profile. NOT their current location.
     user_country: str = ""
+    #: The mood the user picked for this call: "" (natural), angry, angry_argue, sweet,
+    #: jovial, sad or talkative. Drives delivery only, never what the call is about.
+    mood: str = ""
     #: ISO timestamp of the actual answer (set by ``set_in_progress``), so
     #: talk duration can be measured from the answer rather than from dial.
     answered_at: str | None = None
@@ -620,6 +623,8 @@ _CALL_COLUMNS_LEGACY = (
 #: sql/029 adds the attempt columns. PostgREST rejects a select naming a column that
 #: does not exist yet, so an un-migrated database falls back to the legacy list.
 _CALL_COLUMNS_FULL = _CALL_COLUMNS_LEGACY + ", retry_of, attempt_number, attempt_events"
+#: the call-mood migration adds the user-chosen mood. Tried first; a database without it falls back as above.
+_CALL_COLUMNS_MOOD = _CALL_COLUMNS_FULL + ", mood"
 
 
 async def _find_call_row(
@@ -634,7 +639,7 @@ async def _find_call_row(
             attempts.append({"id": f"eq.{candidate}"})
         for filters in attempts:
             rows = None
-            for columns in (_CALL_COLUMNS_FULL, _CALL_COLUMNS_LEGACY):
+            for columns in (_CALL_COLUMNS_MOOD, _CALL_COLUMNS_FULL, _CALL_COLUMNS_LEGACY):
                 try:
                     rows = await rest.select(
                         "calls", select=columns, filters=filters, order="created_at.desc", limit=1
@@ -1115,6 +1120,7 @@ async def resolve_call_context(
             language=language if isinstance(language, str) else "en",
             user_name=profile["name"],
             user_country=profile["country"],
+            mood=str(row.get("mood") or ""),
             attempt=attempt,
             _rest=rest,
         )

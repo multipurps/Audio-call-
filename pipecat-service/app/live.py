@@ -38,6 +38,7 @@ from app.config import Settings
 from app.conversation_policy import (
     audit_reply,
     build_structured_live_prompt,
+    is_argue,
     instructions_fingerprint,
     validate_live_instructions,
 )
@@ -111,6 +112,23 @@ and do not fill the time with a phrase. Never guess the result of backend work w
 waiting."""
 
 
+_INTERRUPTION_DEFAULT = (
+    "Interruption policy: Stop speaking when they interrupt. Listen to what they say, then "
+    "follow them."
+)
+_INTERRUPTION_ARGUE = (
+    "Interruption policy: If they cut in, you do not have to give way. Finish your point if it "
+    "takes only a few more words, then answer what they actually said."
+)
+assert _INTERRUPTION_DEFAULT in _LIVE_POLICIES  # a future edit of the policy text must update this too
+_LIVE_POLICIES_ARGUE = _LIVE_POLICIES.replace(_INTERRUPTION_DEFAULT, _INTERRUPTION_ARGUE)
+
+
+def _live_policies_for(call_context: Any = None) -> str:
+    """The standard policies, except an "argue" call does not auto-yield the floor."""
+    return _LIVE_POLICIES_ARGUE if is_argue(getattr(call_context, "mood", "")) else _LIVE_POLICIES
+
+
 def _live_persona() -> str:
     """The classic prompt with the Fish/text-only parts replaced for a speech model."""
     out: list[str] = []
@@ -153,7 +171,7 @@ def build_live_system_prompt(settings: Settings, extra_context: str | None = Non
     return build_structured_live_prompt(
         persona=persona,
         personality=personality,
-        policies=_LIVE_POLICIES,
+        policies=_live_policies_for(call_context),
         end_call_tool=END_CALL_TOOL,
         call_context=call_context,
         extra_context=extra_context,

@@ -1,3 +1,4 @@
+import { normalizeMood, moodOfCall } from '../lib/callMood.js';
 import { userError } from '../lib/userFacing.js';
 import { LANGUAGE_NAMES } from '../lib/callLanguages.js';
 // Languages the transcription model accepts as a pinned language. Igbo is not
@@ -372,6 +373,8 @@ async function sendMessage(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const body = req.body || {};
   let { text, sessionId: incomingSessionId, source, channel, target } = body;
+  // The mood the user picked for this message's call (null = natural, as before).
+  let mood = normalizeMood(body.mood, body.argue === true);
   // Phase two of a call request: the reply has been delivered, now place the call
   // the server itself resolved in phase one (see the pendingCall response below).
   let pending = null;
@@ -379,6 +382,7 @@ async function sendMessage(req, res, supabase, userId) {
     pending = verifyPendingCall(body.pendingCallToken, userId);
     if (!pending) return res.status(400).json({ error: 'That call request expired. Ask me again and I will place it.' });
     ({ text, source, target } = pending);
+    mood = normalizeMood(pending.mood); // phase two: the mood travels inside the signed token
     channel = pending.uiChannel;
     incomingSessionId = pending.sessionId;
   }
@@ -745,6 +749,8 @@ async function sendMessage(req, res, supabase, userId) {
     let objective = intent.action === 'retry'
       ? [retryObjective, addedObjective].filter(Boolean).join('\nAlso: ') || 'Say hello and share what the user wants to talk about.'
       : sanitizeObjective(intent.objective || '') || 'Say hello and share what the user wants to talk about.';
+    // "Try again" keeps the mood of the call being repeated unless a new one was picked.
+    if (!mood && intent.action === 'retry' && retryPlan?.last?.id) mood = await moodOfCall(supabase, retryPlan.last.id);
     const { data: langProfile } = await supabase.from('profiles').select('language').eq('user_id', userId).maybeSingle();
     if (langProfile?.language && langProfile.language !== 'en') {
       const langName = LANGUAGE_NAMES[langProfile.language] || langProfile.language;
@@ -790,6 +796,7 @@ async function sendMessage(req, res, supabase, userId) {
           instructions: keptInstructions,
           contactId: contact?.id || null,
           sessionId,
+          mood,
           ...(isRetry ? { retryOf: retryPlan.rootId, attemptNumber: retryPlan.attemptNumber } : {}),
         });
       };
@@ -839,7 +846,7 @@ async function sendMessage(req, res, supabase, userId) {
         const spoken = extractAndStripControlTags(llmCallReply || '').cleanText.trim().slice(0, 400);
         const replyText = spoken || `Sure, I'll call ${label} on ${channelName} now.`;
         const token = signPendingCall({
-          uid: userId, sessionId, text: text.trim(), source: msgSource, uiChannel, target: target || null,
+          uid: userId, sessionId, text: text.trim(), source: msgSource, uiChannel, target: target || null, mood,
           intent: { action: intent.action, contactName: intent.contactName || null, phoneNumber: intent.phoneNumber || null, objective: intent.objective || null, channel: callChannel },
         });
         newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', replyText, null, msgSource));
@@ -921,7 +928,7 @@ async function sendMessage(req, res, supabase, userId) {
       const message = await saveCallPlan(supabase, userId, {
         sessionId, toNumber, contactId: contact?.id || null,
         objective: `${objective}\nUser's instructions: ${text.trim()}`, script: text.trim(),
-        summary: `I'll call ${label}. ${objective}`, label,
+        summary: `I'll call ${label}. ${objective}`, label, mood,
       });
       newMessages.push(message);
       return respond({ channelUsed: 'phone' });
