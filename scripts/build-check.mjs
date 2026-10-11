@@ -3,9 +3,11 @@ import { readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 const manifest = JSON.parse(readFileSync('manifest.json', 'utf8'));
 const vercel = JSON.parse(readFileSync('vercel.json', 'utf8'));
-// The landing page is reachable at /landing.html only; / must keep serving the app (index.html).
-if (vercel.rewrites.some((r) => r.source === '/') || manifest.start_url !== '/index.html') throw Error('Landing/app route mismatch');
-for (const path of ['landing.html','landing.css','landing.js','index.html','admin/index.html','sw.js','manifest.json','apple-touch-icon.png','assets/intro/intro.mp3','assets/intro/intro.json','vendor/adhs/adhs.js','vendor/adhs/adhs.css','vendor/adhs/LICENSE']) {
+// / serves the landing page (home.html) via a route that runs before the filesystem; the installed app and all auth
+// redirects use /index.html, the real app.
+const rootRoute = (vercel.routes || []).find((r) => r.src === '/');
+if (!rootRoute || rootRoute.dest !== '/home.html' || manifest.start_url !== '/index.html') throw Error('Landing/app route mismatch');
+for (const path of ['home.html','landing.css','landing.js','index.html','admin/index.html','sw.js','manifest.json','apple-touch-icon.png','assets/intro/intro.mp3','assets/intro/intro.json','vendor/adhs/adhs.js','vendor/adhs/adhs.css','vendor/adhs/LICENSE']) {
   if (!existsSync(path)) throw Error(`Missing deployment asset: ${path}`);
 }
 for (const path of ['landing.js','app.js','api/admin.js','admin/admin.js','intro.js','sw.js']) {

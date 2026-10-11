@@ -2,6 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+<script>
+// The installed app (home screen) and any sign-in return must never land on the marketing page.
+(function () {
+  var l = location, standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  var auth = /(access_token|type=recovery|type=signup|error_description)/.test(l.hash) || /[?&](code|error)=/.test(l.search);
+  if (standalone || auth) l.replace('/index.html' + l.search + l.hash);
+})();
+</script>
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0b0b0b">
   <meta name="description" content="Give Emysa an objective. It makes the call, speaks for you, and brings back what happened.">
@@ -13,9 +21,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300;400;500;600&family=Krona+One&display=swap">
   <link rel="stylesheet" href="/vendor/adhs/adhs.css">
-  <link rel="stylesheet" href="/landing.css?v=2026-10-11.3">
+  <link rel="stylesheet" href="/landing.css?v=2026-10-11.4">
   <script src="/vendor/adhs/adhs.js" defer></script>
-  <script src="/landing.js?v=2026-10-11.3" defer></script>
+  <script src="/landing.js?v=2026-10-11.4" defer></script>
   <title>Emysa | Calls made in your voice</title>
 </head>
 <body>

@@ -6,7 +6,12 @@ const read = (f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
 test('the public route preserves the existing authenticated app and install target', () => {
   const vercel = JSON.parse(read('vercel.json'));
   const manifest = JSON.parse(read('manifest.json'));
-  assert.ok(!vercel.rewrites.some((r) => r.source === '/'), '/ must keep serving the app until the landing page is promoted');
+  const root = vercel.routes.find((r) => r.src === '/');
+  assert.equal(root.dest, '/home.html', '/ serves the public page');
+  assert.ok(vercel.routes.findIndex((r) => r.src === '/') < vercel.routes.findIndex((r) => r.handle === 'filesystem'), '/ must be matched before the filesystem');
+  assert.ok(!vercel.rewrites && !vercel.headers, 'routes cannot be combined with rewrites/headers');
+  assert.match(read('home.html'), /standalone/);
+  assert.match(read('home.html'), /replace\('\/index\.html'/);
   assert.equal(manifest.start_url, '/index.html');
   assert.equal(manifest.scope, '/');
   assert.match(read('app.js'), /redirectTo: window.location.origin \+ '\/index.html'/);
@@ -16,9 +21,10 @@ test('the public route preserves the existing authenticated app and install targ
 test('all media slots have matching server-side validation and schema', () => {
   const admin = read('admin/admin.js');
   const api = read('api/admin.js');
-  const schema = read('sql/032_landing_media.sql');
+  const schema = read('sql/032_landing_media.sql') + read('sql/033_live_call_video.sql') + read('sql/035_landing_feature_slots.sql');
   for (const slot of ['hero_background', 'hero_overlay', 'objective_background', 'objective_overlay',
-    'conversation_background', 'conversation_overlay', 'call_screenshots', 'voice_orb', 'feature_media', 'demo_video']) {
+    'conversation_background', 'conversation_overlay', 'call_screenshots', 'voice_orb', 'feature_media', 'demo_video',
+    'live_call_video', 'how_it_works', 'your_voice', 'call_summary', 'call_in_app', 'import_chats', 'channels', 'footer_background']) {
     assert.ok(admin.includes(`'${slot}'`) && api.includes(`'${slot}'`) && schema.includes(`'${slot}'`), `missing ${slot}`);
   }
   // Uploads stay admin-only: the role check must run before the action switch,
@@ -31,28 +37,21 @@ test('all media slots have matching server-side validation and schema', () => {
   assert.match(schema, /row level security/);
 });
 
-test('media renders as separate background and overlay layers with mobile sizing', () => {
-  const html = read('landing.html');
-  const css = read('landing.css');
+test('feature phones render only real uploads, and videos pause when scrolled away', () => {
+  const html = read('home.html');
   const js = read('landing.js');
-  for (const key of ['hero', 'objective', 'conversation']) {
-    assert.match(html, new RegExp(`data-background="${key}_background" data-overlay="${key}_overlay"`));
-  }
-  assert.match(js, /base\.replaceChildren\(img\)/);
-  assert.match(js, /scene\.querySelector\('\.scene-overlay'\)\?\.replaceWith\(image\)/);
-  assert.match(css, /\.scene-overlay\{position:absolute;z-index:2/);
-  assert.match(css, /@media\(max-width:600px\)/);
-  assert.match(css, /\.scene-overlay\.overlay-image\{width:min\(43%,235px\)/);
-  assert.match(css, /prefers-reduced-motion:reduce/);
+  for (const slot of ['how_it_works', 'your_voice', 'live_call_video', 'call_summary', 'call_in_app', 'import_chats', 'channels'])
+    assert.match(html, new RegExp(`data-slot="${slot}"`));
+  assert.ok(!/class="mk|class="bub/.test(html), 'no placeholder mock content');
+  assert.match(js, /IntersectionObserver[\s\S]*v\.play\(\)[\s\S]*v\.pause\(\)/);
+  assert.match(html, /Octopusfur/);
 });
 
-test('introduction is the original audio/transcript and autoplay is opt-out after listening', () => {
-  const html = read('landing.html');
+test('hero is the login background with the typed introduction transcript', () => {
+  const html = read('home.html');
   const js = read('landing.js');
-  assert.match(html, /assets\/intro\/intro\.mp3/);
+  assert.match(js, /auth_backgrounds/);
+  assert.match(html, /id="introLog"/);
   assert.match(js, /assets\/intro\/intro\.json/);
-  assert.match(js, /emysa_intro_seen/);
-  assert.match(js, /emysa_landing_intro_attempted/);
   assert.match(js, /audio\.play\(\)/);
-  assert.match(html, /type="range" id="audioSeek"/);
 });

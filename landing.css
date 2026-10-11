@@ -82,3 +82,7 @@ footer{position:relative;isolation:isolate;padding:clamp(60px,8vw,120px) clamp(2
 
 .phone-col[hidden]{display:none}
 .feature.nophone{grid-template-columns:1fr}.feature.nophone .txt{max-width:760px}
+
+/* Title and text sit above the phone on small screens; top-aligned beside it on desktop */
+@media(max-width:820px){.feature .txt{order:-1}.feature.flip .phone-col,.feature .phone-col{order:0}}
+@media(min-width:821px){.feature{align-items:start}.feature .txt{position:sticky;top:130px;padding-top:clamp(10px,3vw,50px)}}

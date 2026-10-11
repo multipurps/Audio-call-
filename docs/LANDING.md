@@ -1,13 +1,12 @@
 # Public landing page / deployment notes
 
-- The landing page is served at `/landing.html` only. `/` still serves the app (`/index.html`).
-  To make it the main page later, add `{ "source": "/", "destination": "/landing.html" }` as the first entry in `rewrites` in `vercel.json`
-  (and update `scripts/build-check.mjs` and `tests/landing.test.mjs`, which currently require that route to be absent).
-  The PWA manifest starts at `/index.html`; there is **one** manifest and one
-  root service worker. OAuth and email confirmation redirects now return to
-  `/index.html`, not `/`, so the landing route cannot intercept the session.
-  If you have an external Supabase Auth URL allowlist, add the production
-  `https://your-domain/index.html` redirect URL before deploying.
+- `/` serves the public page (`home.html`) through a `routes` entry in `vercel.json`. Legacy `routes` are used on purpose:
+  `rewrites` run after the filesystem and cannot take over `/` while `index.html` exists. `/landing.html` redirects to `/`.
+- The real app is `/index.html`. The PWA manifest starts there, OAuth and email-confirmation redirects return there, and
+  `home.html` forwards installed (standalone) launches and sign-in returns to it, so the marketing page never intercepts a session.
+  There is **one** manifest and one root service worker.
+  If you have an external Supabase Auth URL allowlist, keep `https://your-domain/index.html` on it.
+- `vercel.json` can use either `routes` or `rewrites/headers`, never both.
 - Run `sql/032_landing_media.sql` on the existing Supabase project **before
   using admin media uploads**. No new environment variables. Existing
   `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `ADMIN_EMAIL` are required.

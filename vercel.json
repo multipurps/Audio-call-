@@ -1,34 +1,49 @@
 {
   "functions": {
-    "api/assistant.js": { "maxDuration": 60 },
-    "api/social-calling.js": { "maxDuration": 60 },
-    "api/calls.js": { "maxDuration": 60 },
-    "api/calls-status.js": { "maxDuration": 60 },
-    "api/memories.js": { "maxDuration": 60 }
+    "api/assistant.js": {
+      "maxDuration": 60
+    },
+    "api/social-calling.js": {
+      "maxDuration": 60
+    },
+    "api/calls.js": {
+      "maxDuration": 60
+    },
+    "api/calls-status.js": {
+      "maxDuration": 60
+    },
+    "api/memories.js": {
+      "maxDuration": 60
+    }
   },
-  "rewrites": [
-    { "source": "/api/bachs-webhook", "destination": "/api/referrals?action=webhook" }
-  ],
-  "headers": [
+  "routes": [
     {
-      "source": "/",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
+      "src": "/api/bachs-webhook",
+      "dest": "/api/referrals?action=webhook"
     },
     {
-      "source": "/index.html",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
+      "src": "/landing\\.html",
+      "status": 308,
+      "headers": {
+        "Location": "/"
+      }
     },
     {
-      "source": "/admin",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
+      "src": "/",
+      "headers": {
+        "Cache-Control": "no-cache, must-revalidate"
+      },
+      "dest": "/home.html"
     },
     {
-      "source": "/admin/",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
+      "src": "/(index\\.html|admin|admin/|admin/index\\.html)",
+      "headers": {
+        "Cache-Control": "no-cache, must-revalidate"
+      },
+      "continue": true
     },
     {
-      "source": "/admin/index.html",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
+      "handle": "filesystem"
     }
   ]
 }
