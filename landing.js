@@ -17,6 +17,7 @@ const allowedMedia = (value) => {
   } catch { return null; }
 };
 const mediaBySlot = new Map();
+const mk = (tag, props) => Object.assign(document.createElement(tag), props);
 async function loadMedia() {
   try {
     const response = await fetch('/api/admin?action=landing-media');
@@ -27,94 +28,46 @@ async function loadMedia() {
       if (!mediaBySlot.has(row.slot)) mediaBySlot.set(row.slot, []);
       mediaBySlot.get(row.slot).push(row);
     }
-    document.querySelectorAll('.scene[data-background]').forEach((scene) => {
-      const bg = mediaBySlot.get(scene.dataset.background)?.[0];
-      const overlay = mediaBySlot.get(scene.dataset.overlay)?.[0];
-      if (bg) {
-        const img = document.createElement('img');
-        img.src = allowedMedia(bg.url);
-        img.alt = '';
-        img.className = 'scene-bg';
-        img.decoding = 'async';
-        img.loading = scene.classList.contains('hero-visual') ? 'eager' : 'lazy';
-        if (scene.classList.contains('hero-visual')) img.fetchPriority = 'high';
-        img.addEventListener('load', () => {
-          const base = scene.querySelector('.scene-base');
-          base.replaceChildren(img);
-          base.classList.add('media-loaded');
-        }, { once: true });
-      }
-      if (overlay) {
-        const image = document.createElement('img');
-        image.src = allowedMedia(overlay.url);
-        image.alt = scene.getAttribute('aria-label') + ' screenshot';
-        image.className = 'scene-overlay overlay-image';
-        image.loading = scene.classList.contains('hero-visual') ? 'eager' : 'lazy';
-        image.decoding = 'async';
-        image.addEventListener('load', () => scene.querySelector('.scene-overlay')?.replaceWith(image), { once: true });
-      }
-    });
-    const orb = mediaBySlot.get('voice_orb')?.[0];
-    if (orb) {
-      const image = document.createElement('img');
-      image.src = allowedMedia(orb.url);
-      image.alt = 'Animated Emysa voice introduction orb';
-      image.loading = 'lazy';
-      image.decoding = 'async';
-      image.addEventListener('load', () => document.querySelector('.orb-fallback')?.replaceWith(image), { once: true });
-    }
-    for (const [slot, id] of [['call_screenshots', 'callGallery'], ['feature_media', 'featureGallery']]) {
-      const rows = mediaBySlot.get(slot) || [];
-      if (!rows.length) continue;
-      const gallery = document.getElementById(id);
-      gallery.replaceChildren();
-      rows.forEach((row, index) => {
-        const figure = document.createElement('figure');
-        const img = document.createElement('img');
-        img.src = allowedMedia(row.url);
-        img.loading = 'lazy';
-        img.decoding = 'async';
-        img.alt = `${slot === 'call_screenshots' ? 'Emysa call interface' : 'Emysa feature'} visual ${index + 1}`;
-        figure.append(img);
-        gallery.append(figure);
-      });
-    }
-    const shots = mediaBySlot.get('hero_overlay') || [];
+    const isImg = (r) => !/\.(mp4|webm|mov)(\?|$)/i.test(r.url) && r.media_type !== 'video';
+    const shots = ['hero_overlay', 'objective_overlay', 'conversation_overlay', 'call_screenshots', 'feature_media'].flatMap((s) => mediaBySlot.get(s) || []).filter(isImg);
     if (shots.length) {
-      document.getElementById('shots').replaceChildren(...shots.map((row, i) => { const f = document.createElement('figure'); f.className = 'shot'; const im = document.createElement('img'); im.src = allowedMedia(row.url); im.alt = `Emysa app screenshot ${i + 1}`; im.loading = i ? 'lazy' : 'eager'; im.decoding = 'async'; f.append(im); return f; }));
+      document.getElementById('shots').replaceChildren(...shots.map((r, i) => {
+        const f = mk('figure', { className: 'shot' });
+        f.append(mk('img', { src: allowedMedia(r.url), alt: `Emysa app screenshot ${i + 1}`, loading: i ? 'lazy' : 'eager', decoding: 'async' }));
+        return f;
+      }));
     }
-    const live = mediaBySlot.get('live_call_video')?.[0];
-    if (live) {
-      const lv = document.createElement('video');
-      lv.src = allowedMedia(live.url); lv.controls = true; lv.playsInline = true; lv.preload = 'metadata';
-      lv.setAttribute('aria-label', 'Emysa live call sample');
-      document.getElementById('liveCall').append(lv);
-      document.getElementById('live-call').hidden = false;
-    }
-    const video = mediaBySlot.get('demo_video')?.[0];
-    if (video) {
-      const el = document.createElement('video');
-      el.src = allowedMedia(video.url);
-      el.controls = true;
-      el.muted = true;
-      el.playsInline = true;
-      el.preload = 'none';
-      el.setAttribute('aria-label', 'Emysa demonstration video');
-      document.getElementById('demoVideo').append(el);
-    }
-  } catch { /* Deliberate local fallbacks stay visible if content API is unavailable. */ }
+    const vid = (slot, host) => {
+      const row = mediaBySlot.get(slot)?.[0]; if (!row) return false;
+      host.append(mk('video', { src: allowedMedia(row.url), controls: true, playsInline: true, preload: 'metadata' })); return true;
+    };
+    if (vid('live_call_video', document.getElementById('liveCall'))) document.getElementById('live-call').hidden = false;
+    vid('demo_video', document.getElementById('demoVideo'));
+  } catch {}
 }
 loadMedia();
 
-if ('IntersectionObserver' in window && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-  document.documentElement.classList.add('js-reveal');
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach((entry) => {
-      if (entry.isIntersecting) { entry.target.classList.add('in-view'); observer.unobserve(entry.target); }
-    });
-  }, { rootMargin: '0px 0px 20px 0px', threshold: .06 });
-  document.querySelectorAll('.section-reveal').forEach((node) => observer.observe(node));
-}
+// Hero background: the login-screen backgrounds (video first, then crossfading images), no overlay
+(async () => {
+  const KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1Y2JsYnZmenVyYWFvenN3ZndkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0NzQ0ODQsImV4cCI6MjA5MTA1MDQ4NH0.OCsEC_FfOJmoL5sQWP8zYnw9SmWuy4xggfcpIIxQw-c';
+  let rows = [];
+  try {
+    const r = await fetch('https://gucblbvfzuraaozswfwd.supabase.co/rest/v1/auth_backgrounds?select=url,media_type&order=created_at.asc', { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } });
+    rows = r.ok ? await r.json() : [];
+  } catch {}
+  rows = rows.filter((x) => allowedMedia(x.url));
+  const vids = rows.filter((x) => x.media_type === 'video').map((x) => allowedMedia(x.url));
+  const imgs = rows.filter((x) => x.media_type !== 'video').map((x) => allowedMedia(x.url));
+  if (vids.length) {
+    const v = document.querySelector('.bg-v'); let i = 0;
+    const next = () => { v.src = vids[i++ % vids.length]; v.loop = vids.length === 1; v.play().catch(() => {}); };
+    v.addEventListener('ended', next); v.addEventListener('playing', () => v.classList.add('on'), { once: true }); next();
+  } else if (imgs.length) {
+    const layers = [document.querySelector('.bg-a'), document.querySelector('.bg-b')]; let i = 0, a = 0;
+    const show = () => { const n = 1 - a; layers[n].style.backgroundImage = `url('${imgs[i % imgs.length]}')`; layers[n].classList.add('on'); layers[a].classList.remove('on'); a = n; i++; };
+    show(); if (imgs.length > 1) setInterval(show, 6000);
+  }
+})();
 
 // Typed voice transcript, same behaviour as the Get Started screen: each word types across the time it is spoken.
 (async () => {
@@ -138,6 +91,8 @@ if ('IntersectionObserver' in window && !matchMedia('(prefers-reduced-motion: re
   const finish = () => { done = true; cancelAnimationFrame(raf); audio.pause(); cur = -1; render(lastEnd + 1); caret.remove(); stage.classList.add('silent'); skipBtn.textContent = 'Replay'; };
   audio.addEventListener('ended', () => setTimeout(finish, 700), { once: true });
   skipBtn.addEventListener('click', () => { if (done) { done = false; audio.currentTime = 0; skipBtn.textContent = 'Skip'; start().catch(() => {}); } else finish(); });
+  const hint = document.getElementById('introHint');
+  audio.addEventListener('playing', () => { hint.hidden = true; }, { once: true });
   log.innerHTML = '<div class="introLine cur"><span class="introPrompt">&gt;</span><span class="txt"></span></div>'; log.firstChild.appendChild(caret);
   // Autoplay now. iPhone only unlocks sound on a real tap (click/touchend), so retry on those until it starts.
   start().catch(() => {
@@ -231,4 +186,31 @@ document.fonts.ready.then(fit); addEventListener('resize', fit);
     const show = () => { const n = 1 - a; layers[n].style.backgroundImage = `url('${imgs[i % imgs.length]}')`; layers[n].classList.add('on'); layers[a].classList.remove('on'); a = n; i++; };
     show(); if (imgs.length > 1) setInterval(show, 6000);
   }
+})();
+
+// Scroll animation: word-by-word text fill, staggered rises, hero parallax, screenshot scale, footer wordmark rise
+(() => {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { document.querySelectorAll('.rise').forEach((e) => e.classList.add('in')); return; }
+  document.querySelectorAll('[data-words]').forEach((el) => { el.innerHTML = el.textContent.trim().split(/\s+/).map((w) => `<span class="wd">${w}</span>`).join(' '); });
+  const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: .12, rootMargin: '0px 0px -6% 0px' });
+  document.querySelectorAll('.rise').forEach((el, i) => { if (!el.style.getPropertyValue('--d')) el.style.setProperty('--d', `${(i % 3) * .1}s`); io.observe(el); });
+  const clamp = (n) => Math.min(1, Math.max(0, n));
+  const hero = document.querySelector('.hero'), heroBg = document.querySelector('.hero-bg'), heroCopy = document.querySelector('.hero-copy');
+  const words = [...document.querySelectorAll('[data-words]')].map((el) => ({ el, w: [...el.querySelectorAll('.wd')] }));
+  const foot = document.querySelector('.foot-mark span');
+  let queued = false;
+  const frame = () => {
+    queued = false; const vh = innerHeight, y = scrollY;
+    const hp = clamp(y / (hero.offsetHeight || vh));
+    heroBg.style.transform = `translate3d(0,${y * .25}px,0) scale(${1 + hp * .12})`;
+    heroCopy.style.transform = `translate3d(0,${y * .22}px,0)`; heroCopy.style.opacity = 1 - hp * 1.15;
+    for (const { el, w } of words) {
+      const r = el.getBoundingClientRect(), p = clamp((vh * .88 - r.top) / (r.height + vh * .4));
+      w.forEach((s, i) => { s.style.opacity = (.16 + .84 * clamp(p * (w.length + 4) - i)).toFixed(3); });
+    }
+    document.querySelectorAll('.shot').forEach((s) => { const r = s.getBoundingClientRect(); const c = Math.abs((r.left + r.width / 2) - innerWidth / 2) / innerWidth; const v = clamp(1 - (r.top - vh * .15) / vh); s.style.setProperty('--s', (.88 + .12 * v * (1 - Math.min(.5, c) * .4)).toFixed(3)); });
+    if (foot) { const r = foot.parentElement.getBoundingClientRect(), p = clamp((vh - r.top) / (r.height * 1.2)); foot.style.setProperty('--ty', `${(1 - p) * 60}%`); foot.style.setProperty('--o', p.toFixed(3)); }
+  };
+  const ask = () => { if (!queued) { queued = true; requestAnimationFrame(frame); } };
+  addEventListener('scroll', ask, { passive: true }); addEventListener('resize', ask); frame();
 })();

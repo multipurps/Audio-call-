@@ -13,10 +13,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300;400;500;600&family=Krona+One&display=swap">
   <link rel="stylesheet" href="/vendor/adhs/adhs.css">
-  <link rel="stylesheet" href="/landing.css?v=2026-10-10.5">
+  <link rel="stylesheet" href="/landing.css?v=2026-10-10.6">
   <script src="/vendor/adhs/adhs.js" defer></script>
-  <script src="/landing.js?v=2026-10-10.5" defer></script>
-  <title>Emysa — Your presence, even when you're not there.</title>
+  <script src="/landing.js?v=2026-10-10.6" defer></script>
+  <title>Emysa | Calls made in your voice</title>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -26,64 +26,47 @@
   </header>
   <nav class="menu" id="menu" aria-label="Main navigation"><a href="#how">How it works</a><a href="#voice">Hear Emysa</a><a href="#install">Install</a><button type="button" class="install-action">Install the app</button></nav>
   <main id="main">
-    <section class="hero" aria-labelledby="hero-title">
+    <section class="hero" aria-label="Emysa introduction">
       <div class="hero-bg" aria-hidden="true"><div class="bg-a"></div><div class="bg-b"></div><video class="bg-v" muted loop playsinline preload="auto"></video></div>
-      <div class="hero-copy">
-        <p class="eyebrow hero-eyebrow"><span class="signal-dot"></span> ANOTHER WAY TO SHOW UP</p>
-        <h1 id="hero-title">Your presence,<br><em>even when</em><br>you’re not there<span class="period">.</span></h1>
-        <div class="hero-bottom"><p>Give Emysa your message and your instructions. It calls, asks the questions, and carries the conversation <strong>on your behalf.</strong></p>
-          <div class="hero-actions"><button class="button button-light install-action" type="button">Install Emysa <span aria-hidden="true">↗</span></button><a class="button button-outline" href="#how">Explore Emysa <span aria-hidden="true">↓</span></a></div>
-        </div>
-        <div class="intro" id="voice"><div class="introHead"><i class="introLive"></i><span>EMYSA</span><span class="introBars" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div><div class="introLog" id="introLog" aria-live="polite"></div><button type="button" class="introSkip" id="introSkip">Skip</button></div>
+      <div class="hero-copy"><div class="intro" id="voice"><div class="introHead"><i class="introLive"></i><span>EMYSA</span><span class="introBars" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div><div class="introLog" id="introLog" aria-live="polite"></div><div class="introFoot"><span class="introHint" id="introHint">Tap anywhere to hear Emysa</span><button type="button" class="introSkip" id="introSkip">Skip</button></div></div></div>
+    </section>
+
+    <section class="statement" id="how"><h2 data-words>Phone calls the way they should be. Handled for you, in your voice, on your terms.</h2></section>
+
+    <section class="claims" aria-label="What Emysa does">
+      <div class="claim rise"><h3>You say it once.</h3><p>Tell Emysa who to call and what you need. Plain words are enough.</p></div>
+      <div class="claim rise"><h3>It makes the call.</h3><p>Emysa phones, speaks in your cloned voice, and holds the conversation for you.</p></div>
+      <div class="claim rise"><h3>You see what happened.</h3><p>Every call comes back as a transcript and a clear summary.</p></div>
+    </section>
+
+    <section class="appshots" aria-label="Emysa app screenshots">
+      <div class="shots" id="shots"><figure class="shot"><div class="mock" aria-label="Emysa call preview"><div class="mock-logo"><img src="/icon-192.png" alt="" width="30" height="30"> Emysa</div><div class="mock-context">CALL IN PROGRESS <i class="introLive"></i></div><div class="mock-name">Calling for you.</div><div class="mock-line">&ldquo;Ask if they have a table for four at 7:30.&rdquo;</div><div class="mock-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="mock-foot">Emysa is speaking for you</div></div></figure></div>
+      <div class="demo" id="demoVideo"></div>
+    </section>
+
+    <section class="livecall" id="live-call" aria-labelledby="live-title" hidden><h2 id="live-title" class="rise">Hear a live call.</h2><p class="rise">Unedited. Turn the sound on.</p><div class="live-call rise" id="liveCall"></div></section>
+
+    <section class="channels" aria-labelledby="ch-title">
+      <h2 id="ch-title" class="rise">Wherever they pick up.</h2>
+      <div class="ch-grid">
+        <div class="rise"><b>On the phone:</b> Call any regular number through supported lines.</div>
+        <div class="rise" style="--d:.12s"><b>On WhatsApp:</b> Call your contacts over WhatsApp once your account is linked.</div>
+        <div class="rise" style="--d:.24s"><b>On Telegram:</b> Reach people on Telegram through your connected account.</div>
       </div>
     </section>
 
-    <section class="appshots section-reveal" aria-label="Emysa app screenshots">
-      <div class="shots" id="shots"><figure class="shot"><div class="fallback-screen hero-screen" aria-label="Emysa call preview">
-        <div class="mock-logo"><img src="/icon-192.png" alt="" width="32" height="32"> Emysa</div>
-        <div class="mock-context">CALL IN PROGRESS <span class="signal-dot"></span></div>
-        <div class="mock-name">Calling for you.</div>
-        <div class="mock-line">“Ask if they have a table for four at 7:30.”</div>
-        <div class="mock-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-        <div class="mock-foot">Emysa is speaking for you <span>↗</span></div></div></figure></div>
-    </section>
-
-    <section class="manifesto section-reveal" id="how" aria-labelledby="how-title">
-      
-      <div class="manifesto-grid"><h2 id="how-title">Not a voice on hold.<br><em>A voice in your corner.</em></h2><div><p>There’s a call you need to make. You know what you want to say. You just don’t need to be the one waiting on the line.</p><p>Emysa represents <strong>you</strong> in a conversation with someone else. You set the objective; it handles the back-and-forth and tells you what happened.</p></div></div>
-      <div class="step-strip" aria-label="How Emysa works"><div><b>Say what you need</b><small>Give it the goal and any details that matter.</small></div><div><b>Emysa makes the call</b><small>It speaks to the recipient on your behalf.</small></div><div><b>Know the outcome</b><small>Review the call and its summary.</small></div></div>
-    </section>
-
-    <section class="showcase section-reveal" aria-labelledby="objective-title">
-      
-      <div class="showcase-copy"><span class="kicker">A CLEAR GOAL. A REAL CONVERSATION.</span><h2 id="objective-title">Tell it what<br><em>matters.</em></h2><p>Write the objective in your own words. Emysa prepares a call plan and asks you to confirm before a phone call goes out.</p></div>
-      <div class="scene showcase-scene objective-scene" data-background="objective_background" data-overlay="objective_overlay" aria-label="Objective and call plan visual">
-        <div class="scene-base objective-base"><span class="big-type">SAY IT<br>YOUR WAY.</span></div>
-        <div class="scene-overlay fallback-screen objective-screen"><div class="mock-logo"><img src="/icon-192.png" alt="" width="30" height="30"> Emysa</div><div class="mock-conversation"><span>YOUR OBJECTIVE</span><p>Call the restaurant and ask if they have a table for four at 7:30 tonight.</p></div><div class="mock-answer"><span>EMYSA</span><p>I’ll ask about availability for four at 7:30 and bring back their answer.</p></div><div class="mock-confirm">Review before calling <span>↗</span></div></div>
+    <section class="inside" aria-labelledby="in-title">
+      <h2 id="in-title" class="rise">Built around you.</h2>
+      <div class="in-list">
+        <ul>
+          <li class="rise">Your own cloned voice</li><li class="rise">A live voice for every call</li><li class="rise">Context carried between calls</li>
+          <li class="rise">Contact memory you can review</li><li class="rise">Call history and transcripts</li><li class="rise">Confirmation before a call goes out</li>
+        </ul>
+        <button type="button" class="outline install-action rise">Install Emysa</button>
       </div>
-      <p class="scene-note">Tell Emysa what you need. You stay in control before it calls.</p>
     </section>
 
-    <section class="interlude section-reveal" aria-label="Product principle"><p>It’s your conversation.<br><em>You just don’t have to be on the line.</em></p><span>EMYSA / MADE TO REPRESENT YOU</span></section>
-
-    <section class="showcase showcase-two section-reveal" aria-labelledby="conversation-title">
-      
-      <div class="showcase-copy"><span class="kicker">MORE THAN A SCRIPT</span><h2 id="conversation-title">The call is<br><em>actually made.</em></h2><p>Emysa speaks to the recipient, asks follow-up questions, and works toward the objective you gave it. Where supported, you can follow the live transcript as the call unfolds.</p></div>
-      <div class="scene showcase-scene conversation-scene" data-background="conversation_background" data-overlay="conversation_overlay" aria-label="Call conversation visual">
-        <div class="scene-base conversation-base"><div class="large-ring"></div><span class="big-type">IN<br>CONVERSATION.</span><span class="scene-side">LIVE / ON YOUR BEHALF</span></div>
-        <div class="scene-overlay fallback-screen conversation-screen"><div class="mock-label">EMYSA <span>● LIVE CALL</span></div><div class="mock-recipient">Restaurant</div><div class="mock-timer">00:42</div><div class="mock-dialog"><p><b>Emysa</b> Hi, I’m calling on behalf of someone. Do you have a table for four at 7:30?</p><p><b>Recipient</b> Let me check what’s available.</p></div><div class="mock-foot">Live transcript <span>↗</span></div></div>
-      </div>
-      <p class="scene-note">A call placed for you, with the conversation kept in view.</p>
-    </section>
-
-    <section class="livecall section-reveal" id="live-call" aria-labelledby="live-title" hidden><h2 id="live-title">Hear a live call.<br><em>Unedited.</em></h2><p>A real call placed by Emysa on someone's behalf. Turn the sound on.</p><div class="live-call" id="liveCall"></div></section>
-    <section class="details section-reveal" aria-labelledby="details-title"><div class="details-layout"><h2 id="details-title">Different calls.<br><em>Same intention.</em></h2><div class="details-list"><div><div><h3>Call where they are</h3><p>Phone calls through supported Twilio lines. WhatsApp and Telegram calls require a linked account and configured relays.</p></div></div><div><div><h3>Choose how you sound</h3><p>Pick a standard or live voice, save a voice preference, or create a voice clone with Fish Audio where enabled.</p></div></div><div><div><h3>Keep the context</h3><p>Review call history, transcripts and outcomes. Contact-specific memories can help carry context into future conversations when enabled.</p></div></div><div><div><h3>Try again, deliberately</h3><p>Retry a call with the right contact and objective. Call plans for phone calls require your confirmation.</p></div></div></div></div></section>
-
-    <section class="gallery section-reveal" aria-labelledby="gallery-title"><div class="gallery-head"><h2 id="gallery-title">See what<br><em>comes back.</em></h2><p>Not just a dial tone. A record of what was said and how the call ended.</p></div><div id="callGallery" class="media-gallery" aria-label="Call interface screenshots"><div class="gallery-fallback"><span>CALL / OUTCOME</span><p>“They can seat four at 7:30.”</p><small>Review the summary and transcript after the call.</small></div></div><div id="featureGallery" class="feature-gallery" aria-label="Additional feature visuals"></div><div id="demoVideo" class="demo-video"></div></section>
-
-    
-
-    <section class="end section-reveal" id="install" aria-labelledby="end-title"><span class="end-overline">YOUR NEXT CALL CAN START HERE</span><h2 id="end-title">Be there.<br><em>Without being there.</em></h2><p>Install Emysa, set your objective, and let your voice go further.</p><div class="end-actions"><button type="button" class="button button-dark install-action">Install Emysa <span aria-hidden="true">↗</span></button></div><small>Availability of calling channels and voices depends on connected accounts and service configuration.</small></section>
+    <section class="end" id="install"><h2 data-words>Your next call can start here.</h2><button type="button" class="outline install-action rise">Install Emysa</button></section>
   </main>
   <footer>
     <div class="foot-grid">
