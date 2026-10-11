@@ -34,7 +34,7 @@ async function loadMedia() {
       const row = (mediaBySlot.get(ph.dataset.slot) || []).find(isImg); if (!row) return;
       const img = slotImg(row, ph.getAttribute('aria-label'));
       const halo = mk('img', { src: img.src, alt: '', className: 'halo', decoding: 'async' });
-      ph.replaceChildren(img); ph.parentElement.prepend(halo); ph.classList.add('has-shot'); ph.style.overflow = 'hidden';
+      ph.replaceChildren(img); ph.parentElement.prepend(halo); ph.classList.add('has-shot'); ph.parentElement.hidden = false; ph.closest('.feature').classList.remove('nophone');
     });
     const extras = ['hero_overlay', 'objective_overlay', 'conversation_overlay', 'call_screenshots', 'feature_media'].flatMap((s) => mediaBySlot.get(s) || []).filter(isImg);
     if (extras.length) {
@@ -50,7 +50,7 @@ async function loadMedia() {
       const snd = mk('button', { type: 'button', className: 'vsound', textContent: 'Tap for sound' });
       snd.addEventListener('click', () => { v.muted = !v.muted; snd.textContent = v.muted ? 'Tap for sound' : 'Sound on'; });
       v.addEventListener('loadedmetadata', () => { if (v.videoWidth > v.videoHeight) ph.classList.add('wide'); });
-      ph.replaceChildren(v, snd); ph.classList.add('has-shot');
+      ph.replaceChildren(v, snd); ph.classList.add('has-shot'); ph.parentElement.hidden = false; ph.closest('.feature').classList.remove('nophone');
       new IntersectionObserver((es) => es.forEach((en) => { if (en.isIntersecting) v.play().catch(() => {}); else v.pause(); }), { threshold: .4 }).observe(ph);
     }
     const vid = (slot, host) => {
