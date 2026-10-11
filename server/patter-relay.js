@@ -9,6 +9,7 @@ import {
 } from '../lib/emotionEngine.js';
 import {
   retrieveRelevantMemories,
+  referencesPriorCall,
 } from '../lib/memoryManager.js';
 import { maybeGenerateCallSummary } from '../lib/callSession.js';
 import { transcribeAudioBuffer, DEFAULT_STT_MODEL } from '../lib/sttClient.js';
@@ -244,6 +245,7 @@ async function loadCallContext(callId) {
     userId: call.user_id,
     contactId: call.contact_id || null,
     queryText: call.objective || '',
+    includeEpisodic: referencesPriorCall(call.objective),
     limit: 8,
   });
   ctx.memories = memBundle.memories.map((m) => m.content);

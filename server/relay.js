@@ -9,6 +9,7 @@ import {
 import { createChatCompletion } from '../lib/llmClient.js';
 import {
   retrieveRelevantMemories,
+  referencesPriorCall,
 } from '../lib/memoryManager.js';
 import { maybeGenerateCallSummary } from '../lib/callSession.js';
 import { transcribeAudioBuffer } from '../lib/sttClient.js';
@@ -140,6 +141,7 @@ async function loadCallContext(state) {
     userId: call.user_id,
     contactId: call.contact_id || null,
     queryText: call.objective || '',
+    includeEpisodic: referencesPriorCall(call.objective),
     limit: 8,
   });
   state.memories = memBundle.memories.map((m) => m.content);
