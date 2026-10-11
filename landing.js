@@ -30,19 +30,18 @@ async function loadMedia() {
     }
     const isImg = (r) => !/\.(mp4|webm|mov)(\?|$)/i.test(r.url) && r.media_type !== 'video';
     const shots = ['hero_overlay', 'objective_overlay', 'conversation_overlay', 'call_screenshots', 'feature_media'].flatMap((s) => mediaBySlot.get(s) || []).filter(isImg);
-    if (shots.length) {
-      document.getElementById('shots').replaceChildren(...shots.map((r, i) => {
-        const f = mk('figure', { className: 'shot' });
-        f.append(mk('img', { src: allowedMedia(r.url), alt: `Emysa app screenshot ${i + 1}`, loading: i ? 'lazy' : 'eager', decoding: 'async' }));
-        return f;
-      }));
+    const img = (r, i) => mk('img', { src: allowedMedia(r.url), alt: `Emysa app screenshot ${i + 1}`, loading: i ? 'lazy' : 'eager', decoding: 'async' });
+    shots.slice(0, 3).forEach((r, i) => document.getElementById('ph' + i)?.replaceChildren(img(r, i)));
+    if (shots.length > 3) {
+      document.getElementById('moreShots').replaceChildren(...shots.slice(3).map((r, i) => { const f = mk('figure', { className: 'shot' }); f.append(img(r, i + 3)); return f; }));
+      document.querySelector('.appshots').hidden = false;
     }
     const vid = (slot, host) => {
       const row = mediaBySlot.get(slot)?.[0]; if (!row) return false;
       host.append(mk('video', { src: allowedMedia(row.url), controls: true, playsInline: true, preload: 'metadata' })); return true;
     };
     if (vid('live_call_video', document.getElementById('liveCall'))) document.getElementById('live-call').hidden = false;
-    vid('demo_video', document.getElementById('demoVideo'));
+    if (vid('demo_video', document.getElementById('demoVideo'))) document.querySelector('.demo').hidden = false;
   } catch {}
 }
 loadMedia();
@@ -190,8 +189,10 @@ document.fonts.ready.then(fit); addEventListener('resize', fit);
 
 // Scroll animation: word-by-word text fill, staggered rises, hero parallax, screenshot scale, footer wordmark rise
 (() => {
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { document.querySelectorAll('.rise').forEach((e) => e.classList.add('in')); return; }
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { document.querySelectorAll('.rise,.feature').forEach((e) => e.classList.add('in')); return; }
   document.querySelectorAll('[data-words]').forEach((el) => { el.innerHTML = el.textContent.trim().split(/\s+/).map((w) => `<span class="wd">${w}</span>`).join(' '); });
+  const fio = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); fio.unobserve(e.target); } }), { threshold: .3 });
+  document.querySelectorAll('.feature').forEach((f) => fio.observe(f));
   const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: .12, rootMargin: '0px 0px -6% 0px' });
   document.querySelectorAll('.rise').forEach((el, i) => { if (!el.style.getPropertyValue('--d')) el.style.setProperty('--d', `${(i % 3) * .1}s`); io.observe(el); });
   const clamp = (n) => Math.min(1, Math.max(0, n));
@@ -204,11 +205,7 @@ document.fonts.ready.then(fit); addEventListener('resize', fit);
     const hp = clamp(y / (hero.offsetHeight || vh));
     heroBg.style.transform = `translate3d(0,${y * .25}px,0) scale(${1 + hp * .12})`;
     heroCopy.style.transform = `translate3d(0,${y * .22}px,0)`; heroCopy.style.opacity = 1 - hp * 1.15;
-    for (const { el, w } of words) {
-      const r = el.getBoundingClientRect(), p = clamp((vh * .88 - r.top) / (r.height + vh * .4));
-      w.forEach((s, i) => { s.style.opacity = (.16 + .84 * clamp(p * (w.length + 4) - i)).toFixed(3); });
-    }
-    document.querySelectorAll('.shot').forEach((s) => { const r = s.getBoundingClientRect(); const c = Math.abs((r.left + r.width / 2) - innerWidth / 2) / innerWidth; const v = clamp(1 - (r.top - vh * .15) / vh); s.style.setProperty('--s', (.88 + .12 * v * (1 - Math.min(.5, c) * .4)).toFixed(3)); });
+    document.querySelectorAll('.phone').forEach((p) => { const r = p.getBoundingClientRect(); p.style.setProperty('--fy', `${((r.top + r.height / 2 - vh / 2) * -.07).toFixed(1)}px`); });
     if (foot) { const r = foot.parentElement.getBoundingClientRect(), p = clamp((vh - r.top) / (r.height * 1.2)); foot.style.setProperty('--ty', `${(1 - p) * 60}%`); foot.style.setProperty('--o', p.toFixed(3)); }
   };
   const ask = () => { if (!queued) { queued = true; requestAnimationFrame(frame); } };
