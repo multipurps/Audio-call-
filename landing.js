@@ -30,22 +30,34 @@ async function loadMedia() {
     }
     const isImg = (r) => !/\.(mp4|webm|mov)(\?|$)/i.test(r.url) && r.media_type !== 'video';
     const slotImg = (row, alt, i = 0) => mk('img', { src: allowedMedia(row.url), alt, loading: 'lazy', decoding: 'async' });
+    // A feature uses its own slot first. Older uploads (made before the per-feature slots existed) are paired
+    // by meaning so nothing sits in a separate row: hero screenshot -> how it works, objective -> calls,
+    // conversation -> live call, first call screenshot -> call summary.
+    const legacy = { how_it_works: ['hero_overlay', 0], calls_for_you: ['objective_overlay', 0], live_call_video: ['conversation_overlay', 0], call_summary: ['call_screenshots', 0] };
+    const used = new Set();
+    const pick = (slot) => {
+      const own = (mediaBySlot.get(slot) || []).find(isImg); if (own) return own;
+      const lg = legacy[slot]; const r = lg && (mediaBySlot.get(lg[0]) || []).filter(isImg)[lg[1]];
+      if (r) used.add(r); return r;
+    };
+    const show = (ph, node, row) => {
+      ph.replaceChildren(node); ph.classList.add('has-shot'); ph.parentElement.hidden = false; ph.closest('.feature').classList.remove('nophone');
+      if (row) ph.parentElement.prepend(mk('img', { src: allowedMedia(row.url), alt: '', className: 'halo', decoding: 'async' }));
+    };
     document.querySelectorAll('.phone[data-slot]').forEach((ph) => {
-      const row = (mediaBySlot.get(ph.dataset.slot) || []).find(isImg); if (!row) return;
-      const img = slotImg(row, ph.getAttribute('aria-label'));
-      const halo = mk('img', { src: img.src, alt: '', className: 'halo', decoding: 'async' });
-      ph.replaceChildren(img); ph.parentElement.prepend(halo); ph.classList.add('has-shot'); ph.parentElement.hidden = false; ph.closest('.feature').classList.remove('nophone');
+      const row = pick(ph.dataset.slot); if (!row) return;
+      show(ph, slotImg(row, ph.getAttribute('aria-label')), row);
     });
-    const extras = ['hero_overlay', 'objective_overlay', 'conversation_overlay', 'call_screenshots', 'feature_media'].flatMap((s) => mediaBySlot.get(s) || []).filter(isImg);
-    if (extras.length) {
-      document.getElementById('moreShots').replaceChildren(...extras.map((r, i) => { const f = mk('figure', { className: 'shot' }); f.append(slotImg(r, `Emysa app screenshot ${i + 1}`)); return f; }));
-      document.querySelector('.appshots').hidden = false;
-    }
-    // Live call sample: plays muted on its own while visible, pauses when scrolled away, tap for sound.
-    const lv = mediaBySlot.get('live_call_video')?.[0];
+    // Live call: a video (its own slot, or the demonstration video slot) plays muted while visible, pauses when
+    // scrolled away; tap for sound. The conversation screenshot becomes its poster.
+    const lv = mediaBySlot.get('live_call_video')?.[0] || mediaBySlot.get('demo_video')?.[0];
+    let demoUsed = false;
     if (lv) {
+      demoUsed = !mediaBySlot.get('live_call_video')?.[0];
       const ph = document.getElementById('ph-live_call_video');
+      const poster = pick('live_call_video');
       const v = mk('video', { src: allowedMedia(lv.url), muted: true, loop: true, playsInline: true, preload: 'auto' });
+      if (poster) v.poster = allowedMedia(poster.url);
       v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
       const snd = mk('button', { type: 'button', className: 'vsound', textContent: 'Tap for sound' });
       snd.addEventListener('click', () => { v.muted = !v.muted; snd.textContent = v.muted ? 'Tap for sound' : 'Sound on'; });
@@ -53,11 +65,14 @@ async function loadMedia() {
       ph.replaceChildren(v, snd); ph.classList.add('has-shot'); ph.parentElement.hidden = false; ph.closest('.feature').classList.remove('nophone');
       new IntersectionObserver((es) => es.forEach((en) => { if (en.isIntersecting) v.play().catch(() => {}); else v.pause(); }), { threshold: .4 }).observe(ph);
     }
-    const vid = (slot, host) => {
-      const row = mediaBySlot.get(slot)?.[0]; if (!row) return false;
-      host.append(mk('video', { src: allowedMedia(row.url), controls: true, playsInline: true, preload: 'metadata' })); return true;
-    };
-    if (vid('demo_video', document.getElementById('demoVideo'))) document.querySelector('.demo').hidden = false;
+    // Whatever is left over (not paired to a feature) goes in the swipe row.
+    const extras = ['hero_overlay', 'objective_overlay', 'conversation_overlay', 'call_screenshots', 'feature_media'].flatMap((s) => mediaBySlot.get(s) || []).filter((r) => isImg(r) && !used.has(r));
+    if (extras.length) {
+      document.getElementById('moreShots').replaceChildren(...extras.map((r, i) => { const f = mk('figure', { className: 'shot' }); f.append(slotImg(r, `Emysa app screenshot ${i + 1}`)); return f; }));
+      document.querySelector('.appshots').hidden = false;
+    }
+    const dv = mediaBySlot.get('demo_video')?.[0];
+    if (dv && !demoUsed) { document.getElementById('demoVideo').append(mk('video', { src: allowedMedia(dv.url), controls: true, playsInline: true, preload: 'metadata' })); document.querySelector('.demo').hidden = false; }
   } catch {}
 }
 const mediaReady = loadMedia();
