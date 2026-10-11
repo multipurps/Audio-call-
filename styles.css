@@ -1132,3 +1132,12 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .premiumBuy:active{opacity:.85;}
 .premiumBuy::after{content:""; position:absolute; top:0; bottom:0; left:-60%; width:40%; pointer-events:none; background:linear-gradient(100deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.55) 50%, rgba(255,255,255,0) 100%); transform:skewX(-18deg); animation:premiumShimmer 3.2s ease-in-out infinite;}
 @media(prefers-reduced-motion:reduce){.premiumBuy::after{animation:none; display:none;}}
+
+.pfTable{display:flex; flex-direction:column;}
+.pfRow{display:grid; grid-template-columns:1.7fr 1fr 1fr; gap:8px; align-items:center; padding:10px 0; font-size:14px; font-weight:300; border-top:1px solid var(--line);}
+.pfRow:first-child{border-top:0;}
+.pfRow span:nth-child(n+2){text-align:left;}
+.pfRow span:nth-child(2){color:var(--muted);}
+.pfRow span:nth-child(3){color:var(--accent);}
+.pfHead{font-weight:500; padding-top:0;}
+.pfHead span:nth-child(n){color:var(--text);}
