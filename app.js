@@ -3257,6 +3257,7 @@ function relTimeShort(iso) {
 function renderBalance() {
   $('dashMinutes').textContent = homeBalance ? formatMinutes(homeBalance.remaining) : '–';
   $('dashBalanceSub').textContent = homeBalance?.pending ? 'confirming payment…' : 'remaining';
+  if (typeof renderPremiumEntry === 'function') renderPremiumEntry();
 }
 
 async function loadBalance() {
@@ -3467,15 +3468,16 @@ async function openAddTime() {
 }
 function closeAddTime() { $('addTimeScreen').classList.add('hidden'); }
 
-async function startCheckout() {
-  const buy = $('addTimeBuy');
+// One payment launcher for both add-time and premium: the server decides the price from
+// the quantity or plan it is given, and credits only after Bachs confirms.
+async function launchCheckout(body, { buy, status, link }) {
   buy.disabled = true;
-  $('addTimeStatus').textContent = 'Opening secure payment…';
+  status.textContent = 'Opening secure payment…';
   try {
     const resp = await authedFetch('/api/referrals?action=checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ quantity: addTimeQty }),
+      body: JSON.stringify(body),
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || !data.url) throw new Error(data.error || 'Could not open payment. Try again.');
@@ -3485,21 +3487,85 @@ async function startCheckout() {
     const opened = window.open(data.url, '_blank');
     if (opened) {
       try { opened.opener = null; } catch {}
-      $('addTimeStatus').textContent = '';
+      status.textContent = '';
     } else {
       // The browser blocked the window (the request finished after the tap).
       // A real tap on a link always works, including in an installed PWA.
-      $('addTimeOpen').href = data.url;
-      $('addTimeOpen').classList.remove('hidden');
-      $('addTimeStatus').textContent = 'Tap to continue to payment.';
+      link.href = data.url;
+      link.classList.remove('hidden');
+      status.textContent = 'Tap to continue to payment.';
     }
     watchPayment();
   } catch (err) {
-    $('addTimeStatus').textContent = err.message || 'Could not open payment. Try again.';
+    status.textContent = err.message || 'Could not open payment. Try again.';
   } finally {
     buy.disabled = false;
   }
 }
+const startCheckout = () => launchCheckout({ quantity: addTimeQty }, { buy: $('addTimeBuy'), status: $('addTimeStatus'), link: $('addTimeOpen') });
+
+// ---------- Premium ----------
+let premiumMonths = 12;
+const monthsLabel = (m) => (m === 12 ? '12 months' : m === 1 ? '1 month' : `${m} months`);
+const formatDay = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+
+function renderPremiumEntry() {
+  const plans = homeBalance?.plans;
+  const on = Boolean(homeBalance?.payments && plans?.length);
+  const premium = Boolean(homeBalance?.premium);
+  $('dashUpgrade').classList.toggle('hidden', !on || premium);
+  const card = $('addTimeUpgrade');
+  card.classList.toggle('hidden', !on);
+  $('addTimeUpgradeTitle').textContent = premium ? 'Premium' : 'Upgrade to Premium';
+  $('addTimeUpgradeSub').textContent = premium ? `Active until ${formatDay(homeBalance.premiumUntil)}. Tap to extend` : 'Your credits never expire';
+  $('addTimeExpiry').textContent = premium
+    ? 'Your credits never expire.'
+    : homeBalance?.creditExpiresAt ? `Your credits expire on ${formatDay(homeBalance.creditExpiresAt)}.` : 'Credits expire one month after you add them.';
+}
+
+function renderPlans() {
+  const plans = homeBalance?.plans || [];
+  const list = $('planList');
+  list.textContent = '';
+  for (const p of plans) {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = `planCard${p.months === premiumMonths ? ' selected' : ''}`;
+    const name = document.createElement('span');
+    name.className = 'planName';
+    name.textContent = monthsLabel(p.months);
+    const price = document.createElement('span');
+    price.className = 'planPrice';
+    price.textContent = formatPlainPrice(p.amount, p.currency);
+    card.append(name, price);
+    if (p.percentOff > 0) {
+      const tag = document.createElement('span');
+      tag.className = 'planTag';
+      tag.textContent = `${p.percentOff}% OFF`;
+      card.appendChild(tag);
+    }
+    card.addEventListener('click', () => { premiumMonths = p.months; renderPlans(); });
+    list.appendChild(card);
+  }
+  const chosen = plans.find((p) => p.months === premiumMonths);
+  $('premiumBuy').disabled = !chosen;
+  $('premiumBuy').textContent = chosen ? `${homeBalance.premium ? 'Extend' : 'Upgrade'} · ${formatPlainPrice(chosen.amount, chosen.currency)}` : 'Upgrade';
+  $('premiumLead').textContent = homeBalance?.premium ? `Premium is active until ${formatDay(homeBalance.premiumUntil)}.` : 'Your call credits never expire.';
+}
+
+async function openPremium() {
+  $('premiumStatus').textContent = '';
+  $('premiumOpen').classList.add('hidden');
+  $('premiumScreen').classList.remove('hidden');
+  if (!homeBalance?.plans) await loadBalance();
+  renderPlans();
+}
+const closePremium = () => $('premiumScreen').classList.add('hidden');
+
+$('premiumBuy').addEventListener('click', () => launchCheckout({ plan: premiumMonths }, { buy: $('premiumBuy'), status: $('premiumStatus'), link: $('premiumOpen') }));
+$('premiumClose').addEventListener('click', closePremium);
+$('dashUpgrade').addEventListener('click', openPremium);
+$('addTimeUpgrade').addEventListener('click', openPremium);
 
 $('addTimeMinus').addEventListener('click', () => { if (addTimeQty > 1) { addTimeQty -= 1; renderAddTime(); } });
 $('addTimePlus').addEventListener('click', () => { if (homeBalance?.packs && addTimeQty < homeBalance.packs.length) { addTimeQty += 1; renderAddTime(); } });
@@ -3516,7 +3582,11 @@ async function verifyPayment() {
   const before = homeBalance?.remaining;
   homeBalance = { ...(homeBalance || {}), ...data, payments: true };
   renderBalance();
-  if (before != null && data.remaining > before) {
+  if (data.planActivated) {
+    showToast('Premium is on');
+    closePremium();
+    closeAddTime();
+  } else if (before != null && data.remaining > before) {
     showToast(`${formatMinutes(data.remaining - before)} added`);
     closeAddTime();
   }

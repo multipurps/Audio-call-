@@ -1,6 +1,6 @@
 import { getServiceClient, getAuthedUser } from '../lib/supabaseAdmin.js';
 import {
-  getPacks, priceFor, remainingMinutes, createCheckoutSession, getCheckout,
+  getPacks, priceFor, planFor, planList, premiumState, expireFreeCredits, remainingMinutes, createCheckoutSession, getCheckout,
   verifyWebhookSignature, checkoutIdFromEvent, eventType, sameAmount, classifyCheckoutState, purchaseInProgress, PURCHASE_NO_CHECKOUT_GRACE_MS } from '../lib/billing.js';
 import { randomUUID } from 'node:crypto';
 import { notifyAdminsOfPurchase } from '../lib/adminPush.js';
@@ -118,8 +118,16 @@ async function redeem(req, res, supabase, userId) {
 // ---------- Add time (Bachs) ----------
 
 async function balanceFor(supabase, userId) {
+  await expireFreeCredits(supabase, userId);
   const { data: usage } = await supabase.from('user_usage').select('*').eq('user_id', userId).maybeSingle();
-  return remainingMinutes(usage);
+  const bal = remainingMinutes(usage);
+  const prem = premiumState(usage);
+  const bonusLeft = Math.min(Number(usage?.bonus_minutes ?? 0), bal.remaining);
+  return {
+    ...bal, ...prem,
+    // When the free user's current credits lapse (null for premium or when there are none).
+    creditExpiresAt: !prem.premium && bonusLeft > 0 ? (usage?.credit_expires_at || null) : null,
+  };
 }
 
 async function startCheckout(req, res, supabase, user, deps) {
@@ -129,8 +137,9 @@ async function startCheckout(req, res, supabase, user, deps) {
   const appUrl = String(env.PUBLIC_APP_URL || '').replace(/\/+$/, '');
   if (!appUrl) return res.status(503).json({ error: 'Payments are not set up yet.' });
 
-  const pack = priceFor(req.body?.quantity, env);
-  if (!pack) return res.status(400).json({ error: 'Choose how much time to add.' });
+  const isPlan = req.body?.plan != null;
+  const pack = isPlan ? planFor(req.body.plan, env) : priceFor(req.body?.quantity, env);
+  if (!pack) return res.status(400).json({ error: isPlan ? 'Choose a premium plan.' : 'Choose how much time to add.' });
 
   // A double tap, or coming back to the sheet, reuses the open checkout
   // instead of creating a second one.
@@ -144,6 +153,7 @@ async function startCheckout(req, res, supabase, user, deps) {
   const { data: purchase, error: insertErr } = await supabase.from('minute_purchases').insert({
     user_id: user.id, reference, pack_id: pack.id, minutes: pack.minutes,
     amount: Number(pack.amount), currency: pack.currency, status: 'pending',
+    ...(isPlan ? { plan_months: pack.months } : {}),
   }).select().single();
   if (insertErr || !purchase) return res.status(500).json({ error: 'Could not start checkout. Try again.' });
 
@@ -215,6 +225,9 @@ async function settlePurchase(supabase, purchase, deps, known = null) {
       try { await (deps.notifyAdmins || notifyAdminsOfPurchase)(supabase, purchase, { env: deps.env || process.env }); }
       catch (err) { console.error('admin purchase alert failed:', err?.message); }
     }
+    // A premium purchase credits no minutes: the database function switches premium on and
+    // returns a positive number only the first time, so a replayed webhook changes nothing.
+    if (purchase.plan_months) return { credited: 0, planActivated: credited > 0 ? purchase.plan_months : 0 };
     return { credited };
   }
   if (purchase.status === 'pending' && ['expired', 'cancelled', 'failed'].includes(cls)) {
@@ -252,7 +265,7 @@ async function reconcilePurchase(supabase, purchase, deps) {
   const cls = classifyCheckoutState(checkout?.status);
   if (cls === 'paid' || cls === 'expired' || cls === 'cancelled' || cls === 'failed') {
     const settled = await settlePurchase(supabase, purchase, deps, checkout);
-    return { credited: settled.credited, state: cls, inProgress: false, mismatch: settled.mismatch };
+    return { credited: settled.credited, planActivated: settled.planActivated || 0, state: cls, inProgress: false, mismatch: settled.mismatch };
   }
   return { credited: 0, state: cls, inProgress: purchaseInProgress({ checkoutClass: cls, ageMs }) };
 }
@@ -264,12 +277,14 @@ async function reconcileUser(supabase, userId, deps) {
   const { data: rows } = await supabase
     .from('minute_purchases').select('*').eq('user_id', userId).eq('status', 'pending').order('created_at', { ascending: false }).limit(5);
   let credited = 0;
+  let activated = 0;
   let inProgress = false;
   let outcome = null;
   for (const row of rows || []) {
     try {
       const r = await reconcilePurchase(supabase, row, deps);
       credited += r.credited;
+      activated += r.planActivated || 0;
       if (r.inProgress) inProgress = true;
       if (!r.inProgress && ['failed', 'cancelled', 'expired'].includes(r.state) && !outcome) outcome = { id: row.id, state: r.state };
     } catch (err) {
@@ -277,7 +292,7 @@ async function reconcileUser(supabase, userId, deps) {
       if (purchaseInProgress({ checkoutClass: 'open', ageMs: nowMs - Date.parse(row.created_at) })) inProgress = true;
     }
   }
-  if (credited > 0) return { credited, inProgress, outcome: { id: 'credited', state: 'paid' } };
+  if (credited > 0 || activated > 0) return { credited, planActivated: activated, inProgress, outcome: { id: 'credited', state: 'paid' } };
   if (!outcome && !inProgress) {
     // A purchase that ended without money moving a moment ago, e.g. cancelled on
     // the provider's page: tell the person once (the app remembers it did).
@@ -298,6 +313,7 @@ async function billingStatus(req, res, supabase, userId, deps) {
     payments: Boolean((deps.env || process.env).BACHS_API_KEY),
     packs: priceList.packs,
     currency: priceList.currency,
+    plans: planList(deps.env || process.env),
     pending: settled.inProgress,
     credited: settled.credited,
     outcome: settled.outcome,
@@ -308,7 +324,7 @@ async function verifyPending(req, res, supabase, userId, deps) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const settled = await reconcileUser(supabase, userId, deps);
   const balance = await balanceFor(supabase, userId);
-  return res.status(200).json({ ...balance, credited: settled.credited, pending: settled.inProgress, outcome: settled.outcome });
+  return res.status(200).json({ ...balance, credited: settled.credited, planActivated: settled.planActivated || 0, pending: settled.inProgress, outcome: settled.outcome });
 }
 
 // The provider's cancel page sends the person here (see pay-return.html), so a

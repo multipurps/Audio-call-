@@ -414,6 +414,7 @@
           </button>
           <button type="button" class="dashAddBtn" id="dashAddTime"><svg class="ic"><use href="#ic-plus"/></svg>Add time</button>
         </div>
+        <button type="button" class="premiumCard dashUpgrade hidden" id="dashUpgrade"><span class="premiumCardText"><strong id="dashUpgradeTitle">Upgrade to Premium</strong><span id="dashUpgradeSub">Your credits never expire</span></span><svg class="ic"><use href="#ic-chevron"/></svg></button>
       </section>
 
       <h2 class="dashHeading">What can Emysa do?</h2>
@@ -748,6 +749,7 @@
   <div class="addTimeLogo"><img src="icon-192.png" alt=""></div>
   <h2 class="addTimeTitle" id="addTimeTitle">Add time</h2>
   <p class="addTimeLead" id="addTimeLead">Top up to keep Emysa making calls for you.</p>
+  <button type="button" class="premiumCard addTimeUpgrade hidden" id="addTimeUpgrade"><span class="premiumCardText"><strong id="addTimeUpgradeTitle">Upgrade to Premium</strong><span id="addTimeUpgradeSub">Your credits never expire</span></span><svg class="ic"><use href="#ic-chevron"/></svg></button>
   <div class="addTimeCenter">
     <div class="addTimeBig" id="addTimeBig">5 hours</div>
     <div class="addTimeOf">of call time</div>
@@ -761,8 +763,24 @@
     <a class="addTimeOpen hidden" id="addTimeOpen" target="_blank" rel="noopener noreferrer">Open payment page</a>
     <button type="button" class="addTimeBuy" id="addTimeBuy">Purchase</button>
     <p class="addTimeStatus" id="addTimeStatus" role="status"></p>
+    <p class="addTimeFine" id="addTimeExpiry"></p>
     <p class="addTimeFine">One-time purchase. Payment is handled securely by Bachs.</p>
     <p class="addTimeLinks"><button type="button" id="addTimeTerms">Terms of Use</button><span aria-hidden="true">·</span><button type="button" id="addTimePrivacy">Privacy Policy</button></p>
+  </div>
+</div>
+
+<!-- ---------- Premium plans (full page) ---------- -->
+<div class="addTimeScreen hidden" id="premiumScreen" role="dialog" aria-modal="true" aria-labelledby="premiumTitle">
+  <button type="button" class="addTimeClose" id="premiumClose" aria-label="Close"><svg class="ic"><use href="#ic-close"/></svg></button>
+  <div class="addTimeLogo"><img src="icon-192.png" alt=""></div>
+  <h2 class="addTimeTitle" id="premiumTitle">Premium</h2>
+  <p class="addTimeLead" id="premiumLead">Your call credits never expire.</p>
+  <div class="addTimeCenter"><div class="planList" id="planList"></div></div>
+  <div class="addTimeBottom">
+    <a class="addTimeOpen hidden" id="premiumOpen" target="_blank" rel="noopener noreferrer">Open payment page</a>
+    <button type="button" class="addTimeBuy" id="premiumBuy">Upgrade</button>
+    <p class="addTimeStatus" id="premiumStatus" role="status"></p>
+    <p class="addTimeFine">Premium credits never expire. Free credits expire one month after you add them. Payment is handled securely by Bachs.</p>
   </div>
 </div>
 

@@ -1090,3 +1090,22 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .introPlaying .gsButtons{opacity:0; pointer-events:none; transform:translateY(12px);}
 .gsButtons{transition:opacity .6s ease, transform .6s ease;}
 .introPlaying .gsButtons.revealed, .introDone .gsButtons{opacity:1; pointer-events:auto; transform:none;}
+
+/* ---------- Premium ---------- */
+.premiumCard{position:relative; overflow:hidden; display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; margin-top:14px; padding:14px 16px; border-radius:24px; text-align:left; background:var(--accent); color:var(--on-accent);}
+.premiumCard.hidden{display:none;}
+.premiumCard:active{opacity:.85;}
+.premiumCardText{display:flex; flex-direction:column; gap:2px; min-width:0;}
+.premiumCardText strong{font-size:16px; font-weight:500;}
+.premiumCardText span{font-size:13px; font-weight:300; opacity:.75;}
+.premiumCard .ic{width:20px; height:20px; flex:none;}
+.premiumCard::after{content:""; position:absolute; top:0; bottom:0; left:-60%; width:40%; pointer-events:none; background:linear-gradient(100deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.55) 50%, rgba(255,255,255,0) 100%); transform:skewX(-18deg); animation:premiumShimmer 3.2s ease-in-out infinite;}
+@keyframes premiumShimmer{0%{left:-60%;} 55%,100%{left:130%;}}
+@media(prefers-reduced-motion:reduce){.premiumCard::after{animation:none; display:none;}}
+.dashHero .dashUpgrade{position:relative; z-index:2; margin-top:8px;}
+.planList{display:flex; flex-direction:column; gap:10px; width:100%;}
+.planCard{position:relative; display:flex; align-items:center; justify-content:space-between; width:100%; padding:16px; border-radius:20px; text-align:left; color:var(--text); background:var(--glass-bg); border:1.5px solid var(--glass-border);}
+.planCard.selected{border-color:var(--accent);}
+.planName{font-size:17px; font-weight:400;}
+.planPrice{font-size:17px; font-weight:300;}
+.planTag{position:absolute; top:-9px; right:14px; padding:2px 9px; border-radius:999px; font-size:11px; font-weight:500; background:var(--accent); color:var(--on-accent);}
