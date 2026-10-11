@@ -1,20 +1,34 @@
 import { randomUUID } from 'crypto';
 import webpush from 'web-push';
-import { getServiceClient, requireAdmin } from '../lib/supabaseAdmin.js';
+import { getServiceClient, getAdminAccess, normEmail } from '../lib/supabaseAdmin.js';
 
 // Every admin-only action lives here behind ?action=..., instead of one
 // file per action — Vercel's Hobby plan caps a deployment at 12 serverless
 // functions, and this app was one file away from that limit. All of these
-// were already gated by requireAdmin() individually; merging them changes
-// nothing about who can call what.
+// are gated individually below; merging them changes nothing about who can
+// call what.
+//
+// Two kinds of admin:
+//   owner  the ADMIN_EMAIL account. Every action, including approving admins.
+//   admin  an account the owner approved (sql/034_admin_access.sql). Every
+//          action except the OWNER_ONLY ones.
+const OWNER_ONLY = new Set(['admin-list', 'admin-decide']);
+
 export default async function handler(req, res) {
   const supabase = getServiceClient();
-  // Only this curated projection is public. Every mutation still requires ADMIN_EMAIL.
+  // Only this curated projection is public. Every mutation still requires an admin.
   if (req.query?.action === 'landing-media' && req.method === 'GET') return listLandingMedia(req, res, supabase);
-  const admin = await requireAdmin(req, supabase);
-  if (!admin) return res.status(403).json({ error: 'Not authorized' });
+  const access = await getAdminAccess(req, supabase);
+  if (!access) return res.status(403).json({ error: 'Not authorized' });
 
   const action = req.query?.action || req.body?.action;
+
+  // Any signed-in account may check where it stands and ask for access.
+  if (action === 'access-status') return res.status(200).json({ role: access.role, status: access.status, email: access.email, unavailable: Boolean(access.unavailable) });
+  if (action === 'request-access') return requestAccess(req, res, supabase, access);
+
+  if (!access.role) return res.status(403).json({ error: 'Not authorized', status: access.status });
+  if (OWNER_ONLY.has(action) && access.role !== 'owner') return res.status(403).json({ error: 'Only the owner can manage admins.' });
 
   switch (action) {
     case 'create-landing-upload': return createLandingUpload(req, res, supabase);
@@ -35,8 +49,60 @@ export default async function handler(req, res) {
     case 'credit-ledger': return creditLedger(req, res, supabase);
     case 'grant-credit': return grantCredit(req, res, supabase);
     case 'rates': return rates(req, res, supabase);
+    case 'admin-list': return listAdmins(req, res, supabase, access);
+    case 'admin-decide': return decideAdmin(req, res, supabase, access);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
   }
+}
+
+// ---------- who may use the admin (owner approves; admins cannot) ----------
+const ACCESS_TABLE_HINT = 'The admin access table is not set up. Run sql/034_admin_access.sql in Supabase.';
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+async function requestAccess(req, res, supabase, access) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  if (access.role) return res.status(200).json({ status: access.status, role: access.role });
+  if (!access.email) return res.status(400).json({ error: 'This account has no email address.' });
+  // Only a confirmed address can ask, so the list cannot be filled with
+  // addresses nobody owns.
+  if (!access.user.email_confirmed_at) return res.status(403).json({ error: 'Confirm your email address first, then sign in again.' });
+  if (access.status === 'pending' || access.status === 'revoked') return res.status(200).json({ status: access.status });
+  const { error } = await supabase.from('admin_access').upsert(
+    { email: access.email, user_id: access.user.id, status: 'pending', requested_at: new Date().toISOString() },
+    { onConflict: 'email', ignoreDuplicates: true },
+  );
+  if (error) {
+    console.error('admin access request failed:', error.message);
+    return res.status(503).json({ error: 'Requests are not available yet. Ask the owner.' });
+  }
+  return res.status(200).json({ status: 'pending' });
+}
+
+async function listAdmins(req, res, supabase, access) {
+  if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
+  const { data, error } = await supabase.from('admin_access').select('email, status, requested_at, decided_at').order('requested_at', { ascending: false }).limit(200);
+  if (error) {
+    console.error('admin list failed:', error.message);
+    return res.status(503).json({ error: ACCESS_TABLE_HINT });
+  }
+  return res.status(200).json({ owner: access.email, admins: (data || []).filter((r) => r.email !== access.email) });
+}
+
+async function decideAdmin(req, res, supabase, access) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const email = normEmail(req.body?.email);
+  const decision = String(req.body?.decision || '');
+  if (!EMAIL_SHAPE.test(email) || email.length > 254) return res.status(400).json({ error: 'Enter a valid email address.' });
+  if (!['approve', 'revoke'].includes(decision)) return res.status(400).json({ error: 'decision must be approve or revoke' });
+  if (email === access.email) return res.status(400).json({ error: 'That is the owner account.' });
+  const row = { email, status: decision === 'approve' ? 'approved' : 'revoked', decided_at: new Date().toISOString(), decided_by: access.email };
+  // Approving an address that never asked adds it directly (for example an investor).
+  const { error } = await supabase.from('admin_access').upsert(row, { onConflict: 'email' });
+  if (error) {
+    console.error('admin decision failed:', error.message);
+    return res.status(503).json({ error: ACCESS_TABLE_HINT });
+  }
+  return res.status(200).json({ ok: true, email, status: row.status });
 }
 
 async function listUsers(req, res, supabase) {

@@ -3430,24 +3430,30 @@ function formatPlainPrice(amount, currency) {
 }
 
 function renderAddTime() {
-  const unit = homeBalance?.unit;
-  const ready = Boolean(homeBalance?.payments && unit);
+  // The server sends the pack list (minutes + price) and charges by position, so
+  // the price shown here is only ever the server's.
+  const packs = homeBalance?.packs;
+  const ready = Boolean(homeBalance?.payments && Array.isArray(packs) && packs.length);
   const out = homeBalance && homeBalance.remaining < 1;
   $('addTimeLead').textContent = out ? "You're out of call time.\nTop up to keep Emysa making calls for you." : 'Top up to keep Emysa making calls for you.';
-  $('addTimeQty').textContent = `${addTimeQty}×`;
-  $('addTimeMinus').disabled = addTimeQty <= 1;
-  $('addTimePlus').disabled = !ready || addTimeQty >= unit.maxQty;
   if (!ready) {
+    $('addTimeQty').textContent = '';
+    $('addTimeMinus').disabled = true;
+    $('addTimePlus').disabled = true;
     $('addTimeBig').textContent = '–';
     $('addTimeBuy').textContent = 'Purchase';
     $('addTimeBuy').disabled = true;
     $('addTimeStatus').textContent = homeBalance ? 'Adding time is not available yet.' : 'Could not load. Check your connection and try again.';
     return;
   }
-  const labels = callTimeLabels(unit.minutes * addTimeQty);
-  const total = unit.prices ? Number(unit.prices[addTimeQty - 1]) : (Math.round(Number(unit.amount) * 100) * addTimeQty) / 100;
+  addTimeQty = Math.min(Math.max(1, addTimeQty), packs.length);
+  const pack = packs[addTimeQty - 1];
+  const labels = callTimeLabels(pack.minutes);
+  $('addTimeQty').textContent = `${addTimeQty} / ${packs.length}`;
+  $('addTimeMinus').disabled = addTimeQty <= 1;
+  $('addTimePlus').disabled = addTimeQty >= packs.length;
   $('addTimeBig').textContent = labels.big;
-  $('addTimeBuy').textContent = `Purchase ${labels.buy} · ${formatPlainPrice(total, unit.currency)}`;
+  $('addTimeBuy').textContent = `Purchase ${labels.buy} · ${formatPlainPrice(Number(pack.amount), homeBalance.currency)}`;
   $('addTimeBuy').disabled = false;
 }
 
@@ -3457,7 +3463,7 @@ async function openAddTime() {
   $('addTimeOpen').classList.add('hidden');
   $('addTimeScreen').classList.remove('hidden');
   renderAddTime();
-  if (!homeBalance?.unit) { await loadBalance(); renderAddTime(); }
+  if (!homeBalance?.packs) { await loadBalance(); renderAddTime(); }
 }
 function closeAddTime() { $('addTimeScreen').classList.add('hidden'); }
 
@@ -3496,7 +3502,7 @@ async function startCheckout() {
 }
 
 $('addTimeMinus').addEventListener('click', () => { if (addTimeQty > 1) { addTimeQty -= 1; renderAddTime(); } });
-$('addTimePlus').addEventListener('click', () => { if (homeBalance?.unit && addTimeQty < homeBalance.unit.maxQty) { addTimeQty += 1; renderAddTime(); } });
+$('addTimePlus').addEventListener('click', () => { if (homeBalance?.packs && addTimeQty < homeBalance.packs.length) { addTimeQty += 1; renderAddTime(); } });
 $('addTimeBuy').addEventListener('click', startCheckout);
 $('addTimeClose').addEventListener('click', closeAddTime);
 $('addTimeTerms').addEventListener('click', () => openSheet('sheet-terms'));

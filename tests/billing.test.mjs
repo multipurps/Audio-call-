@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { database } from './helpers.mjs';
 import handler from '../api/referrals.js';
-import { verifyWebhookSignature, getUnit, priceFor, remainingMinutes } from '../lib/billing.js';
+import { verifyWebhookSignature, getPacks, priceFor, remainingMinutes, DEFAULT_PACKS } from '../lib/billing.js';
 
 const SECRET = 'whsec_test';
 const env = { BACHS_API_KEY: 'sk_sandbox_test', BACHS_WEBHOOK_SECRET: SECRET, PUBLIC_APP_URL: 'https://app.example' };
@@ -75,15 +75,18 @@ test('billing status returns balance and the server price list', async () => {
   assert.equal(r.code, 200);
   assert.equal(r.data.remaining, 48);
   assert.equal(r.data.payments, true);
-  assert.deepEqual(r.data.unit, getUnit(env));
-  assert.deepEqual(r.data.unit, { minutes: 300, amount: '30.00', maxQty: 10, prices: null, currency: 'USD' });
+  assert.deepEqual(r.data.packs, getPacks(env).packs);
+  assert.equal(r.data.currency, 'NGN');
+  assert.deepEqual(r.data.packs.map((p) => [p.minutes, p.amount]), [
+    [30, '15000.00'], [60, '28000.00'], [120, '43000.00'], [180, '56000.00'], [240, '68000.00'], [300, '80000.00'],
+  ]);
 });
 
 test('checkout: server decides the price from the quantity; bad quantities and missing config are refused', async () => {
   const f = fixture();
   let sent;
   const createCheckoutSession = async (input) => { sent = input; return { checkout_id: 'chk_new', checkout_url: 'https://checkout.bachs.io/chk_new' }; };
-  for (const quantity of [0, -1, 1.5, 11, '2; drop', null, undefined]) {
+  for (const quantity of [0, -1, 1.5, 7, 11, '2; drop', null, undefined]) {
     const bad = await call(f, { action: 'checkout', body: { quantity }, extra: { createCheckoutSession } });
     assert.equal(bad.code, 400, String(quantity));
   }
@@ -92,36 +95,42 @@ test('checkout: server decides the price from the quantity; bad quantities and m
   const ok = await call(f, { action: 'checkout', body: { quantity: 2, amount: '0.01', minutes: 9999 }, extra: { createCheckoutSession } });
   assert.equal(ok.code, 200);
   assert.equal(ok.data.url, 'https://checkout.bachs.io/chk_new');
-  assert.equal(sent.pack.amount, '60.00');
-  assert.equal(sent.pack.minutes, 600);
+  assert.equal(sent.pack.amount, '28000.00', 'the server price for pack 2, whatever the client sent');
+  assert.equal(sent.pack.minutes, 60);
   assert.equal(sent.successUrl, 'https://app.example/pay-return.html');
   assert.equal(sent.cancelUrl, `https://app.example/pay-return.html?pay=cancel&ref=${sent.reference}`, 'the cancel page carries the purchase reference so it can tell the server');
   const row = f.db.tables.minute_purchases[0];
-  assert.equal(row.minutes, 600);
-  assert.equal(row.amount, 60);
+  assert.equal(row.minutes, 60);
+  assert.equal(row.amount, 28000);
   assert.equal(row.user_id, 'user-1');
   assert.equal(row.checkout_id, 'chk_new');
 });
 
-test('price table: Emysa NGN tiers, bulk discounts, capped at the last tier', () => {
-  const cfg = { BACHS_CURRENCY: 'NGN', BACHS_UNIT_MINUTES: '60', BACHS_PRICES: '15000,28000,43000,53000,63000' };
-  const got = [1, 2, 3, 4, 5].map((q) => priceFor(q, cfg));
-  assert.deepEqual(got.map((p) => p.amount), ['15000.00', '28000.00', '43000.00', '53000.00', '63000.00']);
-  assert.deepEqual(got.map((p) => p.minutes), [60, 120, 180, 240, 300]);
-  assert.equal(got[0].currency, 'NGN');
-  assert.equal(priceFor(6, cfg), null);
-  assert.equal(getUnit(cfg).maxQty, 5);
-  assert.equal(getUnit({ BACHS_PRICES: '10,abc' }).prices, null); // bad table falls back, never charges 0
+test('price list: the six Emysa packs in naira, in order', () => {
+  const got = [1, 2, 3, 4, 5, 6].map((q) => priceFor(q, {}));
+  assert.deepEqual(got.map((p) => p.minutes), [30, 60, 120, 180, 240, 300]);
+  assert.deepEqual(got.map((p) => p.amount), ['15000.00', '28000.00', '43000.00', '56000.00', '68000.00', '80000.00']);
+  assert.ok(got.every((p) => p.currency === 'NGN'));
+  assert.deepEqual(priceFor(2, {}), { id: 'p60', quantity: 2, minutes: 60, amount: '28000.00', currency: 'NGN' });
+  assert.equal(priceFor(7, {}), null);
+  assert.equal(priceFor(0, {}), null);
+  assert.equal(DEFAULT_PACKS.length, 6);
+  // Bigger packs cost more in total but less per minute.
+  const perMin = got.map((p) => Number(p.amount) / p.minutes);
+  assert.ok(perMin.every((v, i) => i === 0 || v < perMin[i - 1]), 'bulk packs must be cheaper per minute');
 });
 
-test('price: unit x quantity, configurable, no float drift', () => {
-  assert.deepEqual(priceFor(1, {}), { id: 'x1', quantity: 1, minutes: 300, amount: '30.00', currency: 'USD' });
-  assert.equal(priceFor(10, {}).amount, '300.00');
-  assert.equal(priceFor(11, {}), null);
-  const cfg = { BACHS_UNIT_MINUTES: '60', BACHS_UNIT_AMOUNT: '9.99', BACHS_MAX_QTY: '3', BACHS_CURRENCY: 'ngn' };
-  assert.deepEqual(priceFor(3, cfg), { id: 'x3', quantity: 3, minutes: 180, amount: '29.97', currency: 'NGN' });
-  assert.equal(priceFor(4, cfg), null);
-  assert.equal(getUnit({ BACHS_UNIT_AMOUNT: 'abc' }).amount, '30.00'); // bad config falls back, never charges 0
+test('price list: BACHS_PACKS overrides the defaults, and a bad table never charges 0', () => {
+  const cfg = { BACHS_PACKS: '30:1000,60:1800', BACHS_CURRENCY: 'usd' };
+  assert.deepEqual(getPacks(cfg).packs.map((p) => [p.minutes, p.amount]), [[30, '1000.00'], [60, '1800.00']]);
+  assert.equal(getPacks(cfg).currency, 'USD');
+  assert.equal(priceFor(2, cfg).minutes, 60);
+  assert.equal(priceFor(3, cfg), null);
+  for (const bad of ['30:abc', '30', '30:0', '0:100', '30:100:5', '30:100,30:200', ':100', '30:-5', '']) {
+    assert.deepEqual(getPacks({ BACHS_PACKS: bad }).packs, getPacks({}).packs, `ignored: ${JSON.stringify(bad)}`);
+  }
+  // The old per-unit settings are retired: leftover values in Vercel change nothing.
+  assert.deepEqual(getPacks({ BACHS_PRICES: '1,2,3', BACHS_UNIT_MINUTES: '5', BACHS_UNIT_AMOUNT: '1' }), getPacks({}));
 });
 
 test('checkout: a second tap reuses the open checkout instead of creating another', async () => {
@@ -215,4 +224,31 @@ test('actions that need a user are refused when signed out; webhook never needs 
   const r = res();
   await handler({ method: 'POST', query: { action: 'checkout' }, headers: {}, rawBody: '{}' }, r, { supabase: f.supabase, user: null, env });
   assert.equal(r.code, 401);
+});
+
+test('admins are alerted once per paid purchase: not on a replay, a failure, or a pending checkout', async () => {
+  const f = fixture({ minute_purchases: [pending()] });
+  const alerts = [];
+  const notifyAdmins = async (_db, purchase) => { alerts.push(purchase.reference); };
+  const extra = { getCheckout: completed(), notifyAdmins };
+  const first = await webhook(f, event, {}, extra);
+  assert.equal(first.code, 200);
+  assert.deepEqual(alerts, ['emy_1'], 'one alert for the purchase that was credited');
+  assert.equal(f.db.tables.minute_purchases[0].status, 'paid');
+  await webhook(f, event, {}, extra);
+  await webhook(f, event, {}, extra);
+  assert.deepEqual(alerts, ['emy_1'], 'a replayed webhook never alerts again');
+
+  const g = fixture({ minute_purchases: [pending()] });
+  const none = [];
+  await webhook(g, event, {}, { getCheckout: async () => ({ status: 'PENDING', reference: 'emy_1', amount: '9.00', currency: 'USD' }), notifyAdmins: async (_d, p) => { none.push(p.reference); } });
+  assert.deepEqual(none, [], 'an unpaid checkout sends no alert');
+});
+
+test('a failing admin alert never costs the buyer their minutes or fails the webhook', async () => {
+  const f = fixture({ minute_purchases: [pending()] });
+  const r = await webhook(f, event, {}, { getCheckout: completed(), notifyAdmins: async () => { throw new Error('push service down'); } });
+  assert.equal(r.code, 200);
+  assert.equal(f.db.tables.minute_purchases[0].status, 'paid');
+  assert.equal(f.db.tables.user_usage[0].bonus_minutes, 60, 'the minutes were credited');
 });

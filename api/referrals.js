@@ -1,8 +1,9 @@
 import { getServiceClient, getAuthedUser } from '../lib/supabaseAdmin.js';
 import {
-  getUnit, priceFor, remainingMinutes, createCheckoutSession, getCheckout,
+  getPacks, priceFor, remainingMinutes, createCheckoutSession, getCheckout,
   verifyWebhookSignature, checkoutIdFromEvent, eventType, sameAmount, classifyCheckoutState, purchaseInProgress, PURCHASE_NO_CHECKOUT_GRACE_MS } from '../lib/billing.js';
 import { randomUUID } from 'node:crypto';
+import { notifyAdminsOfPurchase } from '../lib/adminPush.js';
 
 // Referrals AND minutes billing (Add time, paid through Bachs) live in this one
 // file on purpose: Vercel's Hobby plan caps a deployment at 12 serverless
@@ -207,7 +208,14 @@ async function settlePurchase(supabase, purchase, deps, known = null) {
     }
     const { data, error } = await supabase.rpc('credit_minute_purchase', { p_reference: purchase.reference });
     if (error) throw new Error(error.message);
-    return { credited: Number(data) || 0 };
+    const credited = Number(data) || 0;
+    // Only the call that actually credits gets a positive number back, so each
+    // purchase alerts the admins exactly once. Never allowed to fail the credit.
+    if (credited > 0) {
+      try { await (deps.notifyAdmins || notifyAdminsOfPurchase)(supabase, purchase, { env: deps.env || process.env }); }
+      catch (err) { console.error('admin purchase alert failed:', err?.message); }
+    }
+    return { credited };
   }
   if (purchase.status === 'pending' && ['expired', 'cancelled', 'failed'].includes(cls)) {
     await markTerminal(supabase, purchase, cls);
@@ -282,13 +290,14 @@ async function reconcileUser(supabase, userId, deps) {
 }
 
 async function billingStatus(req, res, supabase, userId, deps) {
-  const unit = getUnit(deps.env || process.env);
+  const priceList = getPacks(deps.env || process.env);
   const settled = await reconcileUser(supabase, userId, deps);
   const balance = await balanceFor(supabase, userId);
   return res.status(200).json({
     ...balance,
     payments: Boolean((deps.env || process.env).BACHS_API_KEY),
-    unit,
+    packs: priceList.packs,
+    currency: priceList.currency,
     pending: settled.inProgress,
     credited: settled.credited,
     outcome: settled.outcome,

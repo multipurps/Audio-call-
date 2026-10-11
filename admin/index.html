@@ -89,8 +89,11 @@
 
   <div id="notAdminBox" class="hidden" style="margin:auto 0; text-align:center;">
     <div class="authLogo"><img src="../icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
-    <div class="authTitle">Not an admin account</div>
-    <p style="color:var(--dim); font-size:14.5px; margin:10px 0 24px;">This account isn't set as ADMIN_EMAIL.</p>
+    <div class="authTitle" id="notAdminTitle">Not an admin account</div>
+    <p id="notAdminText" style="color:var(--dim); font-size:14.5px; margin:10px 0 24px;"></p>
+    <button class="primaryBtn" id="requestAccessBtn" style="margin-bottom:10px;">Request access</button>
+    <button class="secondaryBtn" id="checkAccessBtn" style="margin-bottom:10px;">Check again</button>
+    <div class="authHint" id="notAdminHint"></div>
     <button class="secondaryBtn" id="notAdminSignOut">Sign out</button>
   </div>
 </div>
@@ -104,6 +107,7 @@
     <section class="aSec" id="sec-usage"></section>
     <section class="aSec" id="sec-credits"></section>
     <section class="aSec" id="sec-costs"></section>
+    <section class="aSec" id="sec-admins"></section>
     <section class="aSec" id="sec-content">
       <div class="aCard"><div class="l">Welcome, login &amp; sign-up backgrounds</div>
         <div class="aHint">Images or a short video. Keep clips a few MB at most.</div>
@@ -135,6 +139,7 @@
     <button class="nav on" data-s="overview">Overview</button><button class="nav" data-s="users">Users</button>
     <button class="nav" data-s="usage">Usage</button><button class="nav" data-s="credits">Credits</button>
     <button class="nav" data-s="costs">Costs &amp; providers</button><button class="nav" data-s="content">Content &amp; push</button>
+    <button class="nav" id="navAdmins" data-s="admins" style="display:none;">Admins</button>
     <button class="nav" id="signOutBtn" style="margin-top:auto;">Sign out</button>
   </nav>
 </div>

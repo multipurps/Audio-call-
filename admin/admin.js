@@ -41,23 +41,59 @@ supabase.auth.onAuthStateChange((_event, session) => {
   else showSignInForm();
 });
 
+let myRole = null;
+
+// Not an admin (yet): say where this account stands, and let it ask.
+function showNotAdmin(access) {
+  const status = access?.status || 'none';
+  const copy = {
+    none: ['Not an admin yet', 'This account is not an admin. You can ask the owner for access.'],
+    pending: ['Request sent', 'The owner has to approve it. Tap Check again once they have.'],
+    revoked: ['Access removed', "The owner removed this account's admin access."],
+    unverified: ['Confirm your email', 'The owner approved this email address, but it has not been confirmed. Confirm it, then sign in again.'],
+  }[status] || ['Not an admin account', 'This account is not an admin.'];
+  $('authBoot').classList.add('hidden');
+  $('authBox').classList.add('hidden');
+  $('adminApp').classList.add('hidden');
+  document.getElementById('authScreen').classList.remove('hidden');
+  $('notAdminBox').classList.remove('hidden');
+  $('notAdminTitle').textContent = copy[0];
+  $('notAdminText').textContent = copy[1];
+  $('requestAccessBtn').style.display = status === 'none' ? '' : 'none';
+  $('checkAccessBtn').style.display = status === 'pending' || status === 'unverified' ? '' : 'none';
+  $('notAdminHint').textContent = '';
+}
+
+$('requestAccessBtn').addEventListener('click', async () => {
+  $('requestAccessBtn').disabled = true;
+  $('notAdminHint').textContent = 'Sending…';
+  try {
+    const r = await api('request-access', { method: 'POST', body: {} });
+    showNotAdmin({ status: r.status });
+  } catch (err) { $('notAdminHint').textContent = err.message; }
+  finally { $('requestAccessBtn').disabled = false; }
+});
+$('checkAccessBtn').addEventListener('click', () => { $('notAdminHint').textContent = 'Checking…'; enterAdmin(); });
+
 async function enterAdmin() {
   try {
-    // The /api/admin-* endpoints already check ADMIN_EMAIL server-side —
-    // this call doubles as the gate for this page too, same source of truth,
-    // no separate admin check to keep in sync.
-    const resp = await withTimeout(authedFetch('/api/admin?action=list-users'), 10000);
+    // The server decides who is an admin (the owner, or an account the owner
+    // approved); this page only reflects its answer.
+    const resp = await withTimeout(authedFetch('/api/admin?action=access-status'), 10000);
     $('authBoot').classList.add('hidden');
     $('authBox').classList.add('hidden');
-    if (!resp.ok) {
-      $('notAdminBox').classList.remove('hidden');
-      $('adminApp').classList.add('hidden');
-      return;
-    }
+    if (!resp.ok) { showNotAdmin({ status: 'none' }); return; }
+    const access = await resp.json();
+    if (!access.role) { showNotAdmin(access); return; }
+    myRole = access.role;
+    // Approving other admins is the one thing only the owner can do.
+    $('navAdmins').style.display = myRole === 'owner' ? '' : 'none';
+    const usersResp = await withTimeout(authedFetch('/api/admin?action=list-users'), 15000);
+    if (!usersResp.ok) throw new Error(`Could not load the admin panel (${usersResp.status}).`);
     $('notAdminBox').classList.add('hidden');
     document.getElementById('authScreen').classList.add('hidden');
     $('adminApp').classList.remove('hidden');
-    initPanel((await resp.json()).users);
+    initPanel((await usersResp.json()).users);
   } catch (err) {
     // A thrown error in here used to leave the splash screen stuck forever
     // with zero feedback — any network hiccup on the first fetch, and
@@ -88,8 +124,8 @@ const card = (l, v, s = '', wide = false) => `<div class="aCard${wide ? ' wide' 
 const fail = (el, err) => { el.innerHTML = `<div class="aHint">${esc(err.message)}</div>`; };
 
 let range = 30, usersCache = [], current = 'overview';
-const TITLES = { overview: 'Overview', users: 'Users', usage: 'Usage', credits: 'Credits', costs: 'Costs & providers', content: 'Content & push' };
-const loaders = { overview: loadOverview, users: loadUsers, usage: loadUsage, credits: loadCredits, costs: loadCosts, content: loadBackgrounds };
+const TITLES = { overview: 'Overview', users: 'Users', usage: 'Usage', credits: 'Credits', costs: 'Costs & providers', content: 'Content & push', admins: 'Admins' };
+const loaders = { overview: loadOverview, users: loadUsers, usage: loadUsage, credits: loadCredits, costs: loadCosts, content: loadBackgrounds, admins: loadAdmins };
 
 function openSection(name) {
   current = name;
@@ -135,8 +171,93 @@ async function loadOverview() {
       ${card('Avg per call', o.calls ? `${num(o.minutesUsed / o.calls)}m` : '—', `last ${o.days} days`)}
       <div class="aCard wide"><div class="l">Daily revenue</div><div class="aBars">${o.series.map((x) => `<i title="${x.d}: ${money(x.revenue, o.currency)}" style="height:${Math.max(2, (x.revenue / max) * 100)}%"></i>`).join('')}</div></div>
     </div>`;
+    renderAlertsCard(el);
   } catch (err) { fail(el, err); }
 }
+
+// ---------- admins (owner only) ----------
+async function loadAdmins() {
+  const el = $('sec-admins');
+  if (myRole !== 'owner') { el.innerHTML = '<div class="aHint">Only the owner can manage admins.</div>'; return; }
+  el.innerHTML = '<div class="aHint">Loading…</div>';
+  let data;
+  try { data = await api('admin-list'); } catch (err) { return fail(el, err); }
+  const label = { pending: 'Waiting for your approval', approved: 'Admin', revoked: 'Removed' };
+  const buttons = (r) => (r.status === 'pending'
+    ? `<button class="aBtn sm" data-d="approve">Approve</button><button class="aBtn ghost sm" data-d="revoke">Decline</button>`
+    : r.status === 'approved'
+      ? `<button class="aBtn ghost sm" data-d="revoke">Remove</button>`
+      : `<button class="aBtn sm" data-d="approve">Approve again</button>`);
+  el.innerHTML = `<div class="aCard"><div class="l" style="margin-bottom:8px;">Add an admin by email</div>
+      <div class="aField"><input type="email" id="adminAddEmail" placeholder="name@example.com" autocomplete="off" autocapitalize="off"></div>
+      <button class="aBtn" id="adminAddBtn">Approve as admin</button>
+      <div class="aHint" id="adminAddHint">Admins can use everything in this panel, including revenue. They cannot approve other admins. They sign in on this page with that email, or tap Request access and you approve them here.</div></div>
+    <div class="l" style="margin:16px 4px 8px;color:var(--muted);font-size:13px;">Requests and admins</div>
+    <div id="adminRows">${data.admins.map((r) => `<div class="aRow" data-email="${esc(r.email)}">
+      <div class="aFlex"><div style="min-width:0"><div class="t">${esc(r.email)}</div>
+        <div class="m">${label[r.status] || r.status} · ${new Date(r.decided_at || r.requested_at).toLocaleDateString()}</div></div>
+        <div class="aFlex" style="gap:6px;">${buttons(r)}</div></div></div>`).join('') || '<div class="aHint">No requests yet.</div>'}</div>`;
+  const decide = async (email, decision, btn) => {
+    if (btn) btn.textContent = '…';
+    try { await api('admin-decide', { method: 'POST', body: { email, decision } }); loadAdmins(); }
+    catch (err) { $('adminAddHint').textContent = err.message; if (btn) btn.textContent = 'Failed'; }
+  };
+  $('adminAddBtn').onclick = () => {
+    const email = $('adminAddEmail').value.trim();
+    if (!email) { $('adminAddHint').textContent = 'Enter an email address.'; return; }
+    decide(email, 'approve', $('adminAddBtn'));
+  };
+  $('adminRows').onclick = (e) => {
+    const btn = e.target.closest('button[data-d]'); if (!btn) return;
+    decide(btn.closest('.aRow').dataset.email, btn.dataset.d, btn);
+  };
+}
+
+// ---------- purchase alerts (web push to this device) ----------
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const keyBytes = (b64) => { const p = '='.repeat((4 - (b64.length % 4)) % 4); const raw = atob((b64 + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from([...raw].map((c) => c.charCodeAt(0))); };
+const sameKey = (sub, bytes) => { const cur = sub.options?.applicationServerKey; if (!cur) return false; const a = new Uint8Array(cur); return a.length === bytes.length && a.every((v, i) => v === bytes[i]); };
+
+async function alertsOn() {
+  if (!pushSupported() || Notification.permission !== 'granted') return false;
+  try { return Boolean(await (await navigator.serviceWorker.ready).pushManager.getSubscription()); } catch { return false; }
+}
+
+async function enableAlerts() {
+  if (!pushSupported()) throw new Error('This browser cannot show notifications. On iPhone, add this page to your Home Screen and open it from there.');
+  if (Notification.permission === 'denied') throw new Error('Notifications are blocked for this page. Allow them in your phone settings.');
+  if (Notification.permission !== 'granted' && (await Notification.requestPermission()) !== 'granted') throw new Error('Notifications were not allowed.');
+  const reg = await navigator.serviceWorker.ready;
+  const keyResp = await authedFetch('/api/assistant?action=pushKey');
+  const { publicKey } = await keyResp.json().catch(() => ({}));
+  if (!publicKey) throw new Error('Notifications are not set up on the server yet.');
+  const bytes = keyBytes(publicKey);
+  let sub = await reg.pushManager.getSubscription();
+  if (sub && !sameKey(sub, bytes)) { await sub.unsubscribe().catch(() => {}); sub = null; }
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
+  const saved = await authedFetch('/api/assistant?action=savePushSubscription', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription: sub.toJSON() }),
+  });
+  if (!saved.ok) throw new Error('Could not save this device for notifications.');
+}
+
+async function renderAlertsCard(el) {
+  const on = await alertsOn();
+  const box = document.createElement('div');
+  box.className = 'aCard wide';
+  box.style.marginTop = '12px';
+  box.innerHTML = `<div class="l">Purchase alerts</div>
+    <div class="s" style="margin:6px 0 10px;">${on ? 'On for this device. You get a notification whenever someone pays for minutes.' : 'Get a notification on this device whenever someone pays for minutes.'}</div>
+    ${on ? '' : '<button class="aBtn" id="alertsBtn">Turn on purchase alerts</button>'}<div class="aHint" id="alertsHint"></div>`;
+  el.appendChild(box);
+  const btn = box.querySelector('#alertsBtn');
+  if (btn) btn.onclick = async () => {
+    btn.disabled = true;
+    try { await enableAlerts(); renderAlertsRefresh(el); }
+    catch (err) { box.querySelector('#alertsHint').textContent = err.message; btn.disabled = false; }
+  };
+}
+function renderAlertsRefresh(el) { el.querySelector('.aCard.wide:last-child')?.remove(); renderAlertsCard(el); }
 
 // ---------- users ----------
 async function loadUsers() {

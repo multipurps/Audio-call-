@@ -21,7 +21,12 @@ test('all media slots have matching server-side validation and schema', () => {
     'conversation_background', 'conversation_overlay', 'call_screenshots', 'voice_orb', 'feature_media', 'demo_video']) {
     assert.ok(admin.includes(`'${slot}'`) && api.includes(`'${slot}'`) && schema.includes(`'${slot}'`), `missing ${slot}`);
   }
-  assert.match(api, /requireAdmin\(req, supabase\)/);
+  // Uploads stay admin-only: the role check must run before the action switch,
+  // and the only action allowed ahead of it is the public read-only projection.
+  assert.match(api, /getAdminAccess\(req, supabase\)/);
+  const beforeGate = api.slice(0, api.indexOf('if (!access.role)'));
+  assert.ok(beforeGate.length > 0, 'role gate missing');
+  assert.ok(!/create-landing-upload|confirm-landing-upload/.test(beforeGate.split('export default async function handler')[1] || ''), 'upload actions must be behind the gate');
   assert.match(api, /createSignedUploadUrl\(path\)/);
   assert.match(schema, /row level security/);
 });

@@ -34,12 +34,10 @@ Everything runs inside `api/referrals.js` (multiplexed by `?action=`) because
    - `BACHS_API_KEY` — secret key. `sk_sandbox_...` automatically uses the sandbox API.
    - `BACHS_WEBHOOK_SECRET` — the signing secret of your webhook endpoint.
    - `PUBLIC_APP_URL` — already set for Twilio (no trailing slash).
-   - optional: `BACHS_CURRENCY` (default `USD`), `BACHS_UNIT_MINUTES` (default `300`),
-     `BACHS_UNIT_AMOUNT` (default `30.00`) and `BACHS_MAX_QTY` (default `10`) for linear
-     pricing, or `BACHS_PRICES` (comma list, entry N = total price of N units, for example
-     `15000,28000,43000,53000,63000`) for tiered pricing; it also sets the max quantity.
-     Bachs minimums apply per currency (for example 1000 for NGN), so set real
-     prices here for the currency you charge in.
+   - optional: `BACHS_CURRENCY` (default `NGN`) and `BACHS_PACKS` to change the packs
+     without a code change (see Prices). Bachs minimums apply per currency (for example
+     1000 for NGN). The older `BACHS_PRICES`, `BACHS_UNIT_MINUTES`, `BACHS_UNIT_AMOUNT`
+     and `BACHS_MAX_QTY` settings are no longer read; any left in Vercel do nothing.
 3. In the Bachs dashboard add a webhook endpoint
    `https://<your-app>/api/bachs-webhook` for the `checkout.completed` event
    (other events are acknowledged and ignored).
@@ -48,9 +46,33 @@ Everything runs inside `api/referrals.js` (multiplexed by `?action=`) because
 
 ## Prices
 
-The defaults (5 hours for $30 per unit) are placeholders copied from the design
-reference. Set your real price with the env vars above before going live.
+The app sells six packs, in naira by default:
 
-The page does not promise an expiry: purchased minutes are added to
-`bonus_minutes` and do not expire. If you want "valid for 30 days", expiry has to
-be built first (per-purchase tracking).
+| Pack | Price |
+|---|---|
+| 30 minutes | 15,000 |
+| 1 hour | 28,000 |
+| 2 hours | 43,000 |
+| 3 hours | 56,000 |
+| 4 hours | 68,000 |
+| 5 hours | 80,000 |
+
+The app only ever sends which pack was picked (1 = the first, 2 = the second, and
+so on); the server looks up the minutes and the price, so a client can never choose
+its own. To change them without a code change, set `BACHS_PACKS` in Vercel as
+`minutes:price,minutes:price,...`, for example `30:15000,60:28000`. A list that does
+not parse is ignored as a whole and the defaults are used, so a typo cannot charge 0.
+A purchase that is already open keeps the price it was created with.
+
+## Admin alerts and admin access
+
+- Every paid purchase sends a web-push alert to the owner and to each approved admin
+  who turned on **Purchase alerts** in the admin Overview (it needs the existing
+  `VAPID_*` settings). It goes out only from the call that actually credits the minutes,
+  so a replayed webhook never alerts twice, and an alert that fails never affects the
+  buyer's minutes.
+- Run `sql/034_admin_access.sql` once. The owner is still the `ADMIN_EMAIL` account. In
+  the admin page, **Admins** (owner only) approves, removes or re-approves other people,
+  for example an investor who needs to see revenue. Approved admins can use everything
+  in the admin panel except managing admins. Approval only counts once that email
+  address is confirmed.
