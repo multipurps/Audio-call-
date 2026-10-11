@@ -29,22 +29,38 @@ async function loadMedia() {
       mediaBySlot.get(row.slot).push(row);
     }
     const isImg = (r) => !/\.(mp4|webm|mov)(\?|$)/i.test(r.url) && r.media_type !== 'video';
-    const shots = ['hero_overlay', 'objective_overlay', 'conversation_overlay', 'call_screenshots', 'feature_media'].flatMap((s) => mediaBySlot.get(s) || []).filter(isImg);
-    const img = (r, i) => mk('img', { src: allowedMedia(r.url), alt: `Emysa app screenshot ${i + 1}`, loading: i ? 'lazy' : 'eager', decoding: 'async' });
-    shots.slice(0, 3).forEach((r, i) => document.getElementById('ph' + i)?.replaceChildren(img(r, i)));
-    if (shots.length > 3) {
-      document.getElementById('moreShots').replaceChildren(...shots.slice(3).map((r, i) => { const f = mk('figure', { className: 'shot' }); f.append(img(r, i + 3)); return f; }));
+    const slotImg = (row, alt, i = 0) => mk('img', { src: allowedMedia(row.url), alt, loading: 'lazy', decoding: 'async' });
+    document.querySelectorAll('.phone[data-slot]').forEach((ph) => {
+      const row = (mediaBySlot.get(ph.dataset.slot) || []).find(isImg); if (!row) return;
+      const img = slotImg(row, ph.getAttribute('aria-label'));
+      const halo = mk('img', { src: img.src, alt: '', className: 'halo', decoding: 'async' });
+      ph.replaceChildren(img); ph.parentElement.prepend(halo); ph.classList.add('has-shot'); ph.style.overflow = 'hidden';
+    });
+    const extras = ['hero_overlay', 'objective_overlay', 'conversation_overlay', 'call_screenshots', 'feature_media'].flatMap((s) => mediaBySlot.get(s) || []).filter(isImg);
+    if (extras.length) {
+      document.getElementById('moreShots').replaceChildren(...extras.map((r, i) => { const f = mk('figure', { className: 'shot' }); f.append(slotImg(r, `Emysa app screenshot ${i + 1}`)); return f; }));
       document.querySelector('.appshots').hidden = false;
+    }
+    // Live call sample: plays muted on its own while visible, pauses when scrolled away, tap for sound.
+    const lv = mediaBySlot.get('live_call_video')?.[0];
+    if (lv) {
+      const ph = document.getElementById('ph-live_call_video');
+      const v = mk('video', { src: allowedMedia(lv.url), muted: true, loop: true, playsInline: true, preload: 'auto' });
+      v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
+      const snd = mk('button', { type: 'button', className: 'vsound', textContent: 'Tap for sound' });
+      snd.addEventListener('click', () => { v.muted = !v.muted; snd.textContent = v.muted ? 'Tap for sound' : 'Sound on'; });
+      v.addEventListener('loadedmetadata', () => { if (v.videoWidth > v.videoHeight) ph.classList.add('wide'); });
+      ph.replaceChildren(v, snd); ph.classList.add('has-shot');
+      new IntersectionObserver((es) => es.forEach((en) => { if (en.isIntersecting) v.play().catch(() => {}); else v.pause(); }), { threshold: .4 }).observe(ph);
     }
     const vid = (slot, host) => {
       const row = mediaBySlot.get(slot)?.[0]; if (!row) return false;
       host.append(mk('video', { src: allowedMedia(row.url), controls: true, playsInline: true, preload: 'metadata' })); return true;
     };
-    if (vid('live_call_video', document.getElementById('liveCall'))) document.getElementById('live-call').hidden = false;
     if (vid('demo_video', document.getElementById('demoVideo'))) document.querySelector('.demo').hidden = false;
   } catch {}
 }
-loadMedia();
+const mediaReady = loadMedia();
 
 // Hero background: the login-screen backgrounds (video first, then crossfading images), no overlay
 (async () => {
@@ -65,6 +81,16 @@ loadMedia();
     const layers = [document.querySelector('.bg-a'), document.querySelector('.bg-b')]; let i = 0, a = 0;
     const show = () => { const n = 1 - a; layers[n].style.backgroundImage = `url('${imgs[i % imgs.length]}')`; layers[n].classList.add('on'); layers[a].classList.remove('on'); a = n; i++; };
     show(); if (imgs.length > 1) setInterval(show, 6000);
+  }
+  // Footer background: its own upload, otherwise the same login background.
+  await mediaReady;
+  const own = mediaBySlot.get('footer_background')?.[0];
+  const src = own ? { url: allowedMedia(own.url), video: own.media_type.startsWith('video/') } : vids.length ? { url: vids[0], video: true } : imgs.length ? { url: imgs[0], video: false } : null;
+  if (src) {
+    const host = document.getElementById('footBg');
+    const el = src.video ? mk('video', { src: src.url, muted: true, loop: true, playsInline: true, preload: 'metadata' }) : mk('img', { src: src.url, alt: '', loading: 'lazy' });
+    if (src.video) { el.setAttribute('muted', ''); new IntersectionObserver((es) => es.forEach((en) => { en.isIntersecting ? el.play().catch(() => {}) : el.pause(); }), { threshold: .05 }).observe(host); }
+    host.append(el);
   }
 })();
 
@@ -189,8 +215,10 @@ document.fonts.ready.then(fit); addEventListener('resize', fit);
 
 // Scroll animation: word-by-word text fill, staggered rises, hero parallax, screenshot scale, footer wordmark rise
 (() => {
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { document.querySelectorAll('.rise,.feature').forEach((e) => e.classList.add('in')); return; }
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { document.querySelectorAll('.rise,.feature,[data-reveal]').forEach((e) => e.classList.add('in')); return; }
   document.querySelectorAll('[data-words]').forEach((el) => { el.innerHTML = el.textContent.trim().split(/\s+/).map((w) => `<span class="wd">${w}</span>`).join(' '); });
+  const pio = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); pio.unobserve(e.target); } }), { threshold: .18 });
+  document.querySelectorAll('[data-reveal]').forEach((p) => pio.observe(p));
   const fio = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); fio.unobserve(e.target); } }), { threshold: .3 });
   document.querySelectorAll('.feature').forEach((f) => fio.observe(f));
   const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: .12, rootMargin: '0px 0px -6% 0px' });

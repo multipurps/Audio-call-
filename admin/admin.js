@@ -428,19 +428,28 @@ function showBootError(err, offerReset = false) {
 // Landing assets use the existing signed-upload pipeline and app-assets bucket.
 // All slot definitions are intentionally explicit; no arbitrary URL or path input.
 const LANDING_SLOTS = [
-  ['hero_background', 'Hero background', 'Animated GIF or image behind the hero screenshot'],
-  ['hero_overlay', 'Hero screenshot', 'App screenshots shown full-size in cards under the hero; upload several, use arrows to reorder'],
-  ['objective_background', 'Objective scene background', 'Large exposed GIF or image'],
-  ['objective_overlay', 'Objective screenshot', 'Screenshot above the scene'],
-  ['conversation_background', 'Conversation scene background', 'Large exposed GIF or image'],
-  ['conversation_overlay', 'Conversation screenshot', 'Screenshot above the scene'],
-  ['call_screenshots', 'Call interface screenshots', 'Multiple images; use arrows to reorder'],
-  ['voice_orb', 'Voice introduction orb', 'Animated GIF only; shown at its natural aspect ratio'],
-  ['feature_media', 'Additional feature media', 'Multiple GIFs or images; use arrows to reorder'],
+  ['hero_background', 'Hero background (fallback)', 'The hero uses the login screen background. Only used if that is empty'],
+  ['how_it_works', 'How it works / set-up screenshot', 'Screenshot of the set-up flow, shown in a phone'],
+  ['calls_for_you', 'Calls for you screenshot', 'Screenshot of an objective being given or a call being placed'],
+  ['your_voice', 'In your own voice screenshot', 'Screenshot of the voice page'],
+  ['live_call_video', 'Live call sample video', 'Plays muted on its own when visible and pauses when scrolled away. MP4 or WebM, up to 50 MB'],
+  ['call_summary', 'Call summary screenshot', 'Screenshot of a finished call summary or transcript'],
+  ['call_in_app', 'Call Emysa in the app screenshot', 'Screenshot of talking to Emysa by voice inside the app'],
+  ['import_chats', 'Import chats into memory screenshot', 'Screenshot of the chat import and memories screen'],
+  ['channels', 'Channels screenshot', 'Screenshot of phone, WhatsApp and Telegram connections'],
+  ['footer_background', 'Footer background', 'Optional GIF, image or video. If empty, the footer reuses the login screen background'],
+  ['hero_overlay', 'More screenshots', 'Extra screenshots shown in a swipe row near the end; upload several and reorder'],
+  ['call_screenshots', 'More call screenshots', 'Extra screenshots, same swipe row'],
+  ['feature_media', 'More feature media', 'Extra images or GIFs, same swipe row'],
   ['demo_video', 'Optional demonstration video', 'Muted, inline video; MP4 or WebM'],
-  ['live_call_video', 'Live call sample video', 'Shown with sound controls in the live-call section; MP4 or WebM, up to 50 MB'],
+  ['objective_background', 'Retired: objective background', 'No longer shown on the page'],
+  ['objective_overlay', 'Extra screenshot: objective', 'Goes into the swipe row'],
+  ['conversation_background', 'Retired: conversation background', 'No longer shown on the page'],
+  ['conversation_overlay', 'Extra screenshot: conversation', 'Goes into the swipe row'],
+  ['voice_orb', 'Retired: voice orb', 'No longer shown on the page'],
 ];
 const GALLERIES = new Set(['call_screenshots', 'feature_media', 'hero_overlay']);
+const typesFor = (slot) => slot === 'voice_orb' ? ['image/gif'] : isVideoSlot(slot) ? ['video/mp4', 'video/webm'] : slot === 'footer_background' ? ['image/gif', 'image/png', 'image/jpeg', 'image/webp', 'video/mp4', 'video/webm'] : ['image/gif', 'image/png', 'image/jpeg', 'image/webp'];
 let landingRows = [];
 async function loadLandingMedia() {
   const area = $('landingSlots');
@@ -455,7 +464,7 @@ async function loadLandingMedia() {
             ${GALLERIES.has(key) ? `<button class="aBtn ghost sm" data-act="up" aria-label="Move ${name} up" ${i === 0 ? 'disabled' : ''}>↑</button><button class="aBtn ghost sm" data-act="down" aria-label="Move ${name} down" ${i === rows.length - 1 ? 'disabled' : ''}>↓</button>` : ''}
             <button class="aBtn ghost sm" data-act="remove" aria-label="Remove ${name}">Remove</button></div></div>`).join('') || '<div class="aHint">No asset yet — landing uses a designed fallback.</div>'}
         <button class="aBtn ghost sm" data-act="upload">${rows.length && !GALLERIES.has(key) ? 'Replace' : 'Upload'}</button>
-        <input type="file" hidden accept="${key === 'voice_orb' ? 'image/gif' : isVideoSlot(key) ? 'video/mp4,video/webm' : 'image/gif,image/png,image/jpeg,image/webp'}"></div>`;
+        <input type="file" hidden accept="${typesFor(key).join(',')}"></div>`;
     }).join('');
   } catch (err) { area.textContent = `Could not load landing media: ${err.message}`; }
 }
@@ -486,23 +495,40 @@ $('landingSlots').addEventListener('change', async (event) => {
   const file = event.target.files[0];
   event.target.value = '';
   if (!file) return;
-  const slot = event.target.closest('[data-slot]').dataset.slot;
+  const slotEl = event.target.closest('[data-slot]');
+  const slot = slotEl.dataset.slot;
   const status = $('landingStatus');
-  const allowed = slot === 'voice_orb' ? ['image/gif'] : isVideoSlot(slot) ? ['video/mp4', 'video/webm'] : ['image/gif', 'image/png', 'image/jpeg', 'image/webp'];
-  const limit = isVideoSlot(slot) ? 50 : 20;
-  if (!allowed.includes(file.type) || !file.size || file.size > limit * 1024 * 1024) {
-    status.textContent = `Choose a supported file under ${limit} MB.`; return;
+  const limit = file.type.startsWith('video/') ? 50 : 20;
+  const say = (text, kind = '') => { let n = slotEl.querySelector('.slotMsg'); if (!n) { n = document.createElement('div'); n.className = 'slotMsg'; slotEl.querySelector('p').after(n); } n.className = `slotMsg ${kind}`; n.textContent = text; };
+  if (!typesFor(slot).includes(file.type) || !file.size || file.size > limit * 1024 * 1024) {
+    say(`Choose a supported file under ${limit} MB.`, 'err'); status.textContent = ''; return;
   }
-  status.textContent = 'Preparing upload…';
+  // Immediate, visible feedback inside the slot: local preview, file name, moving bar, elapsed time.
+  const preview = URL.createObjectURL(file);
+  const tile = document.createElement('div');
+  tile.className = 'landingItem pending';
+  tile.innerHTML = `${file.type.startsWith('video/') ? '<div class="pvBox">video</div>' : `<img src="${preview}" alt="">`}<div><b>${esc(file.name)}</b> <span class="aHint">${(file.size / 1048576).toFixed(1)} MB</span><div class="bar"><i></i></div><span class="aHint step">Preparing…</span></div>`;
+  slotEl.querySelector('p').after(tile);
+  const up = slotEl.querySelector('[data-act=upload]'); up.disabled = true; up.textContent = 'Uploading…';
+  const t0 = Date.now(), step = tile.querySelector('.step'); let stage = 'Preparing';
+  const timer = setInterval(() => { step.textContent = `${stage}… ${Math.round((Date.now() - t0) / 1000)}s`; }, 500);
+  const setStage = (s) => { stage = s; step.textContent = `${s}…`; status.textContent = `${s} ${file.name}…`; };
   try {
+    setStage('Preparing');
     const { path, token } = await api('create-landing-upload', { method: 'POST', body: { slot, mimeType: file.type, size: file.size } });
-    status.textContent = `Uploading ${file.name}…`;
+    setStage('Uploading');
     const { error } = await supabase.storage.from('app-assets').uploadToSignedUrl(path, token, file, { contentType: file.type });
     if (error) throw error;
+    setStage('Saving');
     await api('confirm-landing-upload', { method: 'POST', body: { slot, mimeType: file.type, path } });
+    clearInterval(timer); URL.revokeObjectURL(preview);
     status.textContent = 'Saved. The public page will update shortly.';
     await loadLandingMedia();
-  } catch (err) { status.textContent = `Upload failed: ${err.message}`; }
+    const again = document.querySelector(`[data-slot="${slot}"]`); const n = document.createElement('div'); n.className = 'slotMsg ok'; n.textContent = 'Saved'; again.querySelector('p').after(n);
+  } catch (err) {
+    clearInterval(timer); tile.remove(); up.disabled = false; up.textContent = 'Upload';
+    say(`Upload failed: ${err.message}`, 'err'); status.textContent = `Upload failed: ${err.message}`;
+  }
 });
 
 function isVideoSlot(s) { return s === 'demo_video' || s === 'live_call_video'; }
