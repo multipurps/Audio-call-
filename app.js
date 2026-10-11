@@ -3537,7 +3537,10 @@ function renderPlans() {
     const price = document.createElement('span');
     price.className = 'planPrice';
     price.textContent = formatPlainPrice(p.amount, p.currency);
-    card.append(name, price);
+    const sub = document.createElement('span');
+    sub.className = 'planSub';
+    sub.textContent = 'One payment';
+    card.append(name, price, sub);
     if (p.percentOff > 0) {
       const tag = document.createElement('span');
       tag.className = 'planTag';
@@ -3550,7 +3553,7 @@ function renderPlans() {
   const chosen = plans.find((p) => p.months === premiumMonths);
   $('premiumBuy').disabled = !chosen;
   $('premiumBuy').textContent = chosen ? `${homeBalance.premium ? 'Extend' : 'Upgrade'} · ${formatPlainPrice(chosen.amount, chosen.currency)}` : 'Upgrade';
-  $('premiumLead').textContent = homeBalance?.premium ? `Premium is active until ${formatDay(homeBalance.premiumUntil)}.` : 'Your call credits never expire.';
+  $('premiumLead').textContent = homeBalance?.premium ? `Premium until ${formatDay(homeBalance.premiumUntil)}` : 'Unlock Premium';
 }
 
 async function openPremium() {
@@ -3564,6 +3567,8 @@ const closePremium = () => $('premiumScreen').classList.add('hidden');
 
 $('premiumBuy').addEventListener('click', () => launchCheckout({ plan: premiumMonths }, { buy: $('premiumBuy'), status: $('premiumStatus'), link: $('premiumOpen') }));
 $('premiumClose').addEventListener('click', closePremium);
+$('premiumTerms').addEventListener('click', () => openSheet('sheet-terms'));
+$('premiumPrivacy').addEventListener('click', () => openSheet('sheet-privacy'));
 $('dashUpgrade').addEventListener('click', openPremium);
 $('addTimeUpgrade').addEventListener('click', openPremium);
 
