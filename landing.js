@@ -33,38 +33,37 @@ async function loadMedia() {
     // A feature uses its own slot first. Older uploads (made before the per-feature slots existed) are paired
     // by meaning so nothing sits in a separate row: hero screenshot -> how it works, objective -> calls,
     // conversation -> live call, first call screenshot -> call summary.
-    const legacy = { how_it_works: ['hero_overlay', 0], calls_for_you: ['objective_overlay', 0], live_call_video: ['conversation_overlay', 0], call_summary: ['call_screenshots', 0] };
+    const legacy = { call_in_app: ['hero_overlay', 0], how_it_works: ['objective_overlay', 0], live_call_video: ['conversation_overlay', 0], call_summary: ['call_screenshots', 0] };
     const used = new Set();
     const pick = (slot) => {
       const own = (mediaBySlot.get(slot) || []).find(isImg); if (own) return own;
       const lg = legacy[slot]; const r = lg && (mediaBySlot.get(lg[0]) || []).filter(isImg)[lg[1]];
       if (r) used.add(r); return r;
     };
-    const show = (ph, node, row) => {
-      ph.replaceChildren(node); ph.classList.add('has-shot'); ph.parentElement.hidden = false; ph.closest('.feature').classList.remove('nophone');
-      if (row) ph.parentElement.prepend(mk('img', { src: allowedMedia(row.url), alt: '', className: 'halo', decoding: 'async' }));
-    };
-    document.querySelectorAll('.phone[data-slot]').forEach((ph) => {
-      const row = pick(ph.dataset.slot); if (!row) return;
-      show(ph, slotImg(row, ph.getAttribute('aria-label')), row);
-    });
-    // Live call: a video (its own slot, or the demonstration video slot) plays muted while visible, pauses when
-    // scrolled away; tap for sound. The conversation screenshot becomes its poster.
-    const lv = mediaBySlot.get('live_call_video')?.[0] || mediaBySlot.get('demo_video')?.[0];
+    const reveal = (ph) => { ph.classList.add('has-shot'); ph.parentElement.hidden = false; ph.closest('.feature').classList.remove('nophone'); };
+    // Video phones play muted while visible, pause when scrolled away; tap for sound. A matching screenshot is the poster.
     let demoUsed = false;
-    if (lv) {
-      demoUsed = !mediaBySlot.get('live_call_video')?.[0];
-      const ph = document.getElementById('ph-live_call_video');
-      const poster = pick('live_call_video');
-      const v = mk('video', { src: allowedMedia(lv.url), muted: true, loop: true, playsInline: true, preload: 'auto' });
+    const videoRow = (slot) => (mediaBySlot.get(slot) || []).find((r) => !isImg(r)) || (slot === 'live_call_video' ? mediaBySlot.get('demo_video')?.[0] : null);
+    const mountVideo = (ph, row, poster) => {
+      const v = mk('video', { src: allowedMedia(row.url), muted: true, loop: true, playsInline: true, preload: 'auto' });
       if (poster) v.poster = allowedMedia(poster.url);
       v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
       const snd = mk('button', { type: 'button', className: 'vsound', textContent: 'Tap for sound' });
       snd.addEventListener('click', () => { v.muted = !v.muted; snd.textContent = v.muted ? 'Tap for sound' : 'Sound on'; });
       v.addEventListener('loadedmetadata', () => { if (v.videoWidth > v.videoHeight) ph.classList.add('wide'); });
-      ph.replaceChildren(v, snd); ph.classList.add('has-shot'); ph.parentElement.hidden = false; ph.closest('.feature').classList.remove('nophone');
+      ph.replaceChildren(v, snd); reveal(ph);
       new IntersectionObserver((es) => es.forEach((en) => { if (en.isIntersecting) v.play().catch(() => {}); else v.pause(); }), { threshold: .4 }).observe(ph);
-    }
+    };
+    document.querySelectorAll('.phone[data-slot]').forEach((ph) => {
+      const slot = ph.dataset.slot, poster = pick(slot);
+      if (slot === 'how_it_works' || slot === 'live_call_video') {
+        const vr = videoRow(slot);
+        if (vr) { if (slot === 'live_call_video' && !(mediaBySlot.get(slot) || []).some((r) => !isImg(r))) demoUsed = true; mountVideo(ph, vr, poster); return; }
+      }
+      if (!poster) return;
+      ph.replaceChildren(slotImg(poster, ph.getAttribute('aria-label'))); reveal(ph);
+      ph.parentElement.prepend(mk('img', { src: allowedMedia(poster.url), alt: '', className: 'halo', decoding: 'async' }));
+    });
     // Whatever is left over (not paired to a feature) goes in the swipe row.
     const extras = ['hero_overlay', 'objective_overlay', 'conversation_overlay', 'call_screenshots', 'feature_media'].flatMap((s) => mediaBySlot.get(s) || []).filter((r) => isImg(r) && !used.has(r));
     if (extras.length) {

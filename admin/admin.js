@@ -550,10 +550,9 @@ function showBootError(err, offerReset = false) {
 // All slot definitions are intentionally explicit; no arbitrary URL or path input.
 const LANDING_SLOTS = [
   ['hero_background', 'Hero background (fallback)', 'The hero uses the login screen background. Only used if that is empty'],
-  ['how_it_works', 'How it works / set-up screenshot', 'Screenshot of the set-up flow, shown in a phone'],
-  ['calls_for_you', 'Calls for you screenshot', 'Screenshot of an objective being given or a call being placed'],
+  ['how_it_works', 'How it works video', 'Screen recording of the set-up and a first call. Plays muted on its own when visible and pauses when scrolled away. MP4, MOV or WebM, up to 50 MB'],
   ['your_voice', 'In your own voice screenshot', 'Screenshot of the voice page'],
-  ['live_call_video', 'Live call sample video', 'Plays muted on its own when visible and pauses when scrolled away. MP4 or WebM, up to 50 MB'],
+  ['live_call_video', 'Live call sample video', 'Plays muted on its own when visible and pauses when scrolled away. MP4, MOV or WebM, up to 50 MB'],
   ['call_summary', 'Call summary screenshot', 'Screenshot of a finished call summary or transcript'],
   ['call_in_app', 'Call Emysa in the app screenshot', 'Screenshot of talking to Emysa by voice inside the app'],
   ['import_chats', 'Import chats into memory screenshot', 'Screenshot of the chat import and memories screen'],
@@ -570,7 +569,7 @@ const LANDING_SLOTS = [
   ['voice_orb', 'Retired: voice orb', 'No longer shown on the page'],
 ];
 const GALLERIES = new Set(['call_screenshots', 'feature_media', 'hero_overlay']);
-const typesFor = (slot) => slot === 'voice_orb' ? ['image/gif'] : isVideoSlot(slot) ? ['video/mp4', 'video/webm'] : slot === 'footer_background' ? ['image/gif', 'image/png', 'image/jpeg', 'image/webp', 'video/mp4', 'video/webm'] : ['image/gif', 'image/png', 'image/jpeg', 'image/webp'];
+const typesFor = (slot) => slot === 'voice_orb' ? ['image/gif'] : isVideoSlot(slot) ? ['video/mp4', 'video/webm', 'video/quicktime'] : slot === 'footer_background' ? ['image/gif', 'image/png', 'image/jpeg', 'image/webp', 'video/mp4', 'video/webm', 'video/quicktime'] : ['image/gif', 'image/png', 'image/jpeg', 'image/webp'];
 let landingRows = [];
 async function loadLandingMedia() {
   const area = $('landingSlots');
@@ -619,16 +618,18 @@ $('landingSlots').addEventListener('change', async (event) => {
   const slotEl = event.target.closest('[data-slot]');
   const slot = slotEl.dataset.slot;
   const status = $('landingStatus');
-  const limit = file.type.startsWith('video/') ? 50 : 20;
+  const type = guessType(file);
+  const limit = type.startsWith('video/') ? 50 : 20;
+  const mb = (file.size / 1048576).toFixed(1);
   const say = (text, kind = '') => { let n = slotEl.querySelector('.slotMsg'); if (!n) { n = document.createElement('div'); n.className = 'slotMsg'; slotEl.querySelector('p').after(n); } n.className = `slotMsg ${kind}`; n.textContent = text; };
-  if (!typesFor(slot).includes(file.type) || !file.size || file.size > limit * 1024 * 1024) {
-    say(`Choose a supported file under ${limit} MB.`, 'err'); status.textContent = ''; return;
-  }
+  if (!typesFor(slot).includes(type)) { say(`${file.name} is ${type || 'an unknown type'}. This slot accepts ${typesFor(slot).map((t) => t.split('/')[1]).join(', ')}.`, 'err'); status.textContent = ''; return; }
+  if (!file.size) { say(`${file.name} is empty.`, 'err'); return; }
+  if (file.size > limit * 1024 * 1024) { say(`${file.name} is ${mb} MB. The limit is ${limit} MB. Compress or trim it and try again.`, 'err'); status.textContent = ''; return; }
   // Immediate, visible feedback inside the slot: local preview, file name, moving bar, elapsed time.
   const preview = URL.createObjectURL(file);
   const tile = document.createElement('div');
   tile.className = 'landingItem pending';
-  tile.innerHTML = `${file.type.startsWith('video/') ? '<div class="pvBox">video</div>' : `<img src="${preview}" alt="">`}<div><b>${esc(file.name)}</b> <span class="aHint">${(file.size / 1048576).toFixed(1)} MB</span><div class="bar"><i></i></div><span class="aHint step">Preparing…</span></div>`;
+  tile.innerHTML = `${type.startsWith('video/') ? '<div class="pvBox">video</div>' : `<img src="${preview}" alt="">`}<div><b>${esc(file.name)}</b> <span class="aHint">${(file.size / 1048576).toFixed(1)} MB</span><div class="bar"><i></i></div><span class="aHint step">Preparing…</span></div>`;
   slotEl.querySelector('p').after(tile);
   const up = slotEl.querySelector('[data-act=upload]'); up.disabled = true; up.textContent = 'Uploading…';
   const t0 = Date.now(), step = tile.querySelector('.step'); let stage = 'Preparing';
@@ -636,12 +637,12 @@ $('landingSlots').addEventListener('change', async (event) => {
   const setStage = (s) => { stage = s; step.textContent = `${s}…`; status.textContent = `${s} ${file.name}…`; };
   try {
     setStage('Preparing');
-    const { path, token } = await api('create-landing-upload', { method: 'POST', body: { slot, mimeType: file.type, size: file.size } });
+    const { path, token } = await api('create-landing-upload', { method: 'POST', body: { slot, mimeType: type, size: file.size } });
     setStage('Uploading');
-    const { error } = await supabase.storage.from('app-assets').uploadToSignedUrl(path, token, file, { contentType: file.type });
+    const { error } = await supabase.storage.from('app-assets').uploadToSignedUrl(path, token, file, { contentType: type });
     if (error) throw error;
     setStage('Saving');
-    await api('confirm-landing-upload', { method: 'POST', body: { slot, mimeType: file.type, path } });
+    await api('confirm-landing-upload', { method: 'POST', body: { slot, mimeType: type, path } });
     clearInterval(timer); URL.revokeObjectURL(preview);
     status.textContent = 'Saved. The public page will update shortly.';
     await loadLandingMedia();
@@ -652,4 +653,6 @@ $('landingSlots').addEventListener('change', async (event) => {
   }
 });
 
-function isVideoSlot(s) { return s === 'demo_video' || s === 'live_call_video'; }
+function isVideoSlot(s) { return s === 'demo_video' || s === 'live_call_video' || s === 'how_it_works'; }
+// iPhone and Files often give an empty MIME type, so fall back to the extension.
+function guessType(f) { return f.type || ({ mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', gif: 'image/gif', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' })[(f.name.split('.').pop() || '').toLowerCase()] || ''; }

@@ -422,11 +422,11 @@ const LANDING_SLOTS = new Set([
   'how_it_works', 'calls_for_you', 'your_voice', 'call_summary', 'call_in_app', 'import_chats', 'channels', 'footer_background',
 ]);
 const LANDING_GALLERIES = new Set(['call_screenshots', 'feature_media', 'hero_overlay']);
-const LANDING_TYPES = { 'image/gif': 'gif', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/webm': 'webm' };
+const LANDING_TYPES = { 'image/gif': 'gif', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
 function validLandingType(slot, type) {
   return LANDING_SLOTS.has(slot) && !!LANDING_TYPES[type] &&
     (slot === 'voice_orb' ? type === 'image/gif' :
-      (slot === 'demo_video' || slot === 'live_call_video') ? type.startsWith('video/') : (type.startsWith('video/') ? slot === 'footer_background' : true));
+      (slot === 'demo_video' || slot === 'live_call_video' || slot === 'how_it_works') ? type.startsWith('video/') : (type.startsWith('video/') ? slot === 'footer_background' : true));
 }
 async function listLandingMedia(req, res, supabase) {
   const { data, error } = await supabase.from('landing_media')

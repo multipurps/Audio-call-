@@ -165,7 +165,7 @@
   // standalone app. Tying the import to a version string that changes
   // every deploy forces a genuinely new request each time instead of
   // silently continuing to run whatever was cached from before.
-  import(`./admin.js?v=2026-10-11.1`).catch((err) => showBootFailure('Failed to load admin.js', err));
+  import(`./admin.js?v=2026-10-11.2`).catch((err) => showBootFailure('Failed to load admin.js', err));
 </script>
 <script>
   if ('serviceWorker' in navigator) {
