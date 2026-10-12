@@ -1090,6 +1090,57 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .inputIconSvg.phoneIc{width:24px; height:24px; left:9px;}
 .callChannelIcon.phone svg.phoneIc{width:28px; height:28px;}
 .profileCard .cIcon svg.phoneIc{width:26px; height:26px;}
+
+/* ---------- Premium ---------- */
+.premiumCard{position:relative; overflow:hidden; display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; margin-top:14px; padding:14px 16px; border-radius:24px; text-align:left; background:var(--accent); color:var(--on-accent);}
+.premiumCard.hidden{display:none;}
+.premiumCard:active{opacity:.85;}
+.premiumCardText{display:flex; flex-direction:column; gap:2px; min-width:0;}
+.premiumCardText strong{font-size:16px; font-weight:500;}
+.premiumCardText span{font-size:13px; font-weight:300; opacity:.75;}
+.premiumCard .ic{width:20px; height:20px; flex:none;}
+.premiumCard::after{content:""; position:absolute; top:0; bottom:0; left:-60%; width:40%; pointer-events:none; background:linear-gradient(100deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.55) 50%, rgba(255,255,255,0) 100%); transform:skewX(-18deg); animation:premiumShimmer 3.2s ease-in-out infinite;}
+@keyframes premiumShimmer{0%{left:-60%;} 55%,100%{left:130%;}}
+@media(prefers-reduced-motion:reduce){.premiumCard::after{animation:none; display:none;}}
+.dashHero .dashUpgrade{position:relative; z-index:2; margin-top:8px;}
+
+.premiumScreen{justify-content:flex-start; padding-top:max(env(safe-area-inset-top),56px);}
+.premiumHeading{font-size:18px; font-weight:400; letter-spacing:-0.01em; line-height:40px;}
+.premiumHero{position:relative; width:100%; height:128px; margin-top:18px; flex:none;}
+.premiumTile{position:absolute; top:50%; display:flex; align-items:center; justify-content:center; border-radius:26px; transform:translateY(-50%);}
+.premiumTileC{left:50%; width:108px; height:108px; margin-left:-54px; background:var(--accent); z-index:2; box-shadow:0 10px 30px rgba(0,0,0,.35);}
+.premiumTileC img{width:64px; height:64px; border-radius:50%; object-fit:cover;}
+.premiumTileL,.premiumTileR{width:88px; height:88px; background:var(--surface-3); color:var(--accent); z-index:1;}
+.premiumTileL{left:calc(50% - 128px); transform:translateY(-50%) rotate(-8deg);}
+.premiumTileR{left:calc(50% + 40px); transform:translateY(-50%) rotate(8deg);}
+.premiumTileL .ic,.premiumTileR .ic{width:34px; height:34px;}
+.premiumBenefits{width:100%; margin-top:20px; padding:18px 18px 16px; border:1.5px solid var(--accent); border-radius:24px; text-align:left; flex:none;}
+.premiumBenefits h3{font-size:20px; font-weight:400; text-align:center; color:var(--accent); margin-bottom:12px;}
+.premiumBenefits ul{list-style:none; display:flex; flex-direction:column; gap:10px; margin:0; padding:0;}
+.premiumBenefits li{display:flex; align-items:center; gap:12px; font-size:15px; font-weight:300;}
+.premiumBenefits li .ic{width:18px; height:18px; flex:none; color:var(--accent);}
+.planGrid{display:grid; grid-template-columns:1fr 1fr; gap:12px; width:100%; margin-top:22px; flex:none;}
+.planCard{position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; min-height:92px; padding:14px 8px; border-radius:20px; color:var(--text); background:var(--glass-bg); border:1.5px solid var(--glass-border);}
+.planCard.selected{border-color:var(--accent); background:var(--surface-2);}
+.planName{font-size:14px; font-weight:300; color:var(--muted);}
+.planPrice{font-size:18px; font-weight:500;}
+.planSub{font-size:12px; font-weight:300; color:var(--muted);}
+.planTag{position:absolute; top:-10px; left:50%; transform:translateX(-50%); white-space:nowrap; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:500; background:var(--accent); color:var(--on-accent);}
+.premiumBottom{width:100%; margin-top:auto; padding-top:20px; flex:none;}
+.premiumBuy{position:relative; overflow:hidden; width:100%; height:56px; border-radius:999px; background:var(--accent); color:var(--on-accent); font-size:16px; font-weight:500;}
+.premiumBuy:disabled{opacity:.5;}
+.premiumBuy:active{opacity:.85;}
+.premiumBuy::after{content:""; position:absolute; top:0; bottom:0; left:-60%; width:40%; pointer-events:none; background:linear-gradient(100deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.55) 50%, rgba(255,255,255,0) 100%); transform:skewX(-18deg); animation:premiumShimmer 3.2s ease-in-out infinite;}
+@media(prefers-reduced-motion:reduce){.premiumBuy::after{animation:none; display:none;}}
+
+.pfTable{display:flex; flex-direction:column;}
+.pfRow{display:grid; grid-template-columns:1.7fr 1fr 1fr; gap:8px; align-items:center; padding:10px 0; font-size:14px; font-weight:300; border-top:1px solid var(--line);}
+.pfRow:first-child{border-top:0;}
+.pfRow span:nth-child(n+2){text-align:left;}
+.pfRow span:nth-child(2){color:var(--muted);}
+.pfRow span:nth-child(3){color:var(--accent);}
+.pfHead{font-weight:500; padding-top:0;}
+.pfHead span:nth-child(n){color:var(--text);}
 .contactCallBtn svg.phoneIc{width:28px; height:28px;}
 .dialCallBtn svg.phoneIc{width:44px; height:44px;}
 .iosRowGlyph svg.phoneIc{width:32px; height:32px;}

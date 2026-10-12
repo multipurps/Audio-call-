@@ -836,6 +836,7 @@ async function handleChatResponse(data, isCall, onReply) {
 // the server to place the call it resolved in phase one. Runs even if the user has
 // navigated away (the request was theirs), but only draws into the chat they are in.
 async function placePendingCall(token, revision, onReply) {
+  if (needsTopUp()) { sendToAddTime(); return; } // no minutes: straight to Add time
   await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 700)));
   let data;
   let ok = false;
@@ -1201,6 +1202,7 @@ function openAssistantCallScreen() {
     $('callScreen').classList.remove('hidden');
     return;
   }
+  if (needsTopUp()) { sendToAddTime(); return; } // no minutes: skip the call screen entirely
   assistantCallOpen = true;
   assistantMuted = false;
   callTranscriptForSummary = [];
@@ -1350,6 +1352,7 @@ async function startAppCallSession() {
     if (!resp.ok) {
       stream.getTracks().forEach((t) => t.stop());
       output.dispose();
+      if (started?.code === 'no-minutes') { handleNoMinutes(); return; }
       finishAppCallUi(started?.error || 'Could not start the call');
       return;
     }
@@ -1839,6 +1842,7 @@ function renderCallPlanAction(bubble, plan) {
   status.setAttribute('role', 'status');
   button.onclick = async () => {
     if (button.disabled || chatSending) return;
+    if (needsTopUp()) { sendToAddTime(); return; } // no minutes: straight to Add time
     const revision = chatRevision;
     button.disabled = true;
     actions.dataset.status = 'placing';
@@ -2998,6 +3002,7 @@ async function callAgainFromDetail() {
     openCallScreen(c.id, c.to_number, name);
     return;
   }
+  if (needsTopUp()) { $('callDetailDialog').close(); sendToAddTime(); return; }
   callAgainInFlight = true;
   if (btn) btn.disabled = true;
   setCallAgainStatus('Placing call…', false);
@@ -3031,6 +3036,7 @@ async function callAgainFromDetail() {
       }),
     });
     const data = await resp.json().catch(() => ({}));
+    if (resp.status === 402 && data.code === 'no-minutes') { $('callDetailDialog').close(); handleNoMinutes(); return; }
     if (resp.status === 409) {
       const existingId = data.callId || data.dbCallId;
       setCallAgainStatus('A call to this number is already in progress.', false);
@@ -3257,6 +3263,7 @@ $('recentChatMenu').querySelector('[data-action="delete"]').addEventListener('cl
   if (!recentChatMenuTargetId) return;
   const id = recentChatMenuTargetId;
   closeRecentChatMenu();
+  if (typeof renderPremiumEntry === 'function') renderPremiumEntry();
   if (!confirm('Delete this chat? This can\'t be undone.')) return;
   await authedFetch('/api/assistant?action=deleteSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: id }) });
   loadRecentChats();
@@ -3307,6 +3314,21 @@ async function loadBalance() {
   if (!resp?.ok) return;
   homeBalance = await resp.json();
   renderBalance();
+}
+
+// Out of call minutes: never show a call screen. Go straight to Add time.
+const needsTopUp = () => Boolean(homeBalance && homeBalance.remaining < 1);
+function sendToAddTime() {
+  openAddTime();
+  // Re-check in the background: if the balance turns out to be fine, step back out.
+  loadBalance().then(() => { if (!needsTopUp()) closeAddTime(); else renderAddTime(); }).catch(() => {});
+}
+// The server said no-minutes (our cached balance was stale).
+function handleNoMinutes() {
+  homeBalance = { ...(homeBalance || {}), remaining: 0 };
+  renderBalance();
+  if (assistantCallOpen) endAssistantCall();
+  sendToAddTime();
 }
 
 let homeContacts = [];
@@ -3437,6 +3459,9 @@ function openImportPicker() {
     title.className = 'iosRowTitle';
     title.textContent = c.name;
     row.appendChild(title);
+    $('addTimeQty').textContent = '';
+    $('addTimeMinus').disabled = true;
+    $('addTimePlus').disabled = true;
     row.addEventListener('click', () => { $('moreDialog').close(); openContactMemory(c); });
     list.appendChild(row);
   }
@@ -3473,13 +3498,12 @@ function formatPlainPrice(amount, currency) {
 }
 
 function renderAddTime() {
-  const unit = homeBalance?.unit;
-  const ready = Boolean(homeBalance?.payments && unit);
+  // The server sends the pack list (minutes + price) and charges by position, so
+  // the price shown here is only ever the server's.
+  const packs = homeBalance?.packs;
+  const ready = Boolean(homeBalance?.payments && Array.isArray(packs) && packs.length);
   const out = homeBalance && homeBalance.remaining < 1;
   $('addTimeLead').textContent = out ? "You're out of call time.\nTop up to keep Emysa making calls for you." : 'Top up to keep Emysa making calls for you.';
-  $('addTimeQty').textContent = `${addTimeQty}×`;
-  $('addTimeMinus').disabled = addTimeQty <= 1;
-  $('addTimePlus').disabled = !ready || addTimeQty >= unit.maxQty;
   if (!ready) {
     $('addTimeBig').textContent = '–';
     $('addTimeBuy').textContent = 'Purchase';
@@ -3487,32 +3511,106 @@ function renderAddTime() {
     $('addTimeStatus').textContent = homeBalance ? 'Adding time is not available yet.' : 'Could not load. Check your connection and try again.';
     return;
   }
-  const labels = callTimeLabels(unit.minutes * addTimeQty);
-  const total = unit.prices ? Number(unit.prices[addTimeQty - 1]) : (Math.round(Number(unit.amount) * 100) * addTimeQty) / 100;
+  addTimeQty = Math.min(Math.max(1, addTimeQty), packs.length);
+  const pack = packs[addTimeQty - 1];
+  const labels = callTimeLabels(pack.minutes);
+  $('addTimeQty').textContent = `${addTimeQty} / ${packs.length}`;
+  $('addTimeMinus').disabled = addTimeQty <= 1;
+  $('addTimePlus').disabled = addTimeQty >= packs.length;
   $('addTimeBig').textContent = labels.big;
-  $('addTimeBuy').textContent = `Purchase ${labels.buy} · ${formatPlainPrice(total, unit.currency)}`;
+  $('addTimeBuy').textContent = `Purchase ${labels.buy} · ${formatPlainPrice(Number(pack.amount), homeBalance.currency)}`;
   $('addTimeBuy').disabled = false;
 }
 
 async function openAddTime() {
+const startCheckout = () => launchCheckout({ quantity: addTimeQty }, { buy: $('addTimeBuy'), status: $('addTimeStatus'), link: $('addTimeOpen') });
+
+// ---------- Premium ----------
+let premiumMonths = 12;
+const monthsLabel = (m) => (m === 12 ? '12 months' : m === 1 ? '1 month' : `${m} months`);
+const formatDay = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+
+function renderPremiumEntry() {
+  const plans = homeBalance?.plans;
+  const on = Boolean(homeBalance?.payments && plans?.length);
+  const premium = Boolean(homeBalance?.premium);
+  $('dashUpgrade').classList.toggle('hidden', !on || premium);
+  const card = $('addTimeUpgrade');
+  card.classList.toggle('hidden', !on);
+  $('addTimeUpgradeTitle').textContent = premium ? 'Premium' : 'Upgrade to Premium';
+  $('addTimeUpgradeSub').textContent = premium ? `Active until ${formatDay(homeBalance.premiumUntil)}. Tap to extend` : 'Your credits never expire';
+  $('addTimeExpiry').textContent = premium
+    ? 'Your credits never expire.'
+    : homeBalance?.creditExpiresAt ? `Your credits expire on ${formatDay(homeBalance.creditExpiresAt)}.` : 'Credits expire one month after you add them.';
+}
+
+function renderPlans() {
+  const plans = homeBalance?.plans || [];
+  const list = $('planList');
+  list.textContent = '';
+  for (const p of plans) {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = `planCard${p.months === premiumMonths ? ' selected' : ''}`;
+    const name = document.createElement('span');
+    name.className = 'planName';
+    name.textContent = monthsLabel(p.months);
+    const price = document.createElement('span');
+    price.className = 'planPrice';
+    price.textContent = formatPlainPrice(p.amount, p.currency);
+    const sub = document.createElement('span');
+    sub.className = 'planSub';
+    sub.textContent = 'One payment';
+    card.append(name, price, sub);
+    if (p.percentOff > 0) {
+      const tag = document.createElement('span');
+      tag.className = 'planTag';
+      tag.textContent = `${p.percentOff}% OFF`;
+      card.appendChild(tag);
+    }
+    card.addEventListener('click', () => { premiumMonths = p.months; renderPlans(); });
+    list.appendChild(card);
+  }
+  const chosen = plans.find((p) => p.months === premiumMonths);
+  $('premiumBuy').disabled = !chosen;
+  $('premiumBuy').textContent = chosen ? `${homeBalance.premium ? 'Extend' : 'Upgrade'} · ${formatPlainPrice(chosen.amount, chosen.currency)}` : 'Upgrade';
+  $('premiumLead').textContent = homeBalance?.premium ? `Premium until ${formatDay(homeBalance.premiumUntil)}` : 'Unlock Premium';
+}
+
+async function openPremium() {
+  $('premiumStatus').textContent = '';
+  $('premiumOpen').classList.add('hidden');
+  $('premiumScreen').classList.remove('hidden');
+  if (!homeBalance?.plans) await loadBalance();
+  renderPlans();
+}
+const closePremium = () => $('premiumScreen').classList.add('hidden');
+
+$('premiumBuy').addEventListener('click', () => launchCheckout({ plan: premiumMonths }, { buy: $('premiumBuy'), status: $('premiumStatus'), link: $('premiumOpen') }));
+$('premiumClose').addEventListener('click', closePremium);
+$('premiumTerms').addEventListener('click', () => openSheet('sheet-terms'));
+$('premiumPrivacy').addEventListener('click', () => openSheet('sheet-privacy'));
+$('dashUpgrade').addEventListener('click', openPremium);
+$('addTimeUpgrade').addEventListener('click', openPremium);
   addTimeQty = 1;
   $('addTimeStatus').textContent = '';
   $('addTimeOpen').classList.add('hidden');
   $('addTimeScreen').classList.remove('hidden');
   renderAddTime();
-  if (!homeBalance?.unit) { await loadBalance(); renderAddTime(); }
+  if (!homeBalance?.packs) { await loadBalance(); renderAddTime(); }
 }
 function closeAddTime() { $('addTimeScreen').classList.add('hidden'); }
 
-async function startCheckout() {
-  const buy = $('addTimeBuy');
+// One payment launcher for both add-time and premium: the server decides the price from
+// the quantity or plan it is given, and credits only after Bachs confirms.
+async function launchCheckout(body, { buy, status, link }) {
   buy.disabled = true;
-  $('addTimeStatus').textContent = 'Opening secure payment…';
+  status.textContent = 'Opening secure payment…';
   try {
     const resp = await authedFetch('/api/referrals?action=checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ quantity: addTimeQty }),
+      body: JSON.stringify(body),
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || !data.url) throw new Error(data.error || 'Could not open payment. Try again.');
@@ -3522,24 +3620,24 @@ async function startCheckout() {
     const opened = window.open(data.url, '_blank');
     if (opened) {
       try { opened.opener = null; } catch {}
-      $('addTimeStatus').textContent = '';
+      status.textContent = '';
     } else {
       // The browser blocked the window (the request finished after the tap).
       // A real tap on a link always works, including in an installed PWA.
-      $('addTimeOpen').href = data.url;
-      $('addTimeOpen').classList.remove('hidden');
-      $('addTimeStatus').textContent = 'Tap to continue to payment.';
+      link.href = data.url;
+      link.classList.remove('hidden');
+      status.textContent = 'Tap to continue to payment.';
     }
     watchPayment();
   } catch (err) {
-    $('addTimeStatus').textContent = err.message || 'Could not open payment. Try again.';
+    status.textContent = err.message || 'Could not open payment. Try again.';
   } finally {
     buy.disabled = false;
   }
 }
 
 $('addTimeMinus').addEventListener('click', () => { if (addTimeQty > 1) { addTimeQty -= 1; renderAddTime(); } });
-$('addTimePlus').addEventListener('click', () => { if (homeBalance?.unit && addTimeQty < homeBalance.unit.maxQty) { addTimeQty += 1; renderAddTime(); } });
+$('addTimePlus').addEventListener('click', () => { if (homeBalance?.packs && addTimeQty < homeBalance.packs.length) { addTimeQty += 1; renderAddTime(); } });
 $('addTimeBuy').addEventListener('click', startCheckout);
 $('addTimeClose').addEventListener('click', closeAddTime);
 $('addTimeTerms').addEventListener('click', () => openSheet('sheet-terms'));
@@ -3553,7 +3651,11 @@ async function verifyPayment() {
   const before = homeBalance?.remaining;
   homeBalance = { ...(homeBalance || {}), ...data, payments: true };
   renderBalance();
-  if (before != null && data.remaining > before) {
+  if (data.planActivated) {
+    showToast('Premium is on');
+    closePremium();
+    closeAddTime();
+  } else if (before != null && data.remaining > before) {
     showToast(`${formatMinutes(data.remaining - before)} added`);
     closeAddTime();
   }
