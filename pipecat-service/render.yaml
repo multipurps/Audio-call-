@@ -50,6 +50,14 @@ services:
         sync: false
       - key: FISH_API_KEY
         sync: false
+      # A/B-testing another voice on the same pipeline (set these in the Render
+      # dashboard, then change ASSISTANT_TTS_PROVIDER and ASSISTANT_CALL_ENGINE=classic):
+      #   ASSISTANT_TTS_PROVIDER=elevenlabs  needs ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID
+      #                                      (optional ELEVENLABS_MODEL, e.g. a Flash model)
+      #   ASSISTANT_TTS_PROVIDER=cartesia    needs CARTESIA_API_KEY, CARTESIA_VOICE_ID
+      #                                      (optional CARTESIA_MODEL)
+      # The per-turn latency breakdown is logged as "latency session=... | ..."
+      # (ASSISTANT_LATENCY_LOG=false turns it off).
 
       # --- Non-secret configuration ---------------------------------------
       - key: ASSISTANT_STT_PROVIDER

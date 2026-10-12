@@ -911,6 +911,34 @@ class CallConversation(_BaseConversation):
             end_reason=reason,
         )
 
+    def _build_latency_observer(self) -> Any:
+        """One log line per turn naming where the time went.
+
+        Example (seconds): endpointing wait, transcription, LLM inference,
+        speech synthesis, TOTAL. This is what separates "the voice is slow"
+        from "the setup is slow": swap ASSISTANT_TTS_PROVIDER and compare the
+        speech-synthesis line while everything else stays the same.
+        """
+        try:
+            from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
+
+            observer = UserBotLatencyObserver()
+            session_id = self._session_id
+            tts_name = self._settings.tts_provider
+
+            @observer.event_handler("on_latency_breakdown")
+            async def _on_breakdown(_observer: Any, breakdown: Any) -> None:
+                try:
+                    for line in breakdown.turn_contribution_lines():
+                        logger.info("latency session={} tts={} | {}", session_id, tts_name, line)
+                except Exception:  # noqa: BLE001 - diagnostics must never break a call
+                    pass
+
+            return observer
+        except Exception as exc:  # noqa: BLE001 - diagnostics must never break a call
+            logger.warning("latency observer unavailable: {}", type(exc).__name__)
+            return None
+
     async def _launch_pipeline(self) -> None:
         """Build and start the Pipecat pipeline (once)."""
         if self._task is not None:
@@ -963,10 +991,20 @@ class CallConversation(_BaseConversation):
                 transcript=self.transcript,
                 language=self.call_context.language if self.call_context else None,
             )
+        observers = [CallLogObserver(self._session_id, self._settings.secret_values())]
+        if self._settings.latency_log:
+            latency_observer = self._build_latency_observer()
+            if latency_observer is not None:
+                observers.append(latency_observer)
         self._task = PipelineTask(
             pipeline,
-            params=PipelineParams(audio_in_sample_rate=rate, audio_out_sample_rate=rate),
-            observers=[CallLogObserver(self._session_id, self._settings.secret_values())],
+            params=PipelineParams(
+                audio_in_sample_rate=rate,
+                audio_out_sample_rate=rate,
+                # Pipecat's own per-service timing, used by the latency breakdown.
+                enable_metrics=self._settings.latency_log,
+            ),
+            observers=observers,
             enable_rtvi=False,
             # The bridge owns idle/heartbeat/duration limits; a second, silent
             # idle timer inside Pipecat would end calls the bridge considers live.

@@ -63,6 +63,7 @@ from app.vocal import (
     VocalisationPolicy,
     at_sentence_boundary,
     split_complete,
+    strip_tts_markers,
     starts_with_tag,
     to_transcript_text,
 )
@@ -261,6 +262,7 @@ def build_pipeline(
     # Fish Audio speaks real vocalisations from inline markers; which syntax
     # depends on the model (s1 = "(paren)" fixed set, s2+ = "[bracket]").
     tts_syntax = "s1" if (settings.tts_model or "").lower().startswith("s1") else "s2"
+    tts_is_fish = settings.tts_provider == "fish" or settings.mock_mode or settings.tts_provider == "mock"
     vocal_policy = VocalisationPolicy()
     cue_policy = DeliveryCuePolicy()
 
@@ -407,6 +409,10 @@ def build_pipeline(
             if not clean_text:
                 return None
             state = emotion_state["state"]
+            if not tts_is_fish:
+                # Expression markers are Fish syntax; another voice would read
+                # them aloud. Keep the words only.
+                return strip_tts_markers(clean_text) or None
             tts_text, _ = vocal_policy.process(
                 clean_text,
                 syntax=tts_syntax,

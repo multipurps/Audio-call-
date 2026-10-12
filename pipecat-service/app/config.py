@@ -30,7 +30,7 @@ from typing import Mapping
 
 STT_PROVIDERS = ("openai", "mock")
 LLM_PROVIDERS = ("luna", "openai", "mock")
-TTS_PROVIDERS = ("fish", "mock")
+TTS_PROVIDERS = ("fish", "elevenlabs", "cartesia", "mock")
 
 DEFAULT_STT_PROVIDER = "openai"
 DEFAULT_LLM_PROVIDER = "openai"
@@ -239,11 +239,24 @@ class Settings:
     tts_temperature: float | None = None
     tts_top_p: float | None = None
     tts_model: str | None = None
+    # A/B-test voices (ASSISTANT_TTS_PROVIDER=elevenlabs|cartesia). Each has its
+    # own voice id and model: a Fish voice id, or a per-call cloned voice from
+    # the relay's hello, never means anything to another vendor, so these
+    # providers ignore tts_voice_id entirely.
+    elevenlabs_voice_id: str | None = None
+    elevenlabs_model: str | None = None
+    cartesia_voice_id: str | None = None
+    cartesia_model: str | None = None
+    #: Log a per-turn latency breakdown (endpointing, STT, LLM, TTS) from
+    #: Pipecat's own metrics. Costs nothing on the audio path.
+    latency_log: bool = True
 
     # -- credentials -----------------------------------------------------
     openai_api_key: str | None = None
     luna_api_key: str | None = None
     fish_api_key: str | None = None
+    elevenlabs_api_key: str | None = None
+    cartesia_api_key: str | None = None
 
     # -- conversational behaviour ---------------------------------------
     system_prompt: str | None = None
@@ -303,6 +316,8 @@ class Settings:
             self.openai_api_key,
             self.luna_api_key,
             self.fish_api_key,
+            self.elevenlabs_api_key,
+            self.cartesia_api_key,
             self.supabase_service_role_key,
         )
         return tuple(v for v in values if v and len(v) >= 8)
@@ -388,6 +403,16 @@ class Settings:
             raise ConfigError(
                 "FISH_API_KEY is required when ASSISTANT_TTS_PROVIDER=fish"
             )
+        if self.tts_provider == "elevenlabs" and not (self.elevenlabs_api_key and self.elevenlabs_voice_id):
+            raise ConfigError(
+                "ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID are required when "
+                "ASSISTANT_TTS_PROVIDER=elevenlabs"
+            )
+        if self.tts_provider == "cartesia" and not (self.cartesia_api_key and self.cartesia_voice_id):
+            raise ConfigError(
+                "CARTESIA_API_KEY and CARTESIA_VOICE_ID are required when "
+                "ASSISTANT_TTS_PROVIDER=cartesia"
+            )
 
     # -- presentation ----------------------------------------------------
 
@@ -414,6 +439,8 @@ class Settings:
             "ttsProvider": self.tts_provider,
             "ttsVoiceId": self.tts_voice_id or "<default>",
             "fishKey": "<set>" if self.fish_api_key else "<unset>",
+            "elevenlabsKey": "<set>" if self.elevenlabs_api_key else "<unset>",
+            "cartesiaKey": "<set>" if self.cartesia_api_key else "<unset>",
             "openaiKey": "<set>" if self.openai_api_key else "<unset>",
             "lunaKey": "<set>" if self.luna_api_key else "<unset>",
             "persistentMemory": self.enable_persistent_memory,
@@ -526,6 +553,13 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         openai_api_key=_env(env, "OPENAI_API_KEY"),
         luna_api_key=luna_key,
         fish_api_key=_env(env, "FISH_API_KEY"),
+        elevenlabs_api_key=_env(env, "ELEVENLABS_API_KEY"),
+        elevenlabs_voice_id=_env(env, "ELEVENLABS_VOICE_ID"),
+        elevenlabs_model=_env(env, "ELEVENLABS_MODEL"),
+        cartesia_api_key=_env(env, "CARTESIA_API_KEY"),
+        cartesia_voice_id=_env(env, "CARTESIA_VOICE_ID"),
+        cartesia_model=_env(env, "CARTESIA_MODEL"),
+        latency_log=_env_bool(env, "ASSISTANT_LATENCY_LOG", True),
         system_prompt=_env(env, "ASSISTANT_SYSTEM_PROMPT"),
         greeting=_env(env, "ASSISTANT_GREETING"),
         max_call_seconds=_env_float(env, "ASSISTANT_MAX_CALL_SECONDS", 1800.0, minimum=10.0),

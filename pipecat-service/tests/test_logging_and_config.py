@@ -291,7 +291,7 @@ class TestSettingsValidation:
     def test_unknown_tts_provider_rejected(self):
         with pytest.raises(ConfigError, match="ASSISTANT_TTS_PROVIDER must be one of"):
             load_settings(
-                {"ASSISTANT_MOCK_MODE": "true", "ASSISTANT_TTS_PROVIDER": "elevenlabs"}
+                {"ASSISTANT_MOCK_MODE": "true", "ASSISTANT_TTS_PROVIDER": "polly"}
             )
 
     def test_persistent_memory_requires_supabase(self):

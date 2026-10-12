@@ -158,6 +158,20 @@ def to_transcript_text(text: str) -> str:
     return re.sub(r"[ \t]{2,}", " ", out).strip()
 
 
+def strip_tts_markers(text: str) -> str:
+    """Remove every expression marker, keeping the words.
+
+    Fish speaks ``[laughing]`` / ``(soft)`` as real vocalisations. Any other TTS
+    vendor would read them aloud as words, so for those the markers are dropped
+    (the chunk's own edge whitespace is the caller's concern).
+    """
+    if not text:
+        return ""
+    out = _MARKER_RE.sub("", text)
+    out = re.sub(r"\[\[\s*(?:END_CALL|MOOD|FEEL)\s*[^\]]*\]\]", "", out, flags=re.I)
+    return re.sub(r"[ \t]{2,}", " ", out)
+
+
 def to_tts_text(text: str, *, syntax: str = "s2") -> str:
     """Translate canonical markers into the active Fish model's syntax.
 

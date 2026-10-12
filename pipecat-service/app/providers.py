@@ -278,6 +278,34 @@ def build_tts(settings: Settings) -> Any:
         kwargs["settings"] = FishAudioTTSService.Settings(**tts_kwargs)
         return FishAudioTTSService(**kwargs)
 
+    # A/B-test voices. They plug into the SAME pipeline (same STT, LLM, VAD and
+    # turn-taking) so a difference in sound or response delay is the voice.
+    # Each uses its own env voice id: a Fish id or a per-call cloned voice is
+    # meaningless to another vendor, so settings.tts_voice_id is ignored.
+    if settings.tts_provider == "elevenlabs":
+        from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+
+        tts_kwargs = {"voice": settings.elevenlabs_voice_id}
+        if settings.elevenlabs_model:
+            tts_kwargs["model"] = settings.elevenlabs_model
+        return ElevenLabsTTSService(
+            api_key=settings.elevenlabs_api_key,
+            sample_rate=settings.bridge_sample_rate,
+            settings=ElevenLabsTTSService.Settings(**tts_kwargs),
+        )
+
+    if settings.tts_provider == "cartesia":
+        from pipecat.services.cartesia.tts import CartesiaTTSService
+
+        tts_kwargs = {"voice": settings.cartesia_voice_id}
+        if settings.cartesia_model:
+            tts_kwargs["model"] = settings.cartesia_model
+        return CartesiaTTSService(
+            api_key=settings.cartesia_api_key,
+            sample_rate=settings.bridge_sample_rate,
+            settings=CartesiaTTSService.Settings(**tts_kwargs),
+        )
+
     raise ValueError(f"unsupported TTS provider {settings.tts_provider!r}")
 
 
