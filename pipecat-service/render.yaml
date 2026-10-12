@@ -40,8 +40,7 @@ services:
       - key: ASSISTANT_BRIDGE_SECRET
         sync: false          # shared with mp-relay; generate with:
                              # python -c "import secrets;print(secrets.token_urlsafe(32))"
-      # Deepgram does STT (streaming, nova-3); OpenAI does the LLM (gpt-6-luna) and is the
-      # STT fallback if DEEPGRAM_API_KEY is missing.
+      # OpenAI does STT (gpt-4o-mini-transcribe) and the LLM (gpt-6-luna). Deepgram was removed.
       # LUNA_API_KEY may be set instead of / alongside OPENAI_API_KEY when
       # the operator keeps the Luna key separate; either satisfies the
       # validation. Groq was removed entirely — do not re-add GROQ_API_KEY.
@@ -51,8 +50,6 @@ services:
         sync: false
       - key: FISH_API_KEY
         sync: false
-      - key: DEEPGRAM_API_KEY
-        sync: false
       # ElevenLabs / Cartesia test voices need NO settings here: the user picks the
       # provider, voice id and key in the app (Profile > Voice > Test a voice).
       # The per-turn latency breakdown is logged as "latency session=... | ..."
@@ -60,7 +57,7 @@ services:
 
       # --- Non-secret configuration ---------------------------------------
       - key: ASSISTANT_STT_PROVIDER
-        value: deepgram
+        value: openai
       - key: ASSISTANT_LLM_PROVIDER
         value: luna
       - key: ASSISTANT_TTS_PROVIDER

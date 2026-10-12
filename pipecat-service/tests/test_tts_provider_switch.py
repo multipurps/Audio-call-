@@ -1,4 +1,4 @@
-"""Per-user test voices (ElevenLabs / Cartesia), Deepgram STT, and the rule that
+"""Per-user test voices (ElevenLabs / Cartesia), OpenAI STT, and the rule that
 cloned or test voices never run on GPT-Live."""
 import asyncio
 import dataclasses
@@ -67,28 +67,28 @@ def test_fish_tags_are_dropped_for_other_voices():
     assert strip_tts_markers("Hi [[END_CALL]] bye").split() == ["Hi", "bye"]
 
 
-# ---- Deepgram -----------------------------------------------------------------
+# ---- STT (OpenAI gpt-4o-mini-transcribe; Deepgram was removed) -------------------
 
-def test_deepgram_selected_with_key():
-    s = load_settings({**BASE, "ASSISTANT_STT_PROVIDER": "deepgram", "DEEPGRAM_API_KEY": "dg-test-key-12345"})
-    assert s.stt_provider == "deepgram"
-    assert s.resolved_stt_model() == "nova-3"
-    assert "dg-test-key-12345" in s.secret_values()
+def test_stt_is_openai_gpt_4o_mini_transcribe_by_default():
+    s = load_settings(BASE)
+    assert s.stt_provider == "openai"
+    assert s.resolved_stt_model() == "gpt-4o-mini-transcribe"
+
+
+def test_a_leftover_deepgram_setting_boots_on_openai_instead_of_crashing():
+    s = load_settings({**BASE, "ASSISTANT_STT_PROVIDER": "deepgram", "ASSISTANT_STT_MODEL": "nova-3", "DEEPGRAM_API_KEY": "dg-test-key-12345"})
+    assert s.stt_provider == "openai"
+    assert s.resolved_stt_model() == "gpt-4o-mini-transcribe"
     assert "dg-test-key-12345" not in str(s.redacted_summary())
+    assert "dg-test-key-12345" not in s.secret_values()
 
 
-def test_deepgram_without_key_boots_on_openai_instead_of_crashing():
-    assert load_settings({**BASE, "ASSISTANT_STT_PROVIDER": "deepgram"}).stt_provider == "openai"
-
-
-def test_build_stt_deepgram():
-    pytest.importorskip("deepgram")
-    from pipecat.services.deepgram.stt import DeepgramSTTService
+def test_build_stt_openai():
+    from pipecat.services.openai.stt import OpenAISTTService
     from app.providers import build_stt
-    s = load_settings({**BASE, "ASSISTANT_STT_PROVIDER": "deepgram", "DEEPGRAM_API_KEY": "dg-test-key-12345"})
-    stt = build_stt(s, "en")
-    assert isinstance(stt, DeepgramSTTService)
-    assert stt._settings.model == "nova-3"
+    stt = build_stt(load_settings(BASE), "en")
+    assert isinstance(stt, OpenAISTTService)
+    assert stt._settings.model == "gpt-4o-mini-transcribe"
 
 
 def test_saved_test_voice_is_read_per_user(monkeypatch):

@@ -1228,8 +1228,8 @@ async def _empty() -> list[str]:  # pragma: no cover - trivial
 
 
 # ---- speech-to-text hints ----------------------------------------------------------
-# Names and topic words the transcriber should expect on this call. Deepgram Nova-3 takes them as
-# "key terms" and stops turning "Ayodele" into "I a delay". Taken only from this call's own
+# Names and topic words the transcriber should expect on this call. They go into the gpt-4o-mini-transcribe
+# prompt so "Ayodele" is not heard as "I a delay". Taken only from this call's own
 # context: who is speaking, who is being called, and the proper nouns in the objective.
 _STT_TERM_SKIP = frozenset(
     "tell ask call say please let remind hello hi the this that also and but be make give thanks thank "
@@ -1240,7 +1240,7 @@ STT_KEYTERM_LIMIT = 20
 
 
 def stt_keyterms(context: "CallContext | None") -> list[str]:
-    """Names and proper nouns Deepgram should expect, most important first, capped."""
+    """Names and proper nouns the transcriber should expect, most important first, capped."""
     if context is None:
         return []
     terms: list[str] = []

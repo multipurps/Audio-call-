@@ -210,16 +210,7 @@ def test_engine_routing():
         load_settings({**base, "ASSISTANT_CALL_ENGINE": "banana"}).validate({})
 
 
-def test_deepgram_env_with_a_key_selects_deepgram():
-    env = {"ASSISTANT_BRIDGE_SECRET": "x" * 32, "OPENAI_API_KEY": "sk-test-key-value-123456", "FISH_API_KEY": "fk_test_key_value_123456",
-           "ASSISTANT_STT_PROVIDER": "deepgram", "ASSISTANT_STT_MODEL": "nova-3-general", "DEEPGRAM_API_KEY": "dg_test_key_12345"}
-    s = load_settings(env)
-    s.validate(env)
-    assert s.stt_provider == "deepgram"
-    assert s.resolved_stt_model() == "nova-3-general"
-
-
-def test_deepgram_without_a_key_falls_back_and_the_model_name_does_not_leak():
+def test_deepgram_env_falls_back_to_openai_and_the_model_name_does_not_leak():
     env = {"ASSISTANT_BRIDGE_SECRET": "x" * 32, "OPENAI_API_KEY": "sk-test-key-value-123456", "FISH_API_KEY": "fk_test_key_value_123456",
            "ASSISTANT_STT_PROVIDER": "deepgram", "ASSISTANT_STT_MODEL": "nova-3-general"}
     s = load_settings(env)
@@ -228,10 +219,11 @@ def test_deepgram_without_a_key_falls_back_and_the_model_name_does_not_leak():
     assert s.resolved_stt_model() == "gpt-4o-mini-transcribe", "a Deepgram model name must not reach OpenAI"
 
 
-def test_deepgram_is_available():
+def test_deepgram_is_gone():
     from app import config
 
-    assert "deepgram" in config.STT_PROVIDERS
+    assert "deepgram" not in config.STT_PROVIDERS
+    assert not hasattr(load_settings({"ASSISTANT_BRIDGE_SECRET": "x" * 32, "OPENAI_API_KEY": "sk-test-key-value-123456", "FISH_API_KEY": "fk_test_key_value_123456"}), "deepgram_api_key")
 
 
 def test_live_prompt_is_for_a_speech_model():

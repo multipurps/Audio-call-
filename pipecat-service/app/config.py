@@ -28,7 +28,7 @@ from typing import Mapping
 # actually exists in app/providers.py -- this list is not aspirational.
 # --------------------------------------------------------------------------
 
-STT_PROVIDERS = ("deepgram", "openai", "mock")
+STT_PROVIDERS = ("openai", "mock")
 LLM_PROVIDERS = ("luna", "openai", "mock")
 TTS_PROVIDERS = ("fish", "mock")
 #: Voices a user can try from the app (Profile > Voice > Test a voice). They are
@@ -54,7 +54,6 @@ OPENAI_COMPATIBLE_BASE_URLS = {
 #: manual fallback via ASSISTANT_STT_MODEL=whisper-1 if ever needed.
 #: gpt-6-luna is OpenAI's current general-purpose chat model.
 DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe"
-DEFAULT_DEEPGRAM_STT_MODEL = "nova-3"
 DEFAULT_LLM_MODEL = "gpt-6-luna"
 
 #: Call engines. "live" = OpenAI GPT-Live (one speech-to-speech model: it listens,
@@ -108,15 +107,15 @@ class ConfigError(RuntimeError):
     """Raised for invalid or missing configuration. Always fatal at startup."""
 
 
-def _normalise_stt_provider(value: str | None, *, deepgram_key: str | None = None) -> str:
-    """The configured STT provider. Deepgram needs DEEPGRAM_API_KEY: when it is
-    selected but the key is missing, boot on OpenAI STT with a loud warning
-    instead of refusing to start (a missing key must not take every call down)."""
+def _normalise_stt_provider(value: str | None) -> str:
+    """The configured STT provider. Deepgram was removed: a deployment that still has
+    ASSISTANT_STT_PROVIDER=deepgram set boots on OpenAI STT (gpt-4o-mini-transcribe) with a
+    warning instead of refusing to start, so a stale env var cannot take every call down."""
     provider = (value or DEFAULT_STT_PROVIDER).strip().lower() or DEFAULT_STT_PROVIDER
-    if provider == "deepgram" and not deepgram_key:
+    if provider == "deepgram":
         from loguru import logger
 
-        logger.warning("ASSISTANT_STT_PROVIDER=deepgram but DEEPGRAM_API_KEY is not set; using openai STT")
+        logger.warning("ASSISTANT_STT_PROVIDER=deepgram is no longer supported; using openai STT")
         return "openai"
     return provider
 
@@ -261,7 +260,6 @@ class Settings:
     openai_api_key: str | None = None
     luna_api_key: str | None = None
     fish_api_key: str | None = None
-    deepgram_api_key: str | None = None
 
     # -- conversational behaviour ---------------------------------------
     system_prompt: str | None = None
@@ -321,7 +319,6 @@ class Settings:
             self.openai_api_key,
             self.luna_api_key,
             self.fish_api_key,
-            self.deepgram_api_key,
             self.tts_test_api_key,
             self.supabase_service_role_key,
         )
@@ -408,8 +405,6 @@ class Settings:
             raise ConfigError(
                 "FISH_API_KEY is required when ASSISTANT_TTS_PROVIDER=fish"
             )
-        if self.stt_provider == "deepgram" and not self.deepgram_api_key:
-            raise ConfigError("DEEPGRAM_API_KEY is required when ASSISTANT_STT_PROVIDER=deepgram")
 
     # -- presentation ----------------------------------------------------
 
@@ -436,7 +431,6 @@ class Settings:
             "ttsProvider": self.tts_provider,
             "ttsVoiceId": self.tts_voice_id or "<default>",
             "fishKey": "<set>" if self.fish_api_key else "<unset>",
-            "deepgramKey": "<set>" if self.deepgram_api_key else "<unset>",
             "openaiKey": "<set>" if self.openai_api_key else "<unset>",
             "lunaKey": "<set>" if self.luna_api_key else "<unset>",
             "persistentMemory": self.enable_persistent_memory,
@@ -478,11 +472,7 @@ class Settings:
 
     def resolved_stt_model(self) -> str:
         model = (self.stt_model or "").strip()
-        if self.stt_provider == "deepgram":
-            # An OpenAI model name means nothing to Deepgram.
-            return model if model and not model.lower().startswith(("gpt-", "whisper")) else DEFAULT_DEEPGRAM_STT_MODEL
-        # A Deepgram model name (nova-3...) must never reach OpenAI (e.g. when
-        # Deepgram is selected but its key is missing and STT falls back).
+        # A leftover Deepgram model name (nova-3...) in ASSISTANT_STT_MODEL must never reach OpenAI.
         return model if model and not model.lower().startswith("nova") else DEFAULT_STT_MODEL
 
     @property
@@ -529,9 +519,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ),
         send_lead_secs=_env_float(env, "ASSISTANT_SEND_LEAD_SECS", 0.2, minimum=0.02),
         max_frame_bytes=_env_int(env, "ASSISTANT_MAX_FRAME_BYTES", 64 * 1024, minimum=64),
-        stt_provider=_normalise_stt_provider(
-            _env(env, "ASSISTANT_STT_PROVIDER", DEFAULT_STT_PROVIDER), deepgram_key=_env(env, "DEEPGRAM_API_KEY")
-        ),
+        stt_provider=_normalise_stt_provider(_env(env, "ASSISTANT_STT_PROVIDER", DEFAULT_STT_PROVIDER)),
         stt_model=_env(env, "ASSISTANT_STT_MODEL"),
         llm_provider=_env(env, "ASSISTANT_LLM_PROVIDER", default_llm_prov)
         or default_llm_prov,
@@ -562,7 +550,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         openai_api_key=_env(env, "OPENAI_API_KEY"),
         luna_api_key=luna_key,
         fish_api_key=_env(env, "FISH_API_KEY"),
-        deepgram_api_key=_env(env, "DEEPGRAM_API_KEY"),
         latency_log=_env_bool(env, "ASSISTANT_LATENCY_LOG", True),
         system_prompt=_env(env, "ASSISTANT_SYSTEM_PROMPT"),
         greeting=_env(env, "ASSISTANT_GREETING"),

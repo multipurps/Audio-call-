@@ -175,6 +175,27 @@ DEFAULT_STT_PROMPT = (
 )
 
 
+def stt_prompt_with_names(base: str, names: list[str] | None) -> str:
+    """The transcription prompt plus the names and proper nouns of THIS call, so \"Ayodele\" is spelled
+    right instead of guessed. gpt-4o-mini-transcribe takes this as free-text guidance in `prompt`."""
+    names = [n for n in (names or []) if n]
+    return f"{base} Names that may be spoken: {', '.join(names)}." if names else base
+
+
+def _stt_language(language: str | None) -> Any:
+    """The call's language as Pipecat's Language enum (OpenAI is told the language instead of guessing it).
+    Anything unrecognised falls back to English, which is what the service defaulted to before."""
+    from pipecat.transcriptions.language import Language
+
+    code = (language or "en").strip()
+    for candidate in (code, code.replace("_", "-"), code.split("-")[0].split("_")[0].lower()):
+        try:
+            return Language(candidate)
+        except ValueError:
+            continue
+    return Language.EN
+
+
 def build_stt(settings: Settings, language: str | None = None, keyterms: list[str] | None = None) -> Any:
     """Construct the STT service, or a mock when in mock mode."""
     if settings.mock_mode or settings.stt_provider == "mock":
@@ -195,30 +216,9 @@ def build_stt(settings: Settings, language: str | None = None, keyterms: list[st
             api_key=settings.openai_api_key or settings.luna_api_key,
             settings=OpenAISTTService.Settings(
                 model=settings.resolved_stt_model(),
-                prompt=settings.stt_prompt or DEFAULT_STT_PROMPT,
+                language=_stt_language(language),
+                prompt=stt_prompt_with_names(settings.stt_prompt or DEFAULT_STT_PROMPT, keyterms),
                 temperature=0.0,
-            ),
-        )
-
-    if settings.stt_provider == "deepgram":
-        from pipecat.services.deepgram.stt import DeepgramSTTService
-
-        # Streaming: Deepgram transcribes while the caller is still speaking, so
-        # the transcript is ready the moment the turn ends (OpenAI's endpoint is
-        # batch and only starts after the caller stops).
-        model = settings.resolved_stt_model()
-        return DeepgramSTTService(
-            api_key=settings.deepgram_api_key,
-            sample_rate=settings.bridge_sample_rate,
-            settings=DeepgramSTTService.Settings(
-                model=model,
-                language=language or "en",
-                interim_results=True,
-                smart_format=True,
-                punctuate=True,
-                # Key terms are a Nova-3 feature: the names and proper nouns of THIS call, so they are
-                # spelled right instead of guessed. Other models ignore the hint rather than fail.
-                keyterm=(keyterms or None) if model.lower().startswith("nova-3") else None,
             ),
         )
 

@@ -1,4 +1,4 @@
-"""Deepgram key terms: names and proper nouns of this call, for the classic (custom / test voice) pipeline."""
+"""STT name hints: names and proper nouns of this call go into the gpt-4o-mini-transcribe prompt (classic: custom / test voice pipeline)."""
 
 from __future__ import annotations
 
@@ -36,16 +36,29 @@ def test_terms_are_deduplicated_and_capped():
     assert len({t.lower() for t in terms}) == len(terms)
 
 
-def _deepgram(model: str):
-    settings = Settings(
-        bridge_secret="x" * 32, stt_provider="deepgram", deepgram_api_key="dg-test-key", stt_model=model,
-    )
-    return build_stt(settings, "en", ["Ayodele", "Lekki"])
+def _openai(model: str | None = None, language: str | None = "en", names=None):
+    settings = Settings(bridge_secret="x" * 32, stt_provider="openai", openai_api_key="sk-test-key", stt_model=model)
+    return build_stt(settings, language, names)
 
 
-def test_nova3_receives_the_key_terms():
-    assert _deepgram("nova-3")._settings.keyterm == ["Ayodele", "Lekki"]
+def test_names_go_into_the_transcription_prompt():
+    prompt = _openai(names=["Ayodele", "Lekki"])._settings.prompt
+    assert "Names that may be spoken: Ayodele, Lekki." in prompt
+    assert prompt.startswith("Transcribe the caller's speech only.")
 
 
-def test_other_models_ignore_the_hint_instead_of_failing():
-    assert _deepgram("nova-2")._settings.keyterm is None
+def test_no_names_leaves_the_prompt_unchanged():
+    assert "Names that may be spoken" not in _openai(names=[])._settings.prompt
+
+
+def test_the_model_is_gpt_4o_mini_transcribe_and_a_leftover_nova_name_never_reaches_openai():
+    assert _openai()._settings.model == "gpt-4o-mini-transcribe"
+    assert _openai(model="nova-3")._settings.model == "gpt-4o-mini-transcribe"
+
+
+def test_the_call_language_is_passed_to_openai():
+    # Pipecat stores the language as the code OpenAI receives ("en", "yo").
+    assert _openai(language="yo")._settings.language == "yo"
+    assert _openai(language="en-US")._settings.language == "en"
+    assert _openai(language="not-a-language")._settings.language == "en"
+    assert _openai(language=None)._settings.language == "en"
