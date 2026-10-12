@@ -43,7 +43,8 @@ test('feature phones render only real uploads, and videos pause when scrolled aw
   for (const slot of ['how_it_works', 'your_voice', 'live_call_video', 'call_summary', 'call_in_app', 'import_chats', 'channels'])
     assert.match(html, new RegExp(`data-slot="${slot}"`));
   assert.ok(!/class="mk|class="bub/.test(html), 'no placeholder mock content');
-  assert.match(js, /IntersectionObserver[\s\S]*v\.play\(\)[\s\S]*v\.pause\(\)/);
+  assert.match(js, /IntersectionObserver[\s\S]*tryPlay\(\)[\s\S]*v\.pause\(\)/);
+  assert.match(read("sw.js"), /req\.destination === .video./, "service worker must not intercept video");
   assert.match(html, /Octopusfur/);
 });
 

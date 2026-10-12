@@ -16,6 +16,9 @@ function cacheable(url) {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
+  // Video/audio and any Range request go straight to the network: Safari needs real 206 partial responses,
+  // and a worker answering them with 200 or opaque bodies leaves the player black on iPhone.
+  if (req.headers.has('range') || req.destination === 'video' || req.destination === 'audio') return;
   const mode = cacheable(new URL(req.url));
   if (!mode) return;
   e.respondWith((async () => {

@@ -45,14 +45,23 @@ async function loadMedia() {
     let demoUsed = false;
     const videoRow = (slot) => (mediaBySlot.get(slot) || []).find((r) => !isImg(r)) || (slot === 'live_call_video' ? mediaBySlot.get('demo_video')?.[0] : null);
     const mountVideo = (ph, row, poster) => {
-      const v = mk('video', { src: allowedMedia(row.url), muted: true, loop: true, playsInline: true, preload: 'auto' });
+      // The card stays hidden until the browser has the video's metadata, so there is never an empty black card.
+      const v = mk('video', { muted: true, loop: true, playsInline: true, preload: 'auto', autoplay: false });
+      v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', ''); v.disableRemotePlayback = true;
+      v.src = allowedMedia(row.url) + '#t=0.001';
       if (poster) v.poster = allowedMedia(poster.url);
-      v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
       const snd = mk('button', { type: 'button', className: 'vsound', textContent: 'Tap for sound' });
-      snd.addEventListener('click', () => { v.muted = !v.muted; snd.textContent = v.muted ? 'Tap for sound' : 'Sound on'; });
-      v.addEventListener('loadedmetadata', () => { if (v.videoWidth > v.videoHeight) ph.classList.add('wide'); });
-      ph.replaceChildren(v, snd); reveal(ph);
-      new IntersectionObserver((es) => es.forEach((en) => { if (en.isIntersecting) v.play().catch(() => {}); else v.pause(); }), { threshold: .4 }).observe(ph);
+      let visible = false;
+      const tryPlay = () => { if (visible) v.play().then(() => { snd.textContent = v.muted ? 'Tap for sound' : 'Sound on'; }).catch(() => { snd.textContent = 'Tap to play'; }); };
+      snd.addEventListener('click', () => { if (v.paused) { v.play().catch(() => {}); } else { v.muted = !v.muted; } snd.textContent = v.muted ? 'Tap for sound' : 'Sound on'; });
+      let shown = false;
+      const show = () => { if (shown) return; shown = true; if (v.videoWidth > v.videoHeight) ph.classList.add('wide'); reveal(ph); tryPlay(); };
+      v.addEventListener('loadedmetadata', show); v.addEventListener('loadeddata', show); v.addEventListener('canplay', show);
+      v.addEventListener('error', () => { ph.parentElement.hidden = true; ph.closest('.feature').classList.add('nophone'); });
+      ph.replaceChildren(v, snd); ph.classList.add('has-shot');
+      new IntersectionObserver((es) => es.forEach((en) => { visible = en.isIntersecting; if (visible) tryPlay(); else v.pause(); }), { threshold: .35 }).observe(ph);
+      // iOS sometimes holds autoplay until the first touch; start the visible video then.
+      addEventListener('touchend', () => tryPlay(), { passive: true });
     };
     document.querySelectorAll('.phone[data-slot]').forEach((ph) => {
       const slot = ph.dataset.slot, poster = pick(slot);
@@ -230,7 +239,7 @@ document.fonts.ready.then(fit); addEventListener('resize', fit);
 // Scroll animation: word-by-word text fill, staggered rises, hero parallax, screenshot scale, footer wordmark rise
 (() => {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) { document.querySelectorAll('.rise,.feature,[data-reveal]').forEach((e) => e.classList.add('in')); return; }
-  document.querySelectorAll('[data-words]').forEach((el) => { el.innerHTML = el.textContent.trim().split(/\s+/).map((w) => `<span class="wd">${w}</span>`).join(' '); });
+  document.querySelectorAll('[data-words], .txt h2, .txt p').forEach((el) => { el.innerHTML = el.textContent.trim().split(/\s+/).map((w) => `<span class="wd">${w}</span>`).join(' '); });
   const pio = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); pio.unobserve(e.target); } }), { threshold: .18 });
   document.querySelectorAll('[data-reveal]').forEach((p) => pio.observe(p));
   const fio = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); fio.unobserve(e.target); } }), { threshold: .3 });
@@ -239,7 +248,7 @@ document.fonts.ready.then(fit); addEventListener('resize', fit);
   document.querySelectorAll('.rise').forEach((el) => io.observe(el));
   const clamp = (n) => Math.min(1, Math.max(0, n));
   const hero = document.querySelector('.hero'), heroBg = document.querySelector('.hero-bg'), heroCopy = document.querySelector('.hero-copy');
-  const words = [...document.querySelectorAll('[data-words]')].map((el) => ({ el, w: [...el.querySelectorAll('.wd')] }));
+  const words = [...document.querySelectorAll('[data-words], .txt h2, .txt p')].map((el) => ({ el, w: [...el.querySelectorAll('.wd')] }));
   const foot = document.querySelector('.foot-mark span');
   let queued = false;
   const frame = () => {
