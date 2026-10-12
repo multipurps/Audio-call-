@@ -236,7 +236,7 @@ document.fonts.ready.then(fit); addEventListener('resize', fit);
   const fio = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); fio.unobserve(e.target); } }), { threshold: .3 });
   document.querySelectorAll('.feature').forEach((f) => fio.observe(f));
   const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: .12, rootMargin: '0px 0px -6% 0px' });
-  document.querySelectorAll('.rise').forEach((el, i) => { if (!el.style.getPropertyValue('--d')) el.style.setProperty('--d', `${(i % 3) * .1}s`); io.observe(el); });
+  document.querySelectorAll('.rise').forEach((el) => io.observe(el));
   const clamp = (n) => Math.min(1, Math.max(0, n));
   const hero = document.querySelector('.hero'), heroBg = document.querySelector('.hero-bg'), heroCopy = document.querySelector('.hero-copy');
   const words = [...document.querySelectorAll('[data-words]')].map((el) => ({ el, w: [...el.querySelectorAll('.wd')] }));
@@ -245,9 +245,16 @@ document.fonts.ready.then(fit); addEventListener('resize', fit);
   const frame = () => {
     queued = false; const vh = innerHeight, y = scrollY;
     const hp = clamp(y / (hero.offsetHeight || vh));
-    heroBg.style.transform = `translate3d(0,${y * .25}px,0) scale(${1 + hp * .12})`;
-    heroCopy.style.transform = `translate3d(0,${y * .22}px,0)`; heroCopy.style.opacity = 1 - hp * 1.15;
-    document.querySelectorAll('.phone').forEach((p) => { const r = p.getBoundingClientRect(); p.style.setProperty('--fy', `${((r.top + r.height / 2 - vh / 2) * -.07).toFixed(1)}px`); });
+    heroBg.style.transform = `scale(${1 + hp * .06})`;
+    heroCopy.style.opacity = (1 - hp * 1.2).toFixed(3);
+    for (const { el, w } of words) {
+      const r = el.getBoundingClientRect(), p = clamp((vh * .88 - r.top) / (vh * .46 + r.height));
+      w.forEach((s, i) => { s.style.opacity = (.28 + .72 * clamp(p * (w.length + 3) - i)).toFixed(3); });
+    }
+    document.querySelectorAll('.phone').forEach((p) => {
+      const r = p.getBoundingClientRect(), t = clamp((vh * .98 - r.top) / (vh * .4)), k = 1 - Math.pow(1 - t, 3);
+      p.style.setProperty('--o', k.toFixed(3)); p.style.setProperty('--sc', (.95 + .05 * k).toFixed(3)); p.parentElement.style.setProperty('--g', k.toFixed(3));
+    });
     if (foot) { const r = foot.parentElement.getBoundingClientRect(), p = clamp((vh - r.top) / (r.height * 1.2)); foot.style.setProperty('--ty', `${(1 - p) * 60}%`); foot.style.setProperty('--o', p.toFixed(3)); }
   };
   const ask = () => { if (!queued) { queued = true; requestAnimationFrame(frame); } };
