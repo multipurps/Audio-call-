@@ -166,6 +166,8 @@ async function savePrefs(req, res, supabase, userId) {
   if (Object.keys(row).length <= 2) return res.status(400).json({ error: 'Nothing to save' });
   const { error } = await supabase.from('voice_preferences').upsert(row, { onConflict: 'user_id' });
   if (error) return res.status(500).json({ error: 'Could not save voice settings', detail: error.message });
+  // Choosing a Standard or Custom voice switches the test voice off, so exactly one voice is in charge.
+  await supabase.from('voice_test_settings').update({ active: false }).eq('user_id', userId).then(() => {}, () => {});
   return getPrefs(req, res, supabase, userId);
 }
 
@@ -189,11 +191,11 @@ const TEST_API_KEY = /^\S{12,200}$/;
 
 async function testVoice(req, res, supabase, userId) {
   const read = async () => {
-    const { data } = await supabase.from('voice_test_settings').select('provider,voice_id,api_key').eq('user_id', userId).maybeSingle();
+    const { data } = await supabase.from('voice_test_settings').select('*').eq('user_id', userId).maybeSingle();
     return data || null;
   };
   const view = (row) => (row
-    ? { active: true, provider: row.provider, voiceId: row.voice_id, hasKey: true, keyTail: String(row.api_key).slice(-4) }
+    ? { active: row.active !== false, provider: row.provider, voiceId: row.voice_id, hasKey: true, keyTail: String(row.api_key).slice(-4) }
     : { active: false, provider: null, voiceId: null, hasKey: false, keyTail: null });
 
   if (req.method === 'GET') return res.status(200).json(view(await read()));
@@ -206,6 +208,14 @@ async function testVoice(req, res, supabase, userId) {
 
   if (req.method === 'PUT' || req.method === 'POST') {
     const body = req.body || {};
+    // Switch it on or off without touching the saved key.
+    if (typeof body.active === 'boolean' && !body.provider && !body.voiceId && !body.apiKey) {
+      const existing = await read();
+      if (!existing) return res.status(400).json({ error: 'No test voice saved yet' });
+      const { error } = await supabase.from('voice_test_settings').update({ active: body.active, updated_at: new Date().toISOString() }).eq('user_id', userId);
+      if (error) return res.status(500).json({ error: 'Could not change the test voice (has migration 039 been run?)' });
+      return res.status(200).json(view(await read()));
+    }
     const provider = String(body.provider || '').toLowerCase();
     if (!TEST_PROVIDERS.includes(provider)) return res.status(400).json({ error: 'Provider must be ElevenLabs or Cartesia' });
     const voiceId = String(body.voiceId || '').trim();
@@ -222,7 +232,7 @@ async function testVoice(req, res, supabase, userId) {
     }
 
     const { error } = await supabase.from('voice_test_settings').upsert(
-      { user_id: userId, provider, voice_id: voiceId, api_key: apiKey, updated_at: new Date().toISOString() },
+      { user_id: userId, provider, voice_id: voiceId, api_key: apiKey, active: true, updated_at: new Date().toISOString() },
       { onConflict: 'user_id' },
     );
     if (error) return res.status(500).json({ error: 'Could not save the test voice' });

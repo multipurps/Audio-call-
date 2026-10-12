@@ -1085,6 +1085,7 @@
     <div class="segmented" id="voiceTypeGroup" style="margin-bottom:6px;">
       <button class="segmentedBtn active" data-vtype="standard">Standard</button>
       <button class="segmentedBtn" data-vtype="custom">Custom</button>
+      <button class="segmentedBtn" data-vtype="test">Test</button>
     </div>
 
     <div id="voicePaneStandard">
@@ -1116,24 +1117,27 @@
       <audio id="voicePreviewAudio" style="display:none;"></audio>
     </div>
 
-    <audio id="liveVoiceAudio" style="display:none;"></audio>
+    <div id="voicePaneTest" class="hidden">
+      <div class="sectionLabel">Test a voice</div>
+      <p class="hint" style="margin:0 0 12px;">Try ElevenLabs or Cartesia on your calls. While it is on, GPT-Live and your cloned voice are not used. Your key is saved on the server, never shown again, and only your calls use it.</p>
+      <div class="field"><label>Provider</label>
+        <select id="testVoiceProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option></select>
+      </div>
+      <div class="field"><label>Voice ID</label>
+        <div class="inputWrap"><input type="text" id="testVoiceId" placeholder="Paste the voice ID" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+      </div>
+      <div class="field"><label>API key</label>
+        <div class="inputWrap"><input type="password" id="testVoiceKey" placeholder="Paste your API key" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+      </div>
+      <button class="primaryBtn" id="testVoiceSaveBtn" style="margin-top:8px;">Save and use this voice</button>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button class="secondaryBtn hidden" id="testVoiceOffBtn">Turn off</button>
+        <button class="secondaryBtn hidden" id="testVoiceRemoveBtn">Delete saved key</button>
+      </div>
+      <p class="hint" id="testVoiceStatus" style="margin:10px 4px 0; min-height:18px;"></p>
+    </div>
 
-    <div class="sectionLabel" style="margin-top:30px;">Test a voice</div>
-    <p class="hint" style="margin:0 0 12px;">Try ElevenLabs or Cartesia on your calls. Your key is saved on the server, never shown again, and only your calls use it. Remove it to go back to your normal voice.</p>
-    <div class="field"><label>Provider</label>
-      <select id="testVoiceProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option></select>
-    </div>
-    <div class="field"><label>Voice ID</label>
-      <div class="inputWrap"><input type="text" id="testVoiceId" placeholder="Paste the voice ID" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
-    </div>
-    <div class="field"><label>API key</label>
-      <div class="inputWrap"><input type="password" id="testVoiceKey" placeholder="Paste your API key" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
-    </div>
-    <div style="display:flex; gap:10px; margin-top:6px;">
-      <button class="secondaryBtn" id="testVoiceSaveBtn">Save test voice</button>
-      <button class="secondaryBtn hidden" id="testVoiceRemoveBtn">Remove</button>
-    </div>
-    <p class="hint" id="testVoiceStatus" style="margin:10px 4px 0; min-height:18px;"></p>
+    <audio id="liveVoiceAudio" style="display:none;"></audio>
 
     <button class="primaryBtn" id="voiceApplyBtn" style="margin-top:22px;" disabled>Apply Changes</button>
     <p class="hint" id="voiceApplyStatus" style="margin:10px 4px 0; min-height:18px;"></p>

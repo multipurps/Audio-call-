@@ -4418,14 +4418,14 @@ const PAUSE_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5
 
 function voiceIsDirty() {
   if (!voicePrefs) return false;
-  const savedType = voicePrefs.useCustomVoice ? 'custom' : 'standard';
-  if (voicePending.type !== savedType) return true;
+  if (voicePending.type === 'test') return false; // the test voice is saved by its own button
+  if (voicePending.type !== savedVoiceType()) return true;
   return voicePending.type === 'standard' && voicePending.liveVoiceId !== voicePrefs.liveVoiceId;
 }
 
 function renderVoiceSettings() {
   if (!voicePrefs) return;
-  const savedName = voicePrefs.useCustomVoice ? 'Your cloned voice' : (voicePrefs.liveVoiceName || 'Not chosen yet');
+  const savedName = testVoice?.active ? `${TEST_VOICE_NAMES[testVoice.provider] || 'Test'} test voice` : (voicePrefs.useCustomVoice ? 'Your cloned voice' : (voicePrefs.liveVoiceName || 'Not chosen yet'));
   $('currentVoiceName').textContent = savedName;
   const list = $('liveVoiceList');
   list.textContent = '';
@@ -4443,7 +4443,7 @@ function renderVoiceSettings() {
     list.appendChild(card);
   }
   $('voicePreviewRow').classList.toggle('selected', voicePending.type === 'custom');
-  $('voiceApplyBtn').disabled = !voiceIsDirty() || (voicePending.type === 'standard' && !voicePending.liveVoiceId);
+  $('voiceApplyBtn').disabled = voicePending.type === 'test' || !voiceIsDirty() || (voicePending.type === 'standard' && !voicePending.liveVoiceId);
 }
 
 async function loadVoicePrefs() {
@@ -4454,59 +4454,87 @@ async function loadVoicePrefs() {
   voicePending = { type: custom ? 'custom' : 'standard', liveVoiceId: voicePrefs.liveVoiceId };
   renderVoiceSettings();
   prefetchLivePreviews(voicePrefs.voices || []);
-  loadTestVoice();
+  await loadTestVoice();
+  if (testVoice?.active) showVoiceTab('test');
 }
 
 // ---- Test a voice (ElevenLabs / Cartesia) ---------------------------------------------------
-// The key is sent once to the server and never comes back; the form only ever shows its last 4 characters.
+// Its own option next to Standard and Custom. While it is on, GPT-Live and the cloned voice are
+// not used, and the Standard/Custom ticks clear. The key goes to the server once and never comes
+// back; the form only shows its last 4 characters.
 const TEST_VOICE_NAMES = { elevenlabs: 'ElevenLabs', cartesia: 'Cartesia' };
+let testVoice = null;
+function savedVoiceType() {
+  if (testVoice?.active) return 'test';
+  return voicePrefs?.useCustomVoice ? 'custom' : 'standard';
+}
 function renderTestVoice(t) {
-  const active = !!t?.active;
-  if (active) { $('testVoiceProvider').value = t.provider; $('testVoiceId').value = t.voiceId || ''; }
+  testVoice = t || null;
+  const has = !!t?.hasKey;
+  if (has) { $('testVoiceProvider').value = t.provider; $('testVoiceId').value = t.voiceId || ''; }
   $('testVoiceKey').value = '';
-  $('testVoiceKey').placeholder = active ? `Saved key ending ${t.keyTail} (leave empty to keep it)` : 'Paste your API key';
-  $('testVoiceRemoveBtn').classList.toggle('hidden', !active);
-  $('testVoiceStatus').textContent = active
-    ? `Calls now use your ${TEST_VOICE_NAMES[t.provider] || t.provider} voice.`
-    : '';
+  $('testVoiceKey').placeholder = has ? `Saved key ending ${t.keyTail} (leave empty to keep it)` : 'Paste your API key';
+  $('testVoiceOffBtn').classList.toggle('hidden', !t?.active);
+  $('testVoiceRemoveBtn').classList.toggle('hidden', !has);
+  $('testVoiceSaveBtn').textContent = t?.active ? 'Save changes' : 'Save and use this voice';
+  $('testVoiceStatus').textContent = t?.active
+    ? `On: calls use your ${TEST_VOICE_NAMES[t.provider] || t.provider} voice. GPT-Live is off.`
+    : (has ? 'Saved but off. Calls use your Standard or Custom voice.' : '');
+  if (t?.active) voicePending = { type: 'test', liveVoiceId: voicePrefs?.liveVoiceId || null };
+  else if (voicePending.type === 'test') {
+    const custom = voicePrefs?.customVoice?.ready && voicePrefs?.useCustomVoice;
+    voicePending = { type: custom ? 'custom' : 'standard', liveVoiceId: voicePrefs?.liveVoiceId || null };
+  }
+  renderVoiceSettings();
+}
+async function testVoiceRequest(method, body) {
+  const resp = await authedFetch('/api/voice-clone?action=test-voice', {
+    method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await resp.json().catch(() => ({}));
+  return { ok: resp.ok, data };
 }
 async function loadTestVoice() {
   try {
-    const resp = await authedFetch('/api/voice-clone?action=test-voice');
-    if (resp.ok) renderTestVoice(await resp.json());
+    const { ok, data } = await testVoiceRequest('GET');
+    if (ok) renderTestVoice(data);
   } catch { /* the rest of the voice screen still works */ }
 }
 $('testVoiceSaveBtn').addEventListener('click', async () => {
   const btn = $('testVoiceSaveBtn'); const status = $('testVoiceStatus');
   btn.disabled = true; status.textContent = 'Saving…';
   try {
-    const resp = await authedFetch('/api/voice-clone?action=test-voice', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: $('testVoiceProvider').value, voiceId: $('testVoiceId').value, apiKey: $('testVoiceKey').value }),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) { status.textContent = data.error || 'Could not save.'; return; }
+    const { ok, data } = await testVoiceRequest('PUT', { provider: $('testVoiceProvider').value, voiceId: $('testVoiceId').value, apiKey: $('testVoiceKey').value });
+    if (!ok) { status.textContent = data.error || 'Could not save.'; return; }
     renderTestVoice(data);
-    status.textContent = `Saved. Your next call speaks this ${TEST_VOICE_NAMES[data.provider] || ''} voice.`;
+    $('voiceApplyStatus').textContent = '';
   } catch { status.textContent = 'Could not save. Check your connection.'; }
   finally { btn.disabled = false; }
 });
-$('testVoiceRemoveBtn').addEventListener('click', async () => {
-  const status = $('testVoiceStatus');
-  status.textContent = 'Removing…';
+$('testVoiceOffBtn').addEventListener('click', async () => {
+  const status = $('testVoiceStatus'); status.textContent = 'Turning off…';
   try {
-    const resp = await authedFetch('/api/voice-clone?action=test-voice', { method: 'DELETE' });
-    if (!resp.ok) { status.textContent = 'Could not remove.'; return; }
+    const { ok, data } = await testVoiceRequest('PUT', { active: false });
+    if (!ok) { status.textContent = data.error || 'Could not turn off.'; return; }
+    renderTestVoice(data);
+  } catch { status.textContent = 'Could not turn off. Check your connection.'; }
+});
+$('testVoiceRemoveBtn').addEventListener('click', async () => {
+  const status = $('testVoiceStatus'); status.textContent = 'Deleting…';
+  try {
+    const { ok, data } = await testVoiceRequest('DELETE');
+    if (!ok) { status.textContent = data.error || 'Could not delete.'; return; }
     $('testVoiceId').value = '';
-    renderTestVoice(await resp.json());
-    status.textContent = 'Removed. Calls use your normal voice again.';
-  } catch { status.textContent = 'Could not remove. Check your connection.'; }
+    renderTestVoice(data);
+    status.textContent = 'Saved key deleted.';
+  } catch { status.textContent = 'Could not delete. Check your connection.'; }
 });
 
 function showVoiceTab(which) {
   document.querySelectorAll('#voiceTypeGroup .segmentedBtn').forEach((b) => b.classList.toggle('active', b.dataset.vtype === which));
   $('voicePaneStandard').classList.toggle('hidden', which !== 'standard');
   $('voicePaneCustom').classList.toggle('hidden', which !== 'custom');
+  $('voicePaneTest').classList.toggle('hidden', which !== 'test');
 }
 document.querySelectorAll('#voiceTypeGroup .segmentedBtn').forEach((b) => b.addEventListener('click', () => { haptic(); showVoiceTab(b.dataset.vtype); }));
 $('voicePreviewRow').addEventListener('click', () => {
@@ -4619,7 +4647,9 @@ $('voiceApplyBtn').addEventListener('click', async () => {
   if (!resp.ok) { status.textContent = data.error || 'Could not save.'; renderVoiceSettings(); return; }
   voicePrefs = data;
   status.textContent = 'Saved. Emysa will use this voice on your next call.';
+  if (testVoice?.active) { testVoice = { ...testVoice, active: false }; }
   renderVoiceSettings();
+  loadTestVoice();
 });
 
 async function uploadVoiceClip(blob, mimeType, statusEl = $('voiceRecordStatus')) {

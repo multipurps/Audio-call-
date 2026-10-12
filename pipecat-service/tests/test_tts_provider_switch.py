@@ -122,3 +122,23 @@ def test_missing_test_table_does_not_lose_normal_prefs(monkeypatch):
     s = dataclasses.replace(load_settings(dict(BASE)), supabase_url="https://x.supabase.co", supabase_service_role_key="s" * 30)
     prefs = asyncio.run(call_context.fetch_voice_prefs(s, "user-1", "sess-1"))
     assert prefs is not None and prefs.live_voice_id == "marin" and prefs.test_tts_provider is None
+
+
+def test_a_switched_off_test_voice_is_not_used(monkeypatch):
+    from app import call_context
+
+    class FakeRest:
+        def __init__(self, *a, **k): pass
+        async def aclose(self): pass
+        async def select(self, table, **k):
+            return {
+                "voice_preferences": [{"live_voice_id": "marin", "use_custom_voice": False}],
+                "voice_profiles": [],
+                "voice_test_settings": [{"provider": "elevenlabs", "voice_id": "vendor-voice-123", "api_key": "user-key-abcdefgh", "active": False}],
+            }[table]
+
+    monkeypatch.setattr(call_context, "_Rest", FakeRest)
+    s = dataclasses.replace(load_settings(dict(BASE)), supabase_url="https://x.supabase.co", supabase_service_role_key="s" * 30)
+    prefs = asyncio.run(call_context.fetch_voice_prefs(s, "user-1", "sess-1"))
+    assert prefs.test_tts_provider is None and prefs.test_tts_api_key is None
+    assert prefs.live_voice_id == "marin"

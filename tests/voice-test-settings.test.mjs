@@ -9,7 +9,8 @@ const fakeDb = {
       select() { return q; }, eq() { return q; },
       maybeSingle: async () => ({ data: row }),
       delete() { return { eq: async () => { row = null; return {}; } }; },
-      upsert: async (r) => { row = { provider: r.provider, voice_id: r.voice_id, api_key: r.api_key }; return {}; },
+      update(v) { return { eq: async () => { if (row) Object.assign(row, v); return {}; } }; },
+      upsert: async (r) => { row = { provider: r.provider, voice_id: r.voice_id, api_key: r.api_key, active: r.active }; return {}; },
     };
     return q;
   },
@@ -54,4 +55,18 @@ test('bad input is refused', async () => {
   assert.equal((await call('PUT', { provider: 'cartesia', voiceId: 'bad id!', apiKey: 'k'.repeat(20) })).code, 400);
   assert.equal((await call('PUT', { provider: 'cartesia', voiceId: 'VoiceId12345', apiKey: 'short' })).code, 400);
   assert.equal(row, null);
+});
+
+test('turning it off keeps the key; saving again turns it back on', async () => {
+  row = null;
+  await call('PUT', { provider: 'cartesia', voiceId: 'VoiceId12345', apiKey: 'sk_secret_abcdefgh1234' });
+  let r = await call('PUT', { active: false });
+  assert.equal(r.code, 200);
+  assert.equal(r.body.active, false);
+  assert.equal(r.body.hasKey, true);
+  assert.equal(row.api_key, 'sk_secret_abcdefgh1234');
+  r = await call('PUT', { provider: 'cartesia', voiceId: 'VoiceId12345', apiKey: '' });
+  assert.equal(r.body.active, true);
+  row = null;
+  assert.equal((await call('PUT', { active: false })).code, 400, 'nothing saved to switch off');
 });
