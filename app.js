@@ -6,6 +6,7 @@ import { describeMonitorMessage, describeMonitorClose, noAudioMessage, MONITOR_N
 import { DEFAULT_MOOD, selectMood, toggleArgue, argueVisible, moodButtonLabel, moodPayload, moodChipVisible } from './lib/moodPicker.js';
 import { answeredCallPill, assistantCallPill, listenInPill, liveCallView, endedCallLabel, formatCallTimer, TERMINAL_STATUSES } from './lib/callStatus.js';
 import { userError, friendlyAccountName } from './lib/userFacing.js';
+import * as Tutorial from './lib/tutorial.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // Installed PWAs (especially iOS "Add to Home Screen") can keep showing a
@@ -339,6 +340,7 @@ async function enterApp(session) {
   loadHome(true);
   loadNavAvatar();
   resumePaymentCheck();
+  maybeStartFirstCallTutorial();
 }
 
 async function redeemPendingReferral() {
@@ -405,6 +407,8 @@ supabase.auth.onAuthStateChange((_event, session) => {
     currentUser = null;
     currentSession = null;
     homeChatInitializedFor = null;
+    tutorialAutoFor = null;
+    Tutorial.stop();
     stopMessagePolling();
     $('authBoot').style.display = 'none';
     $('pendingBox').style.display = 'none';
@@ -1808,6 +1812,7 @@ $('addContactBtn').addEventListener('click', async () => {
     $('contactStatus').textContent = 'Contact added.';
     $('contactEditor').open = false;
     await loadContacts();
+    document.dispatchEvent(new CustomEvent('emysa:contact-saved', { detail: { name } }));
   } catch (err) {
     $('contactStatus').textContent = err.message || 'Could not save contact. Please try again.';
   } finally {
@@ -3665,6 +3670,7 @@ async function openAddTime() {
   addTimeQty = 1;
   $('addTimeStatus').textContent = '';
   $('addTimeOpen').classList.add('hidden');
+  $('addTimeCopy').classList.add('hidden');
   $('addTimeScreen').classList.remove('hidden');
   renderAddTime();
   if (!homeBalance?.packs) { await loadBalance(); renderAddTime(); }
@@ -3673,7 +3679,7 @@ function closeAddTime() { $('addTimeScreen').classList.add('hidden'); }
 
 // One payment launcher for both add-time and premium: the server decides the price from
 // the quantity or plan it is given, and credits only after Bachs confirms.
-async function launchCheckout(body, { buy, status, link }) {
+async function launchCheckout(body, { buy, status, link, copy }) {
   buy.disabled = true;
   status.textContent = 'Opening secure payment…';
   try {
@@ -3685,6 +3691,7 @@ async function launchCheckout(body, { buy, status, link }) {
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || !data.url) throw new Error(data.error || 'Could not open payment. Try again.');
     localStorage.setItem(PAY_FLAG, String(Date.now()));
+    if (copy) { copy.dataset.url = data.url; copy.classList.remove('hidden'); }
     // No 'noopener' feature: it makes window.open return null, which would look
     // like a blocked window. The opener link is cut by hand instead.
     const opened = window.open(data.url, '_blank');
@@ -3705,7 +3712,7 @@ async function launchCheckout(body, { buy, status, link }) {
     buy.disabled = false;
   }
 }
-const startCheckout = () => launchCheckout({ quantity: addTimeQty }, { buy: $('addTimeBuy'), status: $('addTimeStatus'), link: $('addTimeOpen') });
+const startCheckout = () => launchCheckout({ quantity: addTimeQty }, { buy: $('addTimeBuy'), status: $('addTimeStatus'), link: $('addTimeOpen'), copy: $('addTimeCopy') });
 
 // ---------- Premium ----------
 let premiumMonths = 12;
@@ -3762,13 +3769,14 @@ function renderPlans() {
 async function openPremium() {
   $('premiumStatus').textContent = '';
   $('premiumOpen').classList.add('hidden');
+  $('premiumCopy').classList.add('hidden');
   $('premiumScreen').classList.remove('hidden');
   if (!homeBalance?.plans) await loadBalance();
   renderPlans();
 }
 const closePremium = () => $('premiumScreen').classList.add('hidden');
 
-$('premiumBuy').addEventListener('click', () => launchCheckout({ plan: premiumMonths }, { buy: $('premiumBuy'), status: $('premiumStatus'), link: $('premiumOpen') }));
+$('premiumBuy').addEventListener('click', () => launchCheckout({ plan: premiumMonths }, { buy: $('premiumBuy'), status: $('premiumStatus'), link: $('premiumOpen'), copy: $('premiumCopy') }));
 $('premiumClose').addEventListener('click', closePremium);
 $('premiumTerms').addEventListener('click', () => openSheet('sheet-terms'));
 $('premiumPrivacy').addEventListener('click', () => openSheet('sheet-privacy'));
@@ -3972,6 +3980,122 @@ $('callAnsweringBtn').addEventListener('click', () => { loadCallAnswering(); ope
 $('memoriesBtn').addEventListener('click', () => { loadMemories(); openSheet('sheet-memories'); });
 $('callSettingsBtn').addEventListener('click', () => { loadCallSettings(); openSheet('sheet-call-settings'); });
 $('contactsBtn').addEventListener('click', () => { closeSheets(); showTab('contacts'); });
+
+// ---------- Guided tutorials (engine: lib/tutorial.js) ----------
+// First call: Profile > Contacts > save a contact > Chat > first request > mood > send.
+// A calling line is already required before Home opens (onboardingStep), so nothing here checks for one.
+// Minutes are deliberately not checked either: if the balance is empty, the call attempt sends the person
+// to Add time (needsTopUp) with the tutorial already behind them.
+const FIRST_CALL_TUTORIAL = 'first-call';
+let tutorialAutoFor = null;
+
+function tutorialEnsureTab(name) {
+  if (!$(`screen-${name}`).classList.contains('active')) showTab(name);
+}
+// Decided once per run, so saving a contact mid-tutorial does not change which steps (and what count) apply.
+async function tutorialHadContacts(ctx) {
+  if (ctx.data.hadContacts === undefined) {
+    if (!contactsLoaded) await loadContacts();
+    ctx.data.hadContacts = savedContacts.length > 0;
+  }
+  return ctx.data.hadContacts;
+}
+const tutorialContactName = (ctx) => ctx.data.contactName || savedContacts[0]?.name || '';
+
+Tutorial.register(FIRST_CALL_TUTORIAL, {
+  version: 1,
+  steps: [
+    {
+      id: 'profile-tab', target: '.tabBtn[data-tab="profile"]', side: 'top', advanceOn: 'click',
+      text: 'Open Profile.',
+      onEnter: () => tutorialEnsureTab('home'),
+    },
+    {
+      id: 'contacts-row', target: '#contactsBtn', advanceOn: 'click',
+      text: 'Open Contacts.',
+      onEnter: () => tutorialEnsureTab('profile'),
+    },
+    {
+      id: 'add-button', target: '#contactsAddBtn', side: 'bottom', advanceOn: 'click',
+      text: 'Tap + to add someone.',
+      skipIf: (ctx) => tutorialHadContacts(ctx),
+      onEnter: () => tutorialEnsureTab('contacts'),
+    },
+    {
+      id: 'contact-fields', target: '#contactEditor', interactive: true,
+      text: 'Enter their name and phone number with country code, like +1 415 555 2671.',
+      skipIf: (ctx) => tutorialHadContacts(ctx),
+      onEnter: () => { tutorialEnsureTab('contacts'); $('contactEditor').open = true; },
+    },
+    {
+      id: 'save-contact', target: '#addContactBtn', side: 'top',
+      advanceOn: { event: 'emysa:contact-saved' },
+      onEvent: (e, ctx) => { ctx.data.contactName = e.detail?.name || ''; },
+      gate: () => savedContacts.length > 0,
+      text: 'Tap Add contact to save them.',
+      skipIf: (ctx) => tutorialHadContacts(ctx),
+      onEnter: () => { tutorialEnsureTab('contacts'); $('contactEditor').open = true; },
+    },
+    {
+      id: 'chat-tab', target: '.tabBtn[data-tab="chat"]', side: 'top', advanceOn: 'click',
+      text: 'Now open Chat.',
+      onEnter: () => tutorialEnsureTab('contacts'),
+    },
+    {
+      id: 'first-request', target: '#briefInput', avoid: ['#moodFloat'], interactive: true, side: 'top',
+      text: (ctx) => `This is your first request. Emysa will call ${tutorialContactName(ctx)} for you.`,
+      onEnter: (ctx) => {
+        tutorialEnsureTab('chat');
+        const name = tutorialContactName(ctx);
+        const input = $('briefInput');
+        // Not focused on purpose: the keyboard would cover the tooltip. Set only if the box is empty
+        // so Back/Next never overwrites something the person typed.
+        if (name && !input.value.trim()) {
+          input.value = `Call ${name} and tell them I said hello.`;
+          input.dispatchEvent(new Event('input'));
+        }
+      },
+    },
+    {
+      id: 'mood', target: '#moodFloat', interactive: true, side: 'top',
+      text: 'Choose a mood for the call.',
+      onEnter: () => tutorialEnsureTab('chat'),
+    },
+    {
+      id: 'send', target: '#sendBtn', avoid: ['#moodFloat'], side: 'top', advanceOn: 'click',
+      text: 'Tap send to place your first call.',
+      onEnter: () => tutorialEnsureTab('chat'),
+    },
+  ],
+});
+
+// Starts once, on Home, for someone with no saved contacts yet. Waits out the cookie notice, open
+// dialogs and sheets. Existing users who already have contacts only see it from Profile > Replay tutorial.
+async function maybeStartFirstCallTutorial() {
+  const userId = currentUser?.id;
+  if (!userId || tutorialAutoFor === userId) return;
+  tutorialAutoFor = userId;
+  if (Tutorial.isCompleted(FIRST_CALL_TUTORIAL, { userId })) return;
+  for (let tries = 0; ; tries += 1) {
+    if (currentUser?.id !== userId) return;
+    const busy = !$('screen-home').classList.contains('active')
+      || !authScreen.classList.contains('hidden')
+      || !$('cookieBanner').classList.contains('hidden')
+      || document.querySelector('dialog[open], .sheetScreen:not(.hidden)');
+    if (!busy) break;
+    if (tries >= 40) return;
+    await new Promise((r) => setTimeout(r, 750));
+  }
+  if (!contactsLoaded) { try { await loadContacts(); } catch { /* treated as no contacts */ } }
+  if (savedContacts.length > 0 || currentUser?.id !== userId) return;
+  Tutorial.start(FIRST_CALL_TUTORIAL, { userId });
+}
+
+$('tutorialBtn').addEventListener('click', () => {
+  closeSheets();
+  showTab('home');
+  Tutorial.start(FIRST_CALL_TUTORIAL, { userId: currentUser?.id, force: true });
+});
 $('archiveBtn').addEventListener('click', () => { loadArchivedChats(); openSheet('sheet-archive'); });
 $('getStartedBtn').addEventListener('click', () => openSheet('sheet-get-started'));
 
@@ -3986,13 +4110,25 @@ async function loadReferrals() {
 }
 $('referralCopyBtn').addEventListener('click', async () => {
   const code = $('referralCodeValue').textContent;
-  try { await navigator.clipboard.writeText(code); $('referralCopyBtn').textContent = 'Copied!'; setTimeout(() => { $('referralCopyBtn').textContent = 'Copy'; }, 1500); } catch {}
+  const ok = await copyText(code);
+  $('referralCopyBtn').textContent = ok ? 'Copied!' : 'Press and hold the code to copy';
+  setTimeout(() => { $('referralCopyBtn').textContent = 'Copy'; }, 1500);
+});
+$('referralCopyLinkBtn').addEventListener('click', async () => {
+  const code = $('referralCodeValue').textContent;
+  const ok = await copyText(`${window.location.origin}/?ref=${code}`);
+  $('referralCopyLinkBtn').textContent = ok ? 'Link copied!' : 'Could not copy';
+  setTimeout(() => { $('referralCopyLinkBtn').textContent = 'Copy link'; }, 1500);
 });
 $('referralShareBtn').addEventListener('click', async () => {
   const code = $('referralCodeValue').textContent;
   const url = `${window.location.origin}/?ref=${code}`;
   if (navigator.share) { try { await navigator.share({ title: 'Emysa', text: `Use my code ${code} on Emysa and we both get bonus calling minutes.`, url }); } catch {} }
-  else { try { await navigator.clipboard.writeText(url); $('referralShareBtn').textContent = 'Link copied!'; setTimeout(() => { $('referralShareBtn').textContent = 'Share'; }, 1500); } catch {} }
+  else {
+    const ok = await copyText(url);
+    $('referralShareBtn').textContent = ok ? 'Link copied!' : 'Could not copy';
+    setTimeout(() => { $('referralShareBtn').textContent = 'Share'; }, 1500);
+  }
 });
 
 // ---------- Call Answering ----------
@@ -5389,6 +5525,14 @@ async function copyText(text) {
     return ok;
   } catch { return false; }
 }
+
+document.querySelectorAll('.checkoutCopy').forEach((btn) => btn.addEventListener('click', async () => {
+  if (!btn.dataset.url) return;
+  const ok = await copyText(btn.dataset.url);
+  const label = btn.textContent;
+  btn.textContent = ok ? 'Link copied!' : 'Could not copy';
+  setTimeout(() => { btn.textContent = label; }, 1800);
+}));
 
 $('waCodeCopy').addEventListener('click', async () => {
   const code = $('waCodeValue').dataset.code;

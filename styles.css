@@ -1251,3 +1251,43 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
   -webkit-mask-image:linear-gradient(to top, #000 62%, transparent 100%); mask-image:linear-gradient(to top, #000 62%, transparent 100%);}
 .tabBtn:not(.active){color:rgba(var(--fg-rgb), 0.68);}
 .tabBtn svg{filter:drop-shadow(0 1px 6px rgba(0,0,0,0.55));}
+/* ---------- guided tutorial (lib/tutorial.js): dims the app, spotlights one element, one tooltip ---------- */
+.tutRoot{position:fixed; inset:0; z-index:1000; overflow:hidden; pointer-events:none;}
+.tutDim{position:fixed; inset:0; background:rgba(0,0,0,.72); opacity:0; pointer-events:none;}
+.tutRoot.tutNoTarget .tutDim, .tutRoot.tutLost .tutDim{opacity:1;}
+.tutBlock{position:fixed; background:transparent; pointer-events:auto; touch-action:none;}
+.tutBlock[hidden]{display:none;}
+.tutRing{
+  position:fixed; pointer-events:none; border-radius:14px;
+  box-shadow:0 0 0 9999px rgba(0,0,0,.72); outline:2px solid var(--accent); outline-offset:0;
+  transition:top .18s ease, left .18s ease, width .18s ease, height .18s ease;
+  animation:tutPulse 1.8s ease-in-out infinite;
+}
+.tutRoot.tutNoTarget .tutRing, .tutRoot.tutLost .tutRing{display:none;}
+@keyframes tutPulse{0%,100%{outline-offset:0;} 50%{outline-offset:3px;}}
+.tutTip{
+  position:fixed; z-index:1; pointer-events:auto; box-sizing:border-box;
+  width:min(320px, calc(100vw - 24px)); padding:16px 16px 12px; visibility:hidden;
+  background:var(--surface-2); color:var(--text); border:1px solid var(--glass-border); border-radius:18px;
+  box-shadow:0 14px 40px rgba(0,0,0,.5); outline:none;
+}
+.tutArrow{position:absolute; width:12px; height:12px; background:inherit; border:inherit; transform:rotate(45deg); display:none;}
+.tutTip[data-side="top"] .tutArrow{display:block; bottom:-7px; left:calc(var(--tut-arrow) - 6px); border-top:0; border-left:0;}
+.tutTip[data-side="bottom"] .tutArrow{display:block; top:-7px; left:calc(var(--tut-arrow) - 6px); border-bottom:0; border-right:0;}
+.tutTip[data-side="left"] .tutArrow{display:block; right:-7px; top:calc(var(--tut-arrow) - 6px); border-bottom:0; border-left:0;}
+.tutTip[data-side="right"] .tutArrow{display:block; left:-7px; top:calc(var(--tut-arrow) - 6px); border-top:0; border-right:0;}
+.tutCount{font-size:12px; font-weight:650; letter-spacing:.02em; color:var(--muted); margin-bottom:6px;}
+.tutCount:empty{display:none;}
+.tutTitle{font-size:15px; font-weight:650; margin-bottom:4px;}
+.tutText{font-size:14px; line-height:1.45;}
+.tutFoot{display:flex; align-items:center; gap:8px; margin-top:14px;}
+.tutSpacer{flex:1;}
+.tutSkip{color:var(--dim); font-size:13.5px; font-weight:600; padding:10px 4px;}
+.tutBack{background:var(--glass-bg); border:1px solid var(--glass-border); color:var(--text); font-size:14px; font-weight:600; padding:10px 16px; border-radius:12px;}
+.tutNext{background:var(--accent-grad); color:var(--on-accent); font-size:14px; font-weight:650; padding:10px 18px; border-radius:12px;}
+.tutNext:disabled{opacity:.45;}
+.tutBack[hidden], .tutSkip[hidden], .tutNext[hidden], .tutTitle[hidden]{display:none;}
+@media (prefers-reduced-motion: reduce){.tutRing{transition:none; animation:none;}}
+
+/* copy-link buttons that sit under "Open payment page" */
+.addTimeCopy{display:block; width:100%; margin-bottom:10px; padding:12px; border-radius:999px; text-align:center; font-size:14px; font-weight:600; color:var(--text); background:var(--glass-bg); border:1px solid var(--glass-border);}

@@ -31,7 +31,7 @@
 </script>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-10-13.1">
+<link rel="stylesheet" href="styles.css?v=2026-10-13.2">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -149,7 +149,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-10-12.6').catch(function (err) {
+        import('./app.js?v=2026-10-13.2').catch(function (err) {
           showBootError('Something went wrong. Check your connection and try again.', 'Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -597,6 +597,11 @@
         <div class="cBody"><div class="cValue">Contacts</div></div>
         <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
       </div>
+      <div class="profileCard linkCard" id="tutorialBtn">
+        <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M10 8.6l5 3.4-5 3.4z" fill="currentColor"/></svg></div>
+        <div class="cBody"><div class="cValue">Replay tutorial</div></div>
+        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
       <div class="profileCard">
         <div class="cIcon"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <path opacity="0.4" d="M19.3399 14.4899L18.3399 12.8299C18.1299 12.4599 17.9399 11.7599 17.9399 11.3499V8.8199C17.9399 5.5599 15.2899 2.8999 12.0199 2.8999C8.74994 2.8999 6.09994 5.5599 6.09994 8.8199V11.3499C6.09994 11.7599 5.90994 12.4599 5.69994 12.8199L4.68994 14.4899C4.28994 15.1599 4.19994 15.8999 4.44994 16.5799C4.68994 17.2499 5.25994 17.7699 5.99994 18.0199C7.93994 18.6799 9.97994 18.9999 12.0199 18.9999C14.0599 18.9999 16.0999 18.6799 18.0399 18.0299C18.7399 17.7999 19.2799 17.2699 19.5399 16.5799C19.7999 15.8899 19.7299 15.1299 19.3399 14.4899Z" fill="currentColor"></path> <path d="M14.2508 3.32C13.5608 3.05 12.8108 2.9 12.0208 2.9C11.2408 2.9 10.4908 3.04 9.80078 3.32C10.2308 2.51 11.0808 2 12.0208 2C12.9708 2 13.8108 2.51 14.2508 3.32Z" fill="currentColor"></path> <path d="M14.8297 20.01C14.4097 21.17 13.2997 22 11.9997 22C11.2097 22 10.4297 21.68 9.87969 21.11C9.55969 20.81 9.31969 20.41 9.17969 20C9.30969 20.02 9.43969 20.03 9.57969 20.05C9.80969 20.08 10.0497 20.11 10.2897 20.13C10.8597 20.18 11.4397 20.21 12.0197 20.21C12.5897 20.21 13.1597 20.18 13.7197 20.13C13.9297 20.11 14.1397 20.1 14.3397 20.07C14.4997 20.05 14.6597 20.03 14.8297 20.01Z" fill="currentColor"></path> </g></svg></div>
         <div class="cBody"><div class="cValue">Notifications</div></div>
@@ -796,6 +801,7 @@
   </div>
   <div class="addTimeBottom">
     <a class="addTimeOpen hidden" id="addTimeOpen" target="_blank" rel="noopener noreferrer">Open payment page</a>
+    <button type="button" class="addTimeCopy checkoutCopy hidden" id="addTimeCopy">Copy payment link</button>
     <button type="button" class="addTimeBuy" id="addTimeBuy">Purchase</button>
     <p class="addTimeStatus" id="addTimeStatus" role="status"></p>
     <p class="addTimeFine" id="addTimeExpiry"></p>
@@ -829,6 +835,7 @@
   <div class="planGrid" id="planList"></div>
   <div class="premiumBottom">
     <a class="addTimeOpen hidden" id="premiumOpen" target="_blank" rel="noopener noreferrer">Open payment page</a>
+    <button type="button" class="addTimeCopy checkoutCopy hidden" id="premiumCopy">Copy payment link</button>
     <button type="button" class="premiumBuy" id="premiumBuy">Upgrade</button>
     <p class="addTimeStatus" id="premiumStatus" role="status"></p>
     <p class="addTimeLinks"><button type="button" id="premiumTerms">Terms of Use</button><span aria-hidden="true">·</span><button type="button" id="premiumPrivacy">Privacy Policy</button></p>
@@ -1298,6 +1305,9 @@
       <div class="codeCardActions">
         <button class="secondaryBtn" id="referralCopyBtn" style="flex:1;">Copy</button>
         <button class="secondaryBtn" id="referralShareBtn" style="flex:1;">Share</button>
+      </div>
+      <div class="codeCardActions" style="margin-top:10px;">
+        <button class="secondaryBtn" id="referralCopyLinkBtn" style="flex:1;">Copy link</button>
       </div>
     </div>
     <div class="statRow">
