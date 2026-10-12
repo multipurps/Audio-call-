@@ -204,26 +204,34 @@ def test_engine_routing():
     assert dataclasses.replace(s, tts_voice_id="c" * 10, tts_voice_is_per_call=True).engine_for_call() == "classic", "a user's clone stays on Fish"
     assert load_settings({**base, "ASSISTANT_CALL_ENGINE": "classic"}).engine_for_call() == "classic"
     forced = dataclasses.replace(load_settings({**base, "ASSISTANT_CALL_ENGINE": "live"}), tts_voice_is_per_call=True)
-    assert forced.engine_for_call() == "live"
+    assert forced.engine_for_call() == "classic", "a cloned voice never runs on GPT-Live, even when live is forced"
     assert load_settings({**base, "ASSISTANT_MOCK_MODE": "true"}).engine_for_call() == "classic"
     with pytest.raises(Exception):
         load_settings({**base, "ASSISTANT_CALL_ENGINE": "banana"}).validate({})
 
 
-def test_stale_deepgram_env_does_not_stop_the_service_booting():
+def test_deepgram_env_with_a_key_selects_deepgram():
     env = {"ASSISTANT_BRIDGE_SECRET": "x" * 32, "OPENAI_API_KEY": "sk-test-key-value-123456", "FISH_API_KEY": "fk_test_key_value_123456",
-           "ASSISTANT_STT_PROVIDER": "deepgram", "ASSISTANT_STT_MODEL": "nova-3-general", "DEEPGRAM_API_KEY": "dg_x"}
+           "ASSISTANT_STT_PROVIDER": "deepgram", "ASSISTANT_STT_MODEL": "nova-3-general", "DEEPGRAM_API_KEY": "dg_test_key_12345"}
+    s = load_settings(env)
+    s.validate(env)
+    assert s.stt_provider == "deepgram"
+    assert s.resolved_stt_model() == "nova-3-general"
+
+
+def test_deepgram_without_a_key_falls_back_and_the_model_name_does_not_leak():
+    env = {"ASSISTANT_BRIDGE_SECRET": "x" * 32, "OPENAI_API_KEY": "sk-test-key-value-123456", "FISH_API_KEY": "fk_test_key_value_123456",
+           "ASSISTANT_STT_PROVIDER": "deepgram", "ASSISTANT_STT_MODEL": "nova-3-general"}
     s = load_settings(env)
     s.validate(env)
     assert s.stt_provider == "openai"
     assert s.resolved_stt_model() == "gpt-4o-mini-transcribe", "a Deepgram model name must not reach OpenAI"
 
 
-def test_deepgram_is_gone():
+def test_deepgram_is_available():
     from app import config
 
-    assert "deepgram" not in config.STT_PROVIDERS
-    assert not hasattr(load_settings({"ASSISTANT_BRIDGE_SECRET": "x" * 32, "OPENAI_API_KEY": "sk-test-key-value-123456", "FISH_API_KEY": "fk_test_key_value_123456"}), "deepgram_api_key")
+    assert "deepgram" in config.STT_PROVIDERS
 
 
 def test_live_prompt_is_for_a_speech_model():

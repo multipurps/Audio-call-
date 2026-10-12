@@ -31,7 +31,7 @@
 </script>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-10-11.1">
+<link rel="stylesheet" href="styles.css?v=2026-10-12.1">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -148,7 +148,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-10-11.1').catch(function (err) {
+        import('./app.js?v=2026-10-12.1').catch(function (err) {
           showBootError('Something went wrong. Check your connection and try again.', 'Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -1082,6 +1082,24 @@
     </div>
 
     <audio id="liveVoiceAudio" style="display:none;"></audio>
+
+    <div class="sectionLabel" style="margin-top:30px;">Test a voice</div>
+    <p class="hint" style="margin:0 0 12px;">Try ElevenLabs or Cartesia on your calls. Your key is saved on the server, never shown again, and only your calls use it. Remove it to go back to your normal voice.</p>
+    <div class="field"><label>Provider</label>
+      <select id="testVoiceProvider"><option value="elevenlabs">ElevenLabs</option><option value="cartesia">Cartesia</option></select>
+    </div>
+    <div class="field"><label>Voice ID</label>
+      <div class="inputWrap"><input type="text" id="testVoiceId" placeholder="Paste the voice ID" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+    </div>
+    <div class="field"><label>API key</label>
+      <div class="inputWrap"><input type="password" id="testVoiceKey" placeholder="Paste your API key" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+    </div>
+    <div style="display:flex; gap:10px; margin-top:6px;">
+      <button class="secondaryBtn" id="testVoiceSaveBtn">Save test voice</button>
+      <button class="secondaryBtn hidden" id="testVoiceRemoveBtn">Remove</button>
+    </div>
+    <p class="hint" id="testVoiceStatus" style="margin:10px 4px 0; min-height:18px;"></p>
+
     <button class="primaryBtn" id="voiceApplyBtn" style="margin-top:22px;" disabled>Apply Changes</button>
     <p class="hint" id="voiceApplyStatus" style="margin:10px 4px 0; min-height:18px;"></p>
 

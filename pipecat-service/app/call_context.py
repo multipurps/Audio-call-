@@ -974,6 +974,11 @@ class VoicePrefs:
     #: None = no preference row; the user's clone (if any) keeps being used.
     use_custom_voice: bool | None = None
     custom_voice_id: str | None = None
+    #: A voice the user is testing from the app ("elevenlabs" | "cartesia"), with
+    #: their own key. None when they have not saved one.
+    test_tts_provider: str | None = None
+    test_tts_voice_id: str | None = None
+    test_tts_api_key: str | None = None
 
 
 async def fetch_voice_prefs(settings: Settings, user_id: str, session_id: str) -> VoicePrefs | None:
@@ -997,6 +1002,18 @@ async def fetch_voice_prefs(settings: Settings, user_id: str, session_id: str) -
             filters={"user_id": f"eq.{user_id}"},
             limit=1,
         )
+        # The voice the user is testing (own key, saved in the app). Read on its
+        # own so a missing table or a hiccup here never loses the normal prefs.
+        test_rows: list[dict] = []
+        try:
+            test_rows = await rest.select(
+                "voice_test_settings",
+                select="provider,voice_id,api_key",
+                filters={"user_id": f"eq.{user_id}"},
+                limit=1,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log("INFO", session_id, "[CALL ENGINE] no test-voice settings", error=type(exc).__name__)
     except Exception as exc:  # noqa: BLE001 - a missing table must not take the call down
         _log("WARNING", session_id, "[CALL ENGINE] could not read voice preferences", error=type(exc).__name__, detail=str(exc)[:160])
         return None
@@ -1006,10 +1023,16 @@ async def fetch_voice_prefs(settings: Settings, user_id: str, session_id: str) -
     clone = clone_rows[0] if clone_rows else {}
     custom_id = clone.get("provider_voice_id") if clone.get("status") == "ready" else None
     use_custom = prefs.get("use_custom_voice")
+    test = test_rows[0] if test_rows else {}
+    test_provider = test.get("provider") if test.get("provider") in ("elevenlabs", "cartesia") else None
+    ok_test = bool(test_provider and test.get("voice_id") and test.get("api_key"))
     return VoicePrefs(
         live_voice_id=prefs.get("live_voice_id") or None,
         use_custom_voice=use_custom if isinstance(use_custom, bool) else None,
         custom_voice_id=custom_id or None,
+        test_tts_provider=test_provider if ok_test else None,
+        test_tts_voice_id=test.get("voice_id") if ok_test else None,
+        test_tts_api_key=test.get("api_key") if ok_test else None,
     )
 
 

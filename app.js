@@ -4352,7 +4352,54 @@ async function loadVoicePrefs() {
   voicePending = { type: custom ? 'custom' : 'standard', liveVoiceId: voicePrefs.liveVoiceId };
   renderVoiceSettings();
   prefetchLivePreviews(voicePrefs.voices || []);
+  loadTestVoice();
 }
+
+// ---- Test a voice (ElevenLabs / Cartesia) ---------------------------------------------------
+// The key is sent once to the server and never comes back; the form only ever shows its last 4 characters.
+const TEST_VOICE_NAMES = { elevenlabs: 'ElevenLabs', cartesia: 'Cartesia' };
+function renderTestVoice(t) {
+  const active = !!t?.active;
+  if (active) { $('testVoiceProvider').value = t.provider; $('testVoiceId').value = t.voiceId || ''; }
+  $('testVoiceKey').value = '';
+  $('testVoiceKey').placeholder = active ? `Saved key ending ${t.keyTail} (leave empty to keep it)` : 'Paste your API key';
+  $('testVoiceRemoveBtn').classList.toggle('hidden', !active);
+  $('testVoiceStatus').textContent = active
+    ? `Calls now use your ${TEST_VOICE_NAMES[t.provider] || t.provider} voice.`
+    : '';
+}
+async function loadTestVoice() {
+  try {
+    const resp = await authedFetch('/api/voice-clone?action=test-voice');
+    if (resp.ok) renderTestVoice(await resp.json());
+  } catch { /* the rest of the voice screen still works */ }
+}
+$('testVoiceSaveBtn').addEventListener('click', async () => {
+  const btn = $('testVoiceSaveBtn'); const status = $('testVoiceStatus');
+  btn.disabled = true; status.textContent = 'Saving…';
+  try {
+    const resp = await authedFetch('/api/voice-clone?action=test-voice', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: $('testVoiceProvider').value, voiceId: $('testVoiceId').value, apiKey: $('testVoiceKey').value }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) { status.textContent = data.error || 'Could not save.'; return; }
+    renderTestVoice(data);
+    status.textContent = `Saved. Your next call speaks this ${TEST_VOICE_NAMES[data.provider] || ''} voice.`;
+  } catch { status.textContent = 'Could not save. Check your connection.'; }
+  finally { btn.disabled = false; }
+});
+$('testVoiceRemoveBtn').addEventListener('click', async () => {
+  const status = $('testVoiceStatus');
+  status.textContent = 'Removing…';
+  try {
+    const resp = await authedFetch('/api/voice-clone?action=test-voice', { method: 'DELETE' });
+    if (!resp.ok) { status.textContent = 'Could not remove.'; return; }
+    $('testVoiceId').value = '';
+    renderTestVoice(await resp.json());
+    status.textContent = 'Removed. Calls use your normal voice again.';
+  } catch { status.textContent = 'Could not remove. Check your connection.'; }
+});
 
 function showVoiceTab(which) {
   document.querySelectorAll('#voiceTypeGroup .segmentedBtn').forEach((b) => b.classList.toggle('active', b.dataset.vtype === which));

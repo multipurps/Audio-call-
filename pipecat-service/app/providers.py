@@ -200,6 +200,24 @@ def build_stt(settings: Settings, language: str | None = None) -> Any:
             ),
         )
 
+    if settings.stt_provider == "deepgram":
+        from pipecat.services.deepgram.stt import DeepgramSTTService
+
+        # Streaming: Deepgram transcribes while the caller is still speaking, so
+        # the transcript is ready the moment the turn ends (OpenAI's endpoint is
+        # batch and only starts after the caller stops).
+        return DeepgramSTTService(
+            api_key=settings.deepgram_api_key,
+            sample_rate=settings.bridge_sample_rate,
+            settings=DeepgramSTTService.Settings(
+                model=settings.resolved_stt_model(),
+                language=language or "en",
+                interim_results=True,
+                smart_format=True,
+                punctuate=True,
+            ),
+        )
+
     raise ValueError(f"unsupported STT provider {settings.stt_provider!r}")
 
 
@@ -278,32 +296,27 @@ def build_tts(settings: Settings) -> Any:
         kwargs["settings"] = FishAudioTTSService.Settings(**tts_kwargs)
         return FishAudioTTSService(**kwargs)
 
-    # A/B-test voices. They plug into the SAME pipeline (same STT, LLM, VAD and
-    # turn-taking) so a difference in sound or response delay is the voice.
-    # Each uses its own env voice id: a Fish id or a per-call cloned voice is
-    # meaningless to another vendor, so settings.tts_voice_id is ignored.
-    if settings.tts_provider == "elevenlabs":
-        from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+    # Voices a user tries from the app. They plug into the SAME pipeline (same STT,
+    # LLM, VAD and turn-taking), so a difference in sound or delay is the voice.
+    # The voice id and API key are THIS user's, saved in the app and loaded for
+    # this call only. A Fish id or cloned voice means nothing to another vendor.
+    if settings.tts_provider in ("elevenlabs", "cartesia"):
+        if not (settings.tts_test_api_key and settings.tts_test_voice_id):
+            raise ValueError(f"{settings.tts_provider} test voice needs a saved key and voice id")
+        if settings.tts_provider == "elevenlabs":
+            from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 
-        tts_kwargs = {"voice": settings.elevenlabs_voice_id}
-        if settings.elevenlabs_model:
-            tts_kwargs["model"] = settings.elevenlabs_model
-        return ElevenLabsTTSService(
-            api_key=settings.elevenlabs_api_key,
-            sample_rate=settings.bridge_sample_rate,
-            settings=ElevenLabsTTSService.Settings(**tts_kwargs),
-        )
-
-    if settings.tts_provider == "cartesia":
+            return ElevenLabsTTSService(
+                api_key=settings.tts_test_api_key,
+                sample_rate=settings.bridge_sample_rate,
+                settings=ElevenLabsTTSService.Settings(voice=settings.tts_test_voice_id),
+            )
         from pipecat.services.cartesia.tts import CartesiaTTSService
 
-        tts_kwargs = {"voice": settings.cartesia_voice_id}
-        if settings.cartesia_model:
-            tts_kwargs["model"] = settings.cartesia_model
         return CartesiaTTSService(
-            api_key=settings.cartesia_api_key,
+            api_key=settings.tts_test_api_key,
             sample_rate=settings.bridge_sample_rate,
-            settings=CartesiaTTSService.Settings(**tts_kwargs),
+            settings=CartesiaTTSService.Settings(voice=settings.tts_test_voice_id),
         )
 
     raise ValueError(f"unsupported TTS provider {settings.tts_provider!r}")

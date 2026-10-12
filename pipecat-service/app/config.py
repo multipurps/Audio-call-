@@ -28,9 +28,13 @@ from typing import Mapping
 # actually exists in app/providers.py -- this list is not aspirational.
 # --------------------------------------------------------------------------
 
-STT_PROVIDERS = ("openai", "mock")
+STT_PROVIDERS = ("deepgram", "openai", "mock")
 LLM_PROVIDERS = ("luna", "openai", "mock")
-TTS_PROVIDERS = ("fish", "elevenlabs", "cartesia", "mock")
+TTS_PROVIDERS = ("fish", "mock")
+#: Voices a user can try from the app (Profile > Voice > Test a voice). They are
+#: chosen per user and per call, never by environment variable, and their API key
+#: is saved by the user in the app (table voice_test_settings), not in Render.
+TEST_TTS_PROVIDERS = ("elevenlabs", "cartesia")
 
 DEFAULT_STT_PROVIDER = "openai"
 DEFAULT_LLM_PROVIDER = "openai"
@@ -50,6 +54,7 @@ OPENAI_COMPATIBLE_BASE_URLS = {
 #: manual fallback via ASSISTANT_STT_MODEL=whisper-1 if ever needed.
 #: gpt-6-luna is OpenAI's current general-purpose chat model.
 DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe"
+DEFAULT_DEEPGRAM_STT_MODEL = "nova-3"
 DEFAULT_LLM_MODEL = "gpt-6-luna"
 
 #: Call engines. "live" = OpenAI GPT-Live (one speech-to-speech model: it listens,
@@ -103,16 +108,17 @@ class ConfigError(RuntimeError):
     """Raised for invalid or missing configuration. Always fatal at startup."""
 
 
-def _normalise_stt_provider(value: str | None) -> str:
-    """Deepgram was removed. A deployment that still says "deepgram" keeps working on
-    OpenAI STT instead of refusing to boot (a stale env var must not take calls down)."""
-    provider = (value or DEFAULT_STT_PROVIDER).strip().lower()
-    if provider == "deepgram":
+def _normalise_stt_provider(value: str | None, *, deepgram_key: str | None = None) -> str:
+    """The configured STT provider. Deepgram needs DEEPGRAM_API_KEY: when it is
+    selected but the key is missing, boot on OpenAI STT with a loud warning
+    instead of refusing to start (a missing key must not take every call down)."""
+    provider = (value or DEFAULT_STT_PROVIDER).strip().lower() or DEFAULT_STT_PROVIDER
+    if provider == "deepgram" and not deepgram_key:
         from loguru import logger
 
-        logger.warning("ASSISTANT_STT_PROVIDER=deepgram is no longer supported; using openai")
+        logger.warning("ASSISTANT_STT_PROVIDER=deepgram but DEEPGRAM_API_KEY is not set; using openai STT")
         return "openai"
-    return provider or DEFAULT_STT_PROVIDER
+    return provider
 
 
 def _env(env: Mapping[str, str], key: str, default: str | None = None) -> str | None:
@@ -243,10 +249,10 @@ class Settings:
     # own voice id and model: a Fish voice id, or a per-call cloned voice from
     # the relay's hello, never means anything to another vendor, so these
     # providers ignore tts_voice_id entirely.
-    elevenlabs_voice_id: str | None = None
-    elevenlabs_model: str | None = None
-    cartesia_voice_id: str | None = None
-    cartesia_model: str | None = None
+    #: Per-call test voice (see TEST_TTS_PROVIDERS). Filled from the user's saved
+    #: test settings at call start; never from the environment.
+    tts_test_voice_id: str | None = None
+    tts_test_api_key: str | None = None
     #: Log a per-turn latency breakdown (endpointing, STT, LLM, TTS) from
     #: Pipecat's own metrics. Costs nothing on the audio path.
     latency_log: bool = True
@@ -255,8 +261,7 @@ class Settings:
     openai_api_key: str | None = None
     luna_api_key: str | None = None
     fish_api_key: str | None = None
-    elevenlabs_api_key: str | None = None
-    cartesia_api_key: str | None = None
+    deepgram_api_key: str | None = None
 
     # -- conversational behaviour ---------------------------------------
     system_prompt: str | None = None
@@ -316,8 +321,8 @@ class Settings:
             self.openai_api_key,
             self.luna_api_key,
             self.fish_api_key,
-            self.elevenlabs_api_key,
-            self.cartesia_api_key,
+            self.deepgram_api_key,
+            self.tts_test_api_key,
             self.supabase_service_role_key,
         )
         return tuple(v for v in values if v and len(v) >= 8)
@@ -403,16 +408,8 @@ class Settings:
             raise ConfigError(
                 "FISH_API_KEY is required when ASSISTANT_TTS_PROVIDER=fish"
             )
-        if self.tts_provider == "elevenlabs" and not (self.elevenlabs_api_key and self.elevenlabs_voice_id):
-            raise ConfigError(
-                "ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID are required when "
-                "ASSISTANT_TTS_PROVIDER=elevenlabs"
-            )
-        if self.tts_provider == "cartesia" and not (self.cartesia_api_key and self.cartesia_voice_id):
-            raise ConfigError(
-                "CARTESIA_API_KEY and CARTESIA_VOICE_ID are required when "
-                "ASSISTANT_TTS_PROVIDER=cartesia"
-            )
+        if self.stt_provider == "deepgram" and not self.deepgram_api_key:
+            raise ConfigError("DEEPGRAM_API_KEY is required when ASSISTANT_STT_PROVIDER=deepgram")
 
     # -- presentation ----------------------------------------------------
 
@@ -432,15 +429,14 @@ class Settings:
             "heartbeatIntervalSecs": self.heartbeat_interval_secs,
             "outboundQueueMaxFrames": self.outbound_queue_max_frames,
             "sttProvider": self.stt_provider,
-            "sttModel": self.stt_model or DEFAULT_STT_MODEL,
+            "sttModel": self.resolved_stt_model(),
             "llmProvider": self.llm_provider,
             "llmModel": self.resolved_llm_model(),
             "llmBaseUrl": self.resolved_llm_base_url(),
             "ttsProvider": self.tts_provider,
             "ttsVoiceId": self.tts_voice_id or "<default>",
             "fishKey": "<set>" if self.fish_api_key else "<unset>",
-            "elevenlabsKey": "<set>" if self.elevenlabs_api_key else "<unset>",
-            "cartesiaKey": "<set>" if self.cartesia_api_key else "<unset>",
+            "deepgramKey": "<set>" if self.deepgram_api_key else "<unset>",
             "openaiKey": "<set>" if self.openai_api_key else "<unset>",
             "lunaKey": "<set>" if self.luna_api_key else "<unset>",
             "persistentMemory": self.enable_persistent_memory,
@@ -465,10 +461,13 @@ class Settings:
         """
         if self.mock_mode or self.call_engine == "classic":
             return "classic"
+        # A cloned or test voice can only be spoken by the classic pipeline
+        # (STT -> Luna -> TTS). GPT-Live is a separate engine and is never used
+        # for these calls, even when ASSISTANT_CALL_ENGINE=live.
+        if self.tts_voice_is_per_call or self.tts_test_active:
+            return "classic"
         if self.call_engine == "live":
             return "live"
-        if self.tts_voice_is_per_call:
-            return "classic"
         return "live" if self.live_api_key() else "classic"
 
     def resolved_llm_base_url(self) -> str:
@@ -478,7 +477,18 @@ class Settings:
         )
 
     def resolved_stt_model(self) -> str:
-        return self.stt_model or DEFAULT_STT_MODEL
+        model = (self.stt_model or "").strip()
+        if self.stt_provider == "deepgram":
+            # An OpenAI model name means nothing to Deepgram.
+            return model if model and not model.lower().startswith(("gpt-", "whisper")) else DEFAULT_DEEPGRAM_STT_MODEL
+        # A Deepgram model name (nova-3...) must never reach OpenAI (e.g. when
+        # Deepgram is selected but its key is missing and STT falls back).
+        return model if model and not model.lower().startswith("nova") else DEFAULT_STT_MODEL
+
+    @property
+    def tts_test_active(self) -> bool:
+        """This call speaks a voice the user is testing (ElevenLabs / Cartesia)."""
+        return self.tts_provider in TEST_TTS_PROVIDERS and bool(self.tts_test_api_key and self.tts_test_voice_id)
 
     def resolved_llm_model(self) -> str:
         if self.llm_model:
@@ -519,11 +529,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ),
         send_lead_secs=_env_float(env, "ASSISTANT_SEND_LEAD_SECS", 0.2, minimum=0.02),
         max_frame_bytes=_env_int(env, "ASSISTANT_MAX_FRAME_BYTES", 64 * 1024, minimum=64),
-        stt_provider=_normalise_stt_provider(_env(env, "ASSISTANT_STT_PROVIDER", DEFAULT_STT_PROVIDER)),
-        # A Deepgram model name (e.g. nova-3-general) means nothing to OpenAI STT.
-        stt_model=None
-        if (_env(env, "ASSISTANT_STT_PROVIDER") or "").lower() == "deepgram"
-        else _env(env, "ASSISTANT_STT_MODEL"),
+        stt_provider=_normalise_stt_provider(
+            _env(env, "ASSISTANT_STT_PROVIDER", DEFAULT_STT_PROVIDER), deepgram_key=_env(env, "DEEPGRAM_API_KEY")
+        ),
+        stt_model=_env(env, "ASSISTANT_STT_MODEL"),
         llm_provider=_env(env, "ASSISTANT_LLM_PROVIDER", default_llm_prov)
         or default_llm_prov,
         llm_model=_env(env, "ASSISTANT_LLM_MODEL") or _env(env, "LUNA_MODEL") or _env(env, "LLM_MODEL"),
@@ -553,12 +562,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         openai_api_key=_env(env, "OPENAI_API_KEY"),
         luna_api_key=luna_key,
         fish_api_key=_env(env, "FISH_API_KEY"),
-        elevenlabs_api_key=_env(env, "ELEVENLABS_API_KEY"),
-        elevenlabs_voice_id=_env(env, "ELEVENLABS_VOICE_ID"),
-        elevenlabs_model=_env(env, "ELEVENLABS_MODEL"),
-        cartesia_api_key=_env(env, "CARTESIA_API_KEY"),
-        cartesia_voice_id=_env(env, "CARTESIA_VOICE_ID"),
-        cartesia_model=_env(env, "CARTESIA_MODEL"),
+        deepgram_api_key=_env(env, "DEEPGRAM_API_KEY"),
         latency_log=_env_bool(env, "ASSISTANT_LATENCY_LOG", True),
         system_prompt=_env(env, "ASSISTANT_SYSTEM_PROMPT"),
         greeting=_env(env, "ASSISTANT_GREETING"),

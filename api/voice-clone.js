@@ -16,6 +16,7 @@ export default async function handler(req, res) {
   if (action === 'prefs' && req.method === 'GET') return getPrefs(req, res, supabase, userId);
   if (action === 'prefs' && (req.method === 'PUT' || req.method === 'POST')) return savePrefs(req, res, supabase, userId);
   if (action === 'live-preview' && req.method === 'GET') return livePreview(req, res);
+  if (action === 'test-voice') return testVoice(req, res, supabase, userId);
 
   const fishKey = process.env.FISH_API_KEY;
   if (!fishKey) return res.status(500).json({ error: 'Voice provider not configured' });
@@ -176,4 +177,56 @@ async function livePreview(req, res) {
   } catch (err) {
     return res.status(err.statusCode || 500).json({ error: err.message || 'Preview failed' });
   }
+}
+
+// ---- test voice (ElevenLabs / Cartesia) --------------------------------------------------
+// The user pastes their own provider key and a voice id in the app. The key is stored server
+// side only (table voice_test_settings, service-role access) and is NEVER sent back: GET returns
+// just whether a key is saved and its last 4 characters.
+const TEST_PROVIDERS = ['elevenlabs', 'cartesia'];
+const TEST_VOICE_ID = /^[A-Za-z0-9_-]{8,64}$/;
+const TEST_API_KEY = /^\S{12,200}$/;
+
+async function testVoice(req, res, supabase, userId) {
+  const read = async () => {
+    const { data } = await supabase.from('voice_test_settings').select('provider,voice_id,api_key').eq('user_id', userId).maybeSingle();
+    return data || null;
+  };
+  const view = (row) => (row
+    ? { active: true, provider: row.provider, voiceId: row.voice_id, hasKey: true, keyTail: String(row.api_key).slice(-4) }
+    : { active: false, provider: null, voiceId: null, hasKey: false, keyTail: null });
+
+  if (req.method === 'GET') return res.status(200).json(view(await read()));
+
+  if (req.method === 'DELETE') {
+    const { error } = await supabase.from('voice_test_settings').delete().eq('user_id', userId);
+    if (error) return res.status(500).json({ error: 'Could not remove the test voice' });
+    return res.status(200).json(view(null));
+  }
+
+  if (req.method === 'PUT' || req.method === 'POST') {
+    const body = req.body || {};
+    const provider = String(body.provider || '').toLowerCase();
+    if (!TEST_PROVIDERS.includes(provider)) return res.status(400).json({ error: 'Provider must be ElevenLabs or Cartesia' });
+    const voiceId = String(body.voiceId || '').trim();
+    if (!TEST_VOICE_ID.test(voiceId)) return res.status(400).json({ error: 'Voice ID looks wrong (8-64 letters, numbers, - or _)' });
+
+    // Leaving the key empty keeps the saved one, but only for the same provider.
+    let apiKey = String(body.apiKey || '').trim();
+    if (!apiKey) {
+      const existing = await read();
+      if (!existing || existing.provider !== provider) return res.status(400).json({ error: `Paste your ${provider === 'elevenlabs' ? 'ElevenLabs' : 'Cartesia'} API key` });
+      apiKey = existing.api_key;
+    } else if (!TEST_API_KEY.test(apiKey)) {
+      return res.status(400).json({ error: 'That API key looks wrong' });
+    }
+
+    const { error } = await supabase.from('voice_test_settings').upsert(
+      { user_id: userId, provider, voice_id: voiceId, api_key: apiKey, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' },
+    );
+    if (error) return res.status(500).json({ error: 'Could not save the test voice' });
+    return res.status(200).json(view(await read()));
+  }
+  return res.status(405).json({ error: 'Method not allowed' });
 }
