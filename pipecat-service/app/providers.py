@@ -175,7 +175,7 @@ DEFAULT_STT_PROMPT = (
 )
 
 
-def build_stt(settings: Settings, language: str | None = None) -> Any:
+def build_stt(settings: Settings, language: str | None = None, keyterms: list[str] | None = None) -> Any:
     """Construct the STT service, or a mock when in mock mode."""
     if settings.mock_mode or settings.stt_provider == "mock":
         logger.info("using mock STT")
@@ -206,15 +206,19 @@ def build_stt(settings: Settings, language: str | None = None) -> Any:
         # Streaming: Deepgram transcribes while the caller is still speaking, so
         # the transcript is ready the moment the turn ends (OpenAI's endpoint is
         # batch and only starts after the caller stops).
+        model = settings.resolved_stt_model()
         return DeepgramSTTService(
             api_key=settings.deepgram_api_key,
             sample_rate=settings.bridge_sample_rate,
             settings=DeepgramSTTService.Settings(
-                model=settings.resolved_stt_model(),
+                model=model,
                 language=language or "en",
                 interim_results=True,
                 smart_format=True,
                 punctuate=True,
+                # Key terms are a Nova-3 feature: the names and proper nouns of THIS call, so they are
+                # spelled right instead of guessed. Other models ignore the hint rather than fail.
+                keyterm=(keyterms or None) if model.lower().startswith("nova-3") else None,
             ),
         )
 

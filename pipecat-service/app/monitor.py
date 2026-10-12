@@ -59,9 +59,9 @@ TOKEN_SKEW_SECS = 60.0
 MAX_SUBSCRIBERS_PER_SESSION = 2
 
 #: How many monitor frames may queue per subscriber before the oldest are
-#: dropped. ~3 s of 20 ms frames. A monitor is a live feed: late audio is
+#: dropped. ~6 s of 20 ms frames. A monitor is a live feed: late audio is
 #: worthless, so the queue sheds rather than grows.
-SUBSCRIBER_QUEUE_MAX_FRAMES = 150
+SUBSCRIBER_QUEUE_MAX_FRAMES = 300
 #: Most transcript turns replayed to a listener who joins mid-call.
 TRANSCRIPT_SNAPSHOT_MAX = 300
 

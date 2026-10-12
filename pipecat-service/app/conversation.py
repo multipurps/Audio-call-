@@ -39,7 +39,7 @@ from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
-from app.call_context import CallContext, TranscriptLog, fetch_voice_prefs, resolve_call_context
+from app.call_context import CallContext, TranscriptLog, fetch_voice_prefs, resolve_call_context, stt_keyterms
 from app.call_wrapup import WrapUpSupervisor, parse_time_budget
 from app.config import Settings, normalise_live_voice
 from app.monitor import DIRECTION_CALLER, DIRECTION_EMYSA, get_hub
@@ -1015,6 +1015,7 @@ class CallConversation(_BaseConversation):
                 on_end_call=self._schedule_assistant_hangup,
                 transcript=self.transcript,
                 language=self.call_context.language if self.call_context else None,
+                stt_keyterms=stt_keyterms(self.call_context),
             )
         observers = [CallLogObserver(self._session_id, self._settings.secret_values())]
         if self._settings.latency_log:

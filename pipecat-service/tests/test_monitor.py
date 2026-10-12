@@ -15,6 +15,7 @@ import pytest
 
 from app.monitor import (
     MonitorHub,
+    SUBSCRIBER_QUEUE_MAX_FRAMES,
     TokenError,
     get_hub,
     pack_monitor_frame,
@@ -122,10 +123,10 @@ class TestMonitorHub:
     def test_slow_subscriber_queue_sheds_oldest_instead_of_lagging(self):
         hub = MonitorHub()
         sub = hub.subscribe("call-42")
-        for i in range(300):
+        for i in range(SUBSCRIBER_QUEUE_MAX_FRAMES * 2):
             hub.publish("call-42", 1, 16000, bytes([i % 256]))
         assert sub.frames_dropped > 0
-        assert sub._queue.qsize() <= 150
+        assert sub._queue.qsize() <= SUBSCRIBER_QUEUE_MAX_FRAMES
 
     def test_close_room_signals_end_and_releases(self):
         hub = MonitorHub()

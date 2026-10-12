@@ -1225,3 +1225,38 @@ async def _default_language() -> str:
 
 async def _empty() -> list[str]:  # pragma: no cover - trivial
     return []
+
+
+# ---- speech-to-text hints ----------------------------------------------------------
+# Names and topic words the transcriber should expect on this call. Deepgram Nova-3 takes them as
+# "key terms" and stops turning "Ayodele" into "I a delay". Taken only from this call's own
+# context: who is speaking, who is being called, and the proper nouns in the objective.
+_STT_TERM_SKIP = frozenset(
+    "tell ask call say please let remind hello hi the this that also and but be make give thanks thank "
+    "you your yes no ok okay can could would will just then when what why how if so it its my our".split()
+)
+_STT_PROPER_NOUN = re.compile(r"\b[A-Z][A-Za-z'\u2019-]{2,}(?:\s[A-Z][A-Za-z'\u2019-]{2,})*\b")
+STT_KEYTERM_LIMIT = 20
+
+
+def stt_keyterms(context: "CallContext | None") -> list[str]:
+    """Names and proper nouns Deepgram should expect, most important first, capped."""
+    if context is None:
+        return []
+    terms: list[str] = []
+
+    def add(value: str) -> None:
+        value = " ".join((value or "").split()).strip(" .,:;!?\"'")
+        if 2 < len(value) <= 40 and value.lower() not in _STT_TERM_SKIP and value.lower() not in {t.lower() for t in terms}:
+            terms.append(value)
+
+    # getattr: a hint must never be the reason a call fails to start, whatever object it is handed.
+    for full in (getattr(context, "user_name", ""), getattr(context, "contact_name", "")):
+        full = full if isinstance(full, str) else ""
+        add(full)
+        add(full.split(" ")[0])
+    objective = getattr(context, "objective", "")
+    for match in _STT_PROPER_NOUN.findall(objective if isinstance(objective, str) else ""):
+        for part in (match, *match.split(" ")):
+            add(part)
+    return terms[:STT_KEYTERM_LIMIT]

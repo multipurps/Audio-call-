@@ -1383,8 +1383,16 @@ async function startAppCallSession() {
     source: null, micNode: null, pending: [], pendingSamples: 0,
   };
   appCall = call;
-  const JITTER = 0.06;
-  const MAX_LAG = 1.2;
+  // Playback cushion. The voice arrives in bursts (a streamed test voice especially), so a 60 ms
+  // cushion underran on the first late chunk and every chunk after it: a chain of tiny gaps heard
+  // as the voice breaking up. Start with a real cushion, re-prime with the full cushion after an
+  // underrun, and deepen it when the underrun happens mid-sentence (the same rule the listen-in
+  // uses). A long gap is just Emysa pausing, so it does not deepen the cushion.
+  const JITTER_START = 0.2;
+  const JITTER_MAX = 0.6;
+  const JITTER_STEP = 0.1;
+  const MAX_LAG = 2.5;
+  call.jitter = JITTER_START;
 
   // -- microphone -> service ------------------------------------------------
   const sendPcm = (floats) => {
@@ -1464,7 +1472,12 @@ async function startAppCallSession() {
     src.buffer = audio;
     src.connect(out);
     const now = ctx.currentTime;
-    if (!call.nextTime || call.nextTime < now) call.nextTime = now + (call.nextTime ? 0.03 : JITTER);
+    if (!call.nextTime) {
+      call.nextTime = now + call.jitter;
+    } else if (call.nextTime < now) {
+      if (now - call.nextTime < 1.0) call.jitter = Math.min(JITTER_MAX, call.jitter + JITTER_STEP);
+      call.nextTime = now + call.jitter;
+    }
     if (call.nextTime > now + MAX_LAG) return;
     src.start(call.nextTime);
     call.nextTime += audio.duration;
@@ -2395,7 +2408,7 @@ function startCallMonitor(url, callId, unlockedCtx) {
   // of new input rather than stopping what is already playing.
   const MAX_JITTER = 0.9;   // deepest cushion a lane may grow to
   const JITTER_STEP = 0.1;  // growth per mid-speech underrun
-  const MAX_LAG = 2.2;
+  const MAX_LAG = 5;       // listen-in: a late word beats a missing one
   function flushLane(lane) {
     clearTimeout(lane.flushTimer);
     if (!lane.pendingSamples) return;
