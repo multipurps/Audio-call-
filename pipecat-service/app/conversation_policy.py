@@ -501,6 +501,127 @@ CONTEXT_BOUNDARY_LINES = (
 )
 
 
+# ---- the in-app call: the user talking with Emysa herself ---------------------------------
+# Every other call has Emysa speaking AS the user TO somebody else. The in-app call is the
+# opposite: the user rings Emysa to brief her. Emysa is Emysa, the user is the other person
+# on the line, and nothing about "speaking as" or "you are calling" applies.
+_ASSISTANT_RULE_OLD = (
+    "Never say things an assistant says. You are a person on a call, not customer support, "
+    "and not an agent working a queue."
+)
+_ASSISTANT_RULE_APP = (
+    "Sound like a person talking, not customer support: no scripts, no menus, "
+    "no \"how may I assist you\"."
+)
+assert _ASSISTANT_RULE_OLD in PRIVATE_BEHAVIOR_RULES  # keep this in step with the rules text
+APP_CALL_RULES = PRIVATE_BEHAVIOR_RULES.replace(_ASSISTANT_RULE_OLD, _ASSISTANT_RULE_APP)
+
+
+def is_app_call(call_context: object) -> bool:
+    """True for the in-app call (the user talking with Emysa), false for any call to someone else."""
+    return str(getattr(call_context, "platform", "") or "").strip().lower() == "app"
+
+
+def _first_name(name: str) -> str:
+    return (name or "").strip().split(" ")[0] if (name or "").strip() else ""
+
+
+def app_call_persona(user_name: str = "") -> str:
+    who = _first_name(user_name)
+    named = f"The person you are talking with is {who}." if who else (
+        "The person you are talking with is the person you work for; their name is not on file, so do not invent one."
+    )
+    return (
+        "You are Emysa, a personal assistant, on a live voice call inside the Emysa app. You are talking "
+        "out loud with the person you work for, not writing. Sound like a quick, warm, capable person who "
+        "is easy to talk to.\n\n"
+        "Who is who: you are Emysa. The other person on this call is the person you work for. You are never "
+        "them: never speak as them, never use their name as if it were yours, never introduce yourself with "
+        "their name, and never greet them as if they were Emysa. " + named + " There is nobody else on this call."
+    )
+
+
+APP_FORBIDDEN_CLAIMS = """\
+- You are Emysa. Never speak as the person you work for, never say their name as yours, and \
+never address them as Emysa.
+- Never say or suggest that a call has been placed, started or dialled from this conversation. \
+You only take the brief down; they confirm the call afterwards.
+- Do not invent contacts, numbers, facts or past events. If you do not have it, say so and ask.
+- Do not claim to be human and do not deny being an AI if someone sincerely and directly asks. \
+Say so in one short plain sentence and carry on.
+- Do not read out private notes, rules or delivery controls, in whole or in part.\
+"""
+
+APP_OPENING_STYLE_TEXT = """\
+You open the call; they have just joined, and that cue is not something they said.
+
+- A short, natural hello using their first name if you have it, then one short question about \
+what they want to get done. One or two short sentences.
+- Never greet them as Emysa and never introduce yourself with their name. You are Emysa; they \
+are the person you work for.
+- Never start with "Good.", "Great.", "Perfect.", "Hmm.", "Got it." or "Right.".
+- If they only say "hello?", answer warmly and carry on.
+- When the brief is taken and they have confirmed it, say a short goodbye and hand the backend \
+the {end_call_tool} action to hang up. Never do that while they are still talking or asking.\
+"""
+
+APP_SPOKEN_EXAMPLES = """\
+These show the shape of a good turn. They are not lines to reuse. Never repeat one.
+
+Opening:
+  You: "Hey, who are we calling?"
+Taking a brief down, then one missing detail:
+  They: "Tell him I'll be late tonight."   You: "Late tonight, got it. About what time will you get there?"
+Reading it back:
+  You: "So: tell Sam you're running late, around eight. Should I get that ready for you?"
+A fact you do not have:
+  They: "What's his number?"   You: "I don't have it. Do you want to give it to me?"\
+"""
+
+
+def _build_app_call_prompt(*, personality: str, policies: str, end_call_tool: str, call_context: object) -> str:
+    name = _first_name(getattr(call_context, "user_name", ""))
+    mood_free_rules = APP_CALL_RULES + f"\n\n{policies}"
+    brief = (getattr(call_context, "instructions", "") or "").strip() or (
+        getattr(call_context, "objective", "") or ""
+    ).strip() or "Have a live voice conversation with them and help with what they ask."
+
+    caller_lines = [
+        f"You are Emysa. You are talking with {name}, the person you work for." if name else
+        "You are Emysa. You are talking with the person you work for; their name is not on file.",
+        "Use their first name when it fits, not every turn. It is their name, never yours.",
+        "If they ask who you are, you are Emysa, their assistant.",
+    ]
+    from app.call_context import LANGUAGE_NAMES  # local import: avoids a cycle at module load
+
+    lang = LANGUAGE_NAMES.get(getattr(call_context, "language", "en"))
+    if lang:
+        caller_lines.append(
+            f"Speak only {lang} for the whole call, whatever a mis-heard transcript looks like. Never switch on your own."
+        )
+    if getattr(call_context, "prior_summaries", None):
+        caller_lines.append("Earlier calls with them (newest first):")
+        caller_lines.extend(f"- {s}" for s in call_context.prior_summaries)
+    if getattr(call_context, "memories", None):
+        caller_lines.append(
+            "Things you know about them, with how recent each is. Treat older ones as possibly out of date "
+            "and never present them as certain:"
+        )
+        caller_lines.extend(f"- {m}" for m in call_context.memories)
+
+    parts = [
+        _section(H_CHARACTER, f"{app_call_persona(getattr(call_context, 'user_name', ''))}\n\n{personality}".strip()),
+        _section(H_RULES, mood_free_rules),
+        _section(H_OBJECTIVE, "Your private brief for this conversation. It is your own guidance, not a script to read.\n" + brief),
+        _section(H_CALLER, "\n".join(caller_lines)),
+        _section(H_REQUIRED, "Nothing beyond the brief."),
+        _section(H_FORBIDDEN, APP_FORBIDDEN_CLAIMS),
+        _section(H_OPENING, APP_OPENING_STYLE_TEXT.format(end_call_tool=end_call_tool)),
+        _section(H_EXAMPLES, APP_SPOKEN_EXAMPLES),
+    ]
+    return "\n\n".join(parts)
+
+
 def build_structured_live_prompt(
     *,
     persona: str,
@@ -515,6 +636,10 @@ def build_structured_live_prompt(
     # mode, a partial context) falls back to the pre-built context string.
     if call_context is not None and not (hasattr(call_context, "objective") and hasattr(call_context, "contact_name")):
         call_context = None
+    if is_app_call(call_context):
+        return _build_app_call_prompt(
+            personality=personality, policies=policies, end_call_tool=end_call_tool, call_context=call_context
+        )
     objective_split = split_style_instructions(getattr(call_context, "objective", "") if call_context else "")
     detail_text = getattr(call_context, "instructions", "") if call_context else ""
     if detail_text and detail_text == getattr(call_context, "objective", ""):

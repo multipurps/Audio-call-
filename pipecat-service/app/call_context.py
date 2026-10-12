@@ -903,6 +903,35 @@ async def _fetch_contact_name(
     return to_number or "your contact"
 
 
+def _build_app_extra_context(context: CallContext) -> str:
+    """The in-app call: the user is talking with Emysa. Overrides the "speaking as the person
+    who set this call up" framing the classic base prompt carries."""
+    first = (context.user_name or "").strip().split(" ")[0]
+    lines = [
+        "This is a live voice call inside the Emysa app — everything you write is spoken aloud.",
+        "This call is different from a call to someone else, and this overrides any earlier line "
+        "about speaking as a person or being on a phone call as them.",
+        "You are Emysa, a personal assistant. The other person on this call is the person you work "
+        "for. Never speak as them, never use their name as yours, never greet them as Emysa.",
+        f"You are talking with {first}. Use their first name when it fits; it is their name, never yours."
+        if first else "You are talking with the person you work for. Their name is not on file; do not invent one.",
+        "There is nobody else on this call to speak to or represent.",
+    ]
+    lang_name = LANGUAGE_NAMES.get(context.language)
+    if lang_name:
+        lines.append(f"Speak only {lang_name} for the whole call. Never switch language on your own.")
+    brief = (context.instructions or context.objective or "").strip()
+    if brief:
+        lines.append(f"Your private brief for this conversation (not a script to read): {brief}")
+    if context.prior_summaries:
+        lines.append("Earlier calls with them:")
+        lines.extend(f"- {summary}" for summary in context.prior_summaries)
+    if context.memories:
+        lines.append("Things you know about them:")
+        lines.extend(f"- {memory}" for memory in context.memories)
+    return "\n".join(lines)
+
+
 def build_extra_context(context: CallContext) -> str:
     """Compose the per-call block appended under the behavioural prompt.
 
@@ -912,6 +941,8 @@ def build_extra_context(context: CallContext) -> str:
     person who set the call up, and the objective is that person's private
     intention, not a request addressed to an assistant.
     """
+    if str(getattr(context, "platform", "") or "").strip().lower() == "app":
+        return _build_app_extra_context(context)
     lines = ["This is a live phone call — everything you write is spoken aloud."]
     if context.user_name:
         lines.append(
@@ -974,11 +1005,6 @@ class VoicePrefs:
     #: None = no preference row; the user's clone (if any) keeps being used.
     use_custom_voice: bool | None = None
     custom_voice_id: str | None = None
-    #: A voice the user is testing from the app ("elevenlabs" | "cartesia"), with
-    #: their own key. None when they have not saved one.
-    test_tts_provider: str | None = None
-    test_tts_voice_id: str | None = None
-    test_tts_api_key: str | None = None
 
 
 async def fetch_voice_prefs(settings: Settings, user_id: str, session_id: str) -> VoicePrefs | None:
@@ -1002,18 +1028,6 @@ async def fetch_voice_prefs(settings: Settings, user_id: str, session_id: str) -
             filters={"user_id": f"eq.{user_id}"},
             limit=1,
         )
-        # The voice the user is testing (own key, saved in the app). Read on its
-        # own so a missing table or a hiccup here never loses the normal prefs.
-        test_rows: list[dict] = []
-        try:
-            test_rows = await rest.select(
-                "voice_test_settings",
-                select="provider,voice_id,api_key",
-                filters={"user_id": f"eq.{user_id}"},
-                limit=1,
-            )
-        except Exception as exc:  # noqa: BLE001
-            _log("INFO", session_id, "[CALL ENGINE] no test-voice settings", error=type(exc).__name__)
     except Exception as exc:  # noqa: BLE001 - a missing table must not take the call down
         _log("WARNING", session_id, "[CALL ENGINE] could not read voice preferences", error=type(exc).__name__, detail=str(exc)[:160])
         return None
@@ -1023,16 +1037,10 @@ async def fetch_voice_prefs(settings: Settings, user_id: str, session_id: str) -
     clone = clone_rows[0] if clone_rows else {}
     custom_id = clone.get("provider_voice_id") if clone.get("status") == "ready" else None
     use_custom = prefs.get("use_custom_voice")
-    test = test_rows[0] if test_rows else {}
-    test_provider = test.get("provider") if test.get("provider") in ("elevenlabs", "cartesia") else None
-    ok_test = bool(test_provider and test.get("voice_id") and test.get("api_key"))
     return VoicePrefs(
         live_voice_id=prefs.get("live_voice_id") or None,
         use_custom_voice=use_custom if isinstance(use_custom, bool) else None,
         custom_voice_id=custom_id or None,
-        test_tts_provider=test_provider if ok_test else None,
-        test_tts_voice_id=test.get("voice_id") if ok_test else None,
-        test_tts_api_key=test.get("api_key") if ok_test else None,
     )
 
 

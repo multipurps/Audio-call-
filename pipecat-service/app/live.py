@@ -194,7 +194,23 @@ OPENING_CUE = (
 )
 
 
-def opening_cue(greeting: str | None = None) -> str:
+#: The in-app call: the user has just joined a call with Emysa. Nobody is being "rung".
+OPENING_CUE_APP = (
+    "The person you work for has just joined the call with you. Say your short hello now, in "
+    "your own voice as Emysa, the way your instructions describe."
+)
+
+BACKEND_INSTRUCTIONS_APP = (
+    "You are the backend for a live voice call between a person and their assistant, Emysa, inside "
+    f"an app. Your only action is {END_CALL_TOOL}, which hangs up the call. Call it only when the "
+    "conversation is finished and a goodbye has been said, or when the person clearly asked to end "
+    "the call. Otherwise reply in one short plain sentence."
+)
+
+
+def opening_cue(greeting: str | None = None, *, app_call: bool = False) -> str:
+    if app_call:  # a fixed greeting override is written for calls to other people; not used here
+        return OPENING_CUE_APP
     text = (greeting or "").strip()
     if not text:
         return OPENING_CUE
@@ -361,6 +377,7 @@ def build_live_service(
     on_end_call: Any,
     state: LiveCallState | None = None,
     session_id: str | None = None,
+    app_call: bool = False,
 ) -> Any:
     """The GPT-Live service with Responses delegation to the Luna backend."""
     from pipecat.services.openai.live.llm import OpenAILiveLLMService
@@ -375,7 +392,7 @@ def build_live_service(
 
     backend_kwargs: dict[str, Any] = {
         "model": settings.resolved_live_backend_model(),
-        "system_instruction": BACKEND_INSTRUCTIONS,
+        "system_instruction": BACKEND_INSTRUCTIONS_APP if app_call else BACKEND_INSTRUCTIONS,
         "max_completion_tokens": 200,
     }
     effort = (settings.llm_reasoning_effort or "").strip().lower()
@@ -448,6 +465,7 @@ def build_live_pipeline(
     on_end_call: Any = None,
     llm: Any = None,
     session_id: str | None = None,
+    app_call: bool = False,
 ) -> tuple[Any, Any]:
     """Assemble the GPT-Live pipeline. Returns `(pipeline, llm)`."""
     from pipecat.frames.frames import (
@@ -478,6 +496,7 @@ def build_live_pipeline(
             on_end_call=on_end_call,
             state=st,
             session_id=st.session_id,
+            app_call=app_call,
         )
 
     class LiveLatencyProbe(FrameProcessor):

@@ -19,7 +19,7 @@ import { mpRelayRequest } from '../lib/mpRelayClient.js';
 import { resolvePersonSession } from '../lib/personSession.js';
 import { endCallRow, isEndCallRequest, LIVE_CALL_STATUSES } from '../lib/callHangup.js';
 import { OBJECTIVE_BOUNDARY_RULES, sanitizeObjective } from '../lib/callContextGuard.js';
-import { sendCallNote } from '../lib/callNote.js';
+import { sendCallNote, callNoteReply } from '../lib/callNote.js';
 import { availableChannels } from '../lib/phoneLines.js';
 import { createCallRecord, markCallPlaced, markCallFailed, findDuplicateActiveCall } from '../lib/callSession.js';
 import { classifyPlacementError, isRetryCommand, ownerMessageFor, planRetry } from '../lib/callAttempts.js';
@@ -458,9 +458,7 @@ async function sendMessage(req, res, supabase, userId) {
       .order('created_at', { ascending: false }).limit(1).maybeSingle();
     if (noteCall) {
       const result = await sendCallNote(noteCall, text.trim());
-      const replyText = result.ok
-        ? "Passed to Emysa. She'll work it in when the moment's right."
-        : `I couldn't pass that to Emysa: ${result.error}.`;
+      const replyText = callNoteReply(text, result); // one voice: the same "I" that is on the call
       newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', replyText, noteCall.id, msgSource));
       return respond();
     }

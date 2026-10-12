@@ -54,6 +54,14 @@ DEFAULT_GREETING = "Hey, can you hear me okay?"
 
 #: Added to the LLM context the moment the callee answers, then the model is run.
 #: It is a stage direction for the model, not something the person said.
+#: The in-app call, spoken only if the model cannot open it: Emysa, not a caller's "hello".
+APP_GREETING = "Hey, I'm here. Who are we calling?"
+APP_OPENING_CUE = (
+    "[The person you work for has just joined the call with you. Open it now as Emysa: a short, "
+    "natural hello using their first name if you have it, then one short question about what they "
+    "want to get done. Never greet them as Emysa and never introduce yourself with their name.]"
+)
+
 OPENING_CUE = (
     "[The person has just picked up the call. Open it now, the way the person you "
     "are speaking as would if they had just rung someone: a short, natural hello, "
@@ -378,7 +386,16 @@ class _BaseConversation:
         self.transcript: TranscriptLog | None = None
 
     @property
+    def is_app_call(self) -> bool:
+        """The user talking with Emysa herself (not Emysa calling someone on their behalf)."""
+        from app.conversation_policy import is_app_call
+
+        return is_app_call(self.call_context) or str(self.platform or "").strip().lower() == "app"
+
+    @property
     def greeting_text(self) -> str:
+        if self.is_app_call:
+            return APP_GREETING
         return (self._settings.greeting or DEFAULT_GREETING).strip() or DEFAULT_GREETING
 
     @property
@@ -847,15 +864,6 @@ class CallConversation(_BaseConversation):
         want_custom = bool(custom_id) and use_custom
 
         updates: dict[str, Any] = {}
-        # A voice the user is testing from the app (ElevenLabs / Cartesia, their own
-        # key) replaces the TTS for this call and always runs the classic pipeline.
-        test_voice = bool(prefs and prefs.test_tts_provider and prefs.test_tts_voice_id and prefs.test_tts_api_key)
-        if test_voice:
-            updates.update(
-                tts_provider=prefs.test_tts_provider,
-                tts_test_voice_id=prefs.test_tts_voice_id,
-                tts_test_api_key=prefs.test_tts_api_key,
-            )
         if want_custom:
             updates.update(tts_voice_id=custom_id, tts_voice_is_per_call=True)
         elif hello_clone:
@@ -871,10 +879,10 @@ class CallConversation(_BaseConversation):
         self.engine = self._settings.engine_for_call()
         self._first_engine = self.engine
         cfg = self._settings.call_engine
-        if test_voice:
-            self._engine_reason = f"user is testing a {self._settings.tts_provider} voice (classic only; GPT-Live is never used)"
-        elif cfg == "classic":
+        if cfg == "classic":
             self._engine_reason = "ASSISTANT_CALL_ENGINE=classic (kill switch)"
+        elif cfg == "live" and want_custom:
+            self._engine_reason = "ASSISTANT_CALL_ENGINE=live forces GPT-Live; the user's custom voice is ignored"
         elif want_custom:
             self._engine_reason = "user has a custom (cloned) voice selected"
         elif self.engine == "classic":
@@ -920,34 +928,6 @@ class CallConversation(_BaseConversation):
             end_reason=reason,
         )
 
-    def _build_latency_observer(self) -> Any:
-        """One log line per turn naming where the time went.
-
-        Example (seconds): endpointing wait, transcription, LLM inference,
-        speech synthesis, TOTAL. This is what separates "the voice is slow"
-        from "the setup is slow": swap ASSISTANT_TTS_PROVIDER and compare the
-        speech-synthesis line while everything else stays the same.
-        """
-        try:
-            from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
-
-            observer = UserBotLatencyObserver()
-            session_id = self._session_id
-            tts_name = self._settings.tts_provider
-
-            @observer.event_handler("on_latency_breakdown")
-            async def _on_breakdown(_observer: Any, breakdown: Any) -> None:
-                try:
-                    for line in breakdown.turn_contribution_lines():
-                        logger.info("latency session={} tts={} | {}", session_id, tts_name, line)
-                except Exception:  # noqa: BLE001 - diagnostics must never break a call
-                    pass
-
-            return observer
-        except Exception as exc:  # noqa: BLE001 - diagnostics must never break a call
-            logger.warning("latency observer unavailable: {}", type(exc).__name__)
-            return None
-
     async def _launch_pipeline(self) -> None:
         """Build and start the Pipecat pipeline (once)."""
         if self._task is not None:
@@ -979,6 +959,7 @@ class CallConversation(_BaseConversation):
                 on_end_call=self._schedule_assistant_hangup,
                 llm=self._live_llm_override,
                 session_id=self._session_id,
+                app_call=self.is_app_call,
             )
         else:
             clog(
@@ -1000,20 +981,10 @@ class CallConversation(_BaseConversation):
                 transcript=self.transcript,
                 language=self.call_context.language if self.call_context else None,
             )
-        observers = [CallLogObserver(self._session_id, self._settings.secret_values())]
-        if self._settings.latency_log:
-            latency_observer = self._build_latency_observer()
-            if latency_observer is not None:
-                observers.append(latency_observer)
         self._task = PipelineTask(
             pipeline,
-            params=PipelineParams(
-                audio_in_sample_rate=rate,
-                audio_out_sample_rate=rate,
-                # Pipecat's own per-service timing, used by the latency breakdown.
-                enable_metrics=self._settings.latency_log,
-            ),
-            observers=observers,
+            params=PipelineParams(audio_in_sample_rate=rate, audio_out_sample_rate=rate),
+            observers=[CallLogObserver(self._session_id, self._settings.secret_values())],
             enable_rtvi=False,
             # The bridge owns idle/heartbeat/duration limits; a second, silent
             # idle timer inside Pipecat would end calls the bridge considers live.
@@ -1294,7 +1265,7 @@ class CallConversation(_BaseConversation):
             if self._context is None or self._task is None:
                 return
             self._context.add_message(
-                {"role": "developer", "content": opening_cue(self._settings.greeting)}
+                {"role": "developer", "content": opening_cue(self._settings.greeting, app_call=self.is_app_call)}
             )
             await self._task.queue_frame(LLMRunFrame())
             clog("INFO", self._session_id, "live model opening the call")
@@ -1309,9 +1280,9 @@ class CallConversation(_BaseConversation):
         # as, guided by that person's private brief already in its system
         # prompt (no introduction unless the brief asks for one). An explicit
         # ASSISTANT_GREETING override is spoken verbatim instead.
-        if not (self._settings.greeting or "").strip() and self._context is not None:
+        if (self.is_app_call or not (self._settings.greeting or "").strip()) and self._context is not None:
             try:
-                self._context.add_message({"role": "user", "content": OPENING_CUE})
+                self._context.add_message({"role": "user", "content": APP_OPENING_CUE if self.is_app_call else OPENING_CUE})
                 await self._task.queue_frame(LLMRunFrame())
                 clog("INFO", self._session_id, "model opening the call")
                 return
