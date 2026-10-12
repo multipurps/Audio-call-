@@ -21,9 +21,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300;400;500;600&family=Krona+One&display=swap">
   <link rel="stylesheet" href="/vendor/adhs/adhs.css">
-  <link rel="stylesheet" href="/landing.css?v=2026-10-11.6">
+  <link rel="stylesheet" href="/landing.css?v=2026-10-11.7">
   <script src="/vendor/adhs/adhs.js" defer></script>
-  <script src="/landing.js?v=2026-10-11.6" defer></script>
+  <script src="/install-env.js?v=2026-10-11.7" defer></script>
+<script src="/landing.js?v=2026-10-11.7" defer></script>
   <title>Emysa | Calls made in your voice</title>
 </head>
 <body>
@@ -62,6 +63,6 @@
     <div class="foot-meta"><span>&copy; 2026 Octopusfur. All rights reserved.</span><span>Availability of calling channels and voices depends on connected accounts and service configuration.</span></div>
     <div class="foot-mark" id="footMark" aria-hidden="true"><span>Emysa</span></div>
   </footer>
-  <dialog id="installDialog" aria-labelledby="installTitle"><div class="dialog-inner"><button type="button" id="closeInstall" class="close-dialog" aria-label="Close installation instructions">×</button><img src="/icon-192.png" alt="" width="52" height="52"><h2 id="installTitle">Install Emysa</h2><p id="installMessage"></p></div></dialog>
+  <dialog id="installDialog" aria-labelledby="installTitle"><div class="dialog-inner"><button type="button" id="closeInstall" class="close-dialog" aria-label="Close installation instructions">×</button><img src="/icon-192.png" alt="" width="52" height="52"><h2 id="installTitle">Install Emysa</h2><p id="installChip" class="chip" hidden></p><p id="installMessage"></p><ol id="installSteps" class="steps" hidden></ol><p id="installNote" class="note" hidden></p><button type="button" id="installCopy" class="outline" hidden>Copy link</button></div></dialog>
 </body>
 </html>

@@ -167,39 +167,54 @@ window.addEventListener('beforeinstallprompt', (event) => { event.preventDefault
 window.addEventListener('appinstalled', () => { installPrompt = null; if (installGuide?.modalIsShowing()) installGuide.closeModal(); });
 const installed = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true || matchMedia('(display-mode: fullscreen)').matches;
 const dialog = document.getElementById('installDialog');
-const showFallback = (message, title = 'Install Emysa') => {
-  document.getElementById('installTitle').textContent = title;
-  document.getElementById('installMessage').textContent = message;
+const E = window.EmysaInstallEnv;
+const el = (id) => document.getElementById(id);
+// One place that renders the dialog: a plain message, or a guide with detected environment and numbered steps.
+const showFallback = (message, title = 'Install Emysa', extra = {}) => {
+  el('installTitle').textContent = title;
+  el('installMessage').textContent = message || '';
+  el('installMessage').hidden = !message;
+  el('installChip').textContent = extra.chip ? `Detected: ${extra.chip}` : ''; el('installChip').hidden = !extra.chip;
+  const ol = el('installSteps'); ol.replaceChildren(...(extra.steps || []).map((s) => { const li = document.createElement('li'); li.textContent = s; return li; })); ol.hidden = !(extra.steps || []).length;
+  el('installNote').textContent = extra.note || ''; el('installNote').hidden = !extra.note;
+  el('installCopy').hidden = !extra.copy; el('installCopy').textContent = 'Copy link';
   if (!dialog.open) dialog.showModal();
 };
+el('installCopy').addEventListener('click', async () => {
+  const url = location.origin + '/';
+  try { await navigator.clipboard.writeText(url); el('installCopy').textContent = 'Link copied'; }
+  catch { el('installCopy').textContent = url; }
+});
 document.getElementById('closeInstall').addEventListener('click', () => dialog.close());
 dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
+const showGuide = (env) => { const g = E.guide(env); showFallback(g.intro, g.title, { chip: env.chip, steps: g.steps, note: g.note, copy: g.copy }); };
 async function install() {
+  const env = E ? E.detect() : { route: 'generic', chip: '', ios: /iPhone|iPad|iPod/.test(navigator.userAgent), android: /Android/.test(navigator.userAgent) };
   if (installed()) return showFallback('Emysa is already open as an installed app. You can start using it now.', 'Emysa is installed');
+  // 1) The browser's own install prompt (Chrome, Edge and Samsung Internet on Android, Chrome and Edge on desktop).
   if (installPrompt) {
     const prompt = installPrompt;
     installPrompt = null;
     try { await prompt.prompt(); await prompt.userChoice; return; }
-    catch { /* Use guide below if the native event is no longer valid. */ }
+    catch { /* Use the guide below if the native event is no longer valid. */ }
   }
-  if (installGuide) {
+  // 2) The illustrated library guide, only for combinations it covers correctly (Safari, Chrome on iOS, Chrome and Edge on Android, desktop Chrome, Edge and Safari).
+  if (env.route === 'lib' && installGuide) {
     try {
-      const info = installGuide.show('en');
+      installGuide.show('en');
       if (installGuide.modalIsShowing()) return;
-      // The desktop guide may open asynchronously while waiting for the
-      // browser's prompt; avoid an overlapping dialog in that case.
-      if (/Chrome|Edg/i.test(navigator.userAgent) && !/Android|iPhone|iPad/i.test(navigator.userAgent)) {
-        setTimeout(() => {
-          if (!installed() && !installGuide.modalIsShowing() && !dialog.open) showFallback('Use your browser’s install icon or menu to install Emysa. If installation is unavailable, you can still open Emysa in your browser.');
-        }, 2300);
+      // The desktop guide waits for the browser's prompt event; avoid an overlapping dialog while it does.
+      if (!env.ios && !env.android && /Chrome|Edg/i.test(navigator.userAgent)) {
+        setTimeout(() => { if (!installed() && !installGuide.modalIsShowing() && !dialog.open) showFallback('Click the install icon in your browser\u2019s address bar, or open the browser menu and choose Install Emysa.', 'Install Emysa', { chip: env.chip }); }, 2300);
         return;
       }
-    } catch { /* Give actionable generic guidance below. */ }
+    } catch { /* Fall through to our own guide. */ }
   }
-  const ua = navigator.userAgent;
-  if (/iPhone|iPad|iPod/i.test(ua)) showFallback('Open this page in Safari. Tap Share, then Add to Home Screen. If you are in an in-app browser, use its menu to open in Safari first.');
-  else if (/Android/i.test(ua)) showFallback('Open this page in your system browser, then choose Install app or Add to Home screen from the browser menu. If you are in another app, open its menu and choose Open in browser first.');
-  else showFallback('Use your browser’s install icon or menu to install Emysa. On Safari for Mac, choose Add to Dock from the File menu. If installation is unavailable, you can still open Emysa in your browser.');
+  // 3) Our own guide for the combinations the library does not cover: Firefox and Edge on iPhone, Samsung Internet, in-app browsers, desktop Firefox.
+  if (E && env.route !== 'lib') return showGuide(env);
+  // 4) Last resort: say what we detected and give accurate generic steps.
+  if (E) return showGuide({ ...env, route: 'generic' });
+  showFallback('Open your browser menu and choose Install app or Add to Home Screen.');
 }
 document.querySelectorAll('.install-action').forEach((button) => button.addEventListener('click', install));
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));

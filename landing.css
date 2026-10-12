@@ -90,3 +90,8 @@ footer{position:relative;isolation:isolate;padding:clamp(60px,8vw,120px) clamp(2
 
 .feature.nophone{padding-block:clamp(40px,7vw,90px)}
 .txt p .wd{opacity:.3}
+
+/* Install guide */
+.chip{display:inline-block;font-size:12px;letter-spacing:.08em;color:var(--dim);border:1px solid var(--line);padding:6px 12px;justify-self:start}
+.steps{margin:0;padding-left:1.3em;display:grid;gap:10px;color:var(--cream)}.steps li::marker{color:var(--dim)}
+.note{color:var(--dim);font-size:14px}.dialog-inner .outline{justify-self:start}
