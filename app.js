@@ -4500,6 +4500,20 @@ async function loadTestVoice() {
     if (ok) renderTestVoice(data);
   } catch { /* the rest of the voice screen still works */ }
 }
+// Only one test voice is saved per account, so each provider has its own voice ID and key.
+// Switching the provider must never keep showing the other provider's ID.
+$('testVoiceProvider').addEventListener('change', () => {
+  const provider = $('testVoiceProvider').value;
+  const name = TEST_VOICE_NAMES[provider] || 'this provider';
+  const same = !!testVoice?.hasKey && testVoice.provider === provider;
+  $('testVoiceId').value = same ? (testVoice.voiceId || '') : '';
+  $('testVoiceId').placeholder = `Paste the ${name} voice ID`;
+  $('testVoiceKey').value = '';
+  $('testVoiceKey').placeholder = same ? `Saved key ending ${testVoice.keyTail} (leave empty to keep it)` : `Paste your ${name} API key`;
+  $('testVoiceStatus').textContent = same || !testVoice?.hasKey
+    ? ''
+    : `Only one test voice is saved at a time. Enter your ${name} voice ID and key, then save (this replaces your ${TEST_VOICE_NAMES[testVoice.provider] || 'saved'} voice).`;
+});
 $('testVoiceSaveBtn').addEventListener('click', async () => {
   const btn = $('testVoiceSaveBtn'); const status = $('testVoiceStatus');
   btn.disabled = true; status.textContent = 'Saving…';
