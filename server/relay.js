@@ -7,6 +7,7 @@ import {
   shouldEndCall,
 } from '../lib/emotionEngine.js';
 import { createChatCompletion } from '../lib/llmClient.js';
+import { moodPromptLines } from '../lib/callMood.js';
 import {
   retrieveRelevantMemories,
   referencesPriorCall,
@@ -113,6 +114,7 @@ async function loadCallContext(state) {
   const { data: call } = await supabase.from('calls').select('*').eq('id', state.callId).maybeSingle();
   if (!call) return;
   state.objective = call.objective;
+  state.mood = call.mood || null;
   state.callKind = call.call_kind || 'contact';
   if (state.callKind === 'emysa') state.greetingOverride = assistantCallIdentity(state.callKind).greeting;
   state.twilioCallSid = call.twilio_call_sid;
@@ -247,6 +249,7 @@ export function buildSystemPrompt(state) {
       ? [state.instructions ? `How to go about it: ${state.instructions}` : '']
       : briefLines({ objective: state.objective, instructions: state.instructions })),
     state.personality ? `General manner: ${state.personality}` : '',
+    ...moodPromptLines(state.mood),
     state.memoryBlock
       ? state.memoryBlock
       : state.memories?.length

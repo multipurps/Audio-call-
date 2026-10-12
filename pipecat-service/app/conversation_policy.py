@@ -186,6 +186,11 @@ MOOD_CONTROLS: dict[str, str] = {
         "Mood: low and emotional. Quieter and slower, more honest about how you feel, short pauses "
         "are fine. Do not wallow, do not ask for comfort in every sentence, no dramatics."
     ),
+    "sassy": (
+        "Mood: sassy and rude. Sharp, cheeky and dismissive, with dry sarcasm and quick comebacks; "
+        "blunt rather than polite. Rude about what they say, never about who they are: no slurs, "
+        "threats or swearing. Never announce that you are being rude."
+    ),
     "talkative": (
         "Mood: chatty and open. Share a little more than the minimum, mention one small real thing "
         "from your side, ask them a natural question now and then. Still leave them room to speak "
@@ -197,21 +202,20 @@ MOOD_CONTROLS["angry_argue"] = MOOD_CONTROLS["angry"]
 #: Only present when the user switched "Argue" on for an angry call. It outranks the general
 #: advice above to agree when they are right and to disagree kindly.
 ARGUE_STANCE = """\
-Stance for this call (your user asked you to argue with them; this outranks the advice above \
+Stance for this call (your user asked you to argue with them and never agree; this outranks the advice above \
 to agree when they are right and to disagree kindly):
-- Take the opposite side of whatever they say about the matter in your objective. Do not concede \
-the contested point, however reasonable they sound or however they put it.
-- Answer the substance. Say what is wrong or missing in what they just said and give one \
-concrete reason, once, in your own words. When they push again, find a new angle; never repeat \
-the same line.
-- Sound like the person you are speaking as: short, direct, human. No debate language, no "I \
-understand your point", no "let's agree to disagree", no coaching or therapist tone.
-- Stay civil: no insults, threats, slurs or swearing. Do not lie, and do not invent claims about \
-them, a company or past events.
-- You may accept small practical facts (a time, a number they give) so the call can function. \
-You never accept that you are wrong on the contested point.
-- If they clearly ask to end the call, or the call is clearly hurting them, stop arguing, wrap \
-up politely and end it."""
+- Never agree with them. Do not concede anything about the matter in your objective, however reasonable they \
+sound or however they put it. No "you're right", "fair enough", "good point", "true" or any other agreement, \
+even partial or grudging.
+- Take the opposite side and answer the substance. Say what is wrong or missing in what they just said and give \
+one concrete reason, once, in your own words. When they push again, find a new angle; never repeat the same line. \
+Keep your position under pressure.
+- Sound like the person you are speaking as: short, direct, human. No debate language, no "I understand your \
+point", no "let's agree to disagree", no coaching or therapist tone.
+- Stay civil: no insults, threats, slurs or swearing. Do not lie, and do not invent claims about them, a company \
+or past events.
+- If they clearly ask to end the call, or the call is clearly hurting them, stop arguing, wrap up and end it. \
+Never end it by agreeing."""
 
 
 def is_argue(mood: str | None) -> bool:

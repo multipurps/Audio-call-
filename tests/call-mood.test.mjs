@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { normalizeMood, moodFields, moodOfCall, isMissingMoodColumn } from '../lib/callMood.js';
+import { normalizeMood, moodFields, moodOfCall, isMissingMoodColumn, moodPromptLines, ARGUE_PROMPT } from '../lib/callMood.js';
 import { MOOD_OPTIONS, DEFAULT_MOOD, selectMood, toggleArgue, argueVisible, moodButtonLabel, moodPayload, moodChipVisible } from '../lib/moodPicker.js';
 import { createCallRecord } from '../lib/callSession.js';
 import { signPendingCall, verifyPendingCall } from '../lib/pendingCall.js';
@@ -107,7 +107,7 @@ test('assistant.js carries the mood through every call path', () => {
 // ---- the picker ------------------------------------------------------------------------------
 
 test('there are exactly six moods, Natural first', () => {
-  assert.deepEqual(MOOD_OPTIONS.map((o) => o.id), ['natural', 'angry', 'sweet', 'jovial', 'sad', 'talkative']);
+  assert.deepEqual(MOOD_OPTIONS.map((o) => o.id), ['natural', 'angry', 'sassy', 'sweet', 'jovial', 'sad', 'talkative']);
   assert.equal(MOOD_OPTIONS.find((o) => o.id === 'jovial').sub, 'funny');
   assert.equal(MOOD_OPTIONS.find((o) => o.id === 'sad').sub, 'emotional');
 });
@@ -172,4 +172,34 @@ test('typed messages send the mood; spoken in-call messages never do; it resets 
   assert.match(app, /\.\.\.\(isCall \? \{\} : moodPayload\(moodState\)\)/);
   assert.match(app, /await sendChatMessage\(text, null, 'text', currentCallChannel\(\)\);\n\s+resetMood\(\);/);
   assert.match(app, /\['moodBtn', 'moodMenu'\]\.forEach\(\(id\) => \$\(id\)\.addEventListener\('pointerdown', \(e\) => e\.preventDefault\(\)\)\)/);
+});
+
+// ---- Sassy / rude, and the engines that build their prompt in JS -------------------------
+
+test('sassy is a real mood, never combined with argue, and shows in the menu', () => {
+  assert.equal(normalizeMood('sassy'), 'sassy');
+  assert.equal(normalizeMood('sassy', true), 'sassy');
+  assert.deepEqual(moodPayload(selectMood(DEFAULT_MOOD, 'sassy')), { mood: 'sassy' });
+  assert.match(html, /data-mood="sassy"/);
+});
+
+test('classic Twilio relays get the mood and the literal argue stance', () => {
+  assert.deepEqual(moodPromptLines(null), []);
+  assert.deepEqual(moodPromptLines('natural'), []);
+  assert.match(moodPromptLines('sassy').join('\n'), /sassy and rude/);
+  assert.ok(!moodPromptLines('angry').join('\n').includes(ARGUE_PROMPT));
+  const argue = moodPromptLines('angry_argue').join('\n');
+  assert.match(argue, /Never agree with them/);
+  assert.match(argue, /No "you're right"/);
+  for (const f of ['server/relay.js', 'server/patter-relay.js']) {
+    const src = read(f);
+    assert.match(src, /moodPromptLines/, f);
+    assert.match(src, /call\.mood/, f);
+  }
+});
+
+test('WhatsApp, Telegram and Signal direct placement store the mood', async () => {
+  const social = read('api/social-calling.js');
+  assert.equal((social.match(/\n\s+mood,\n/g) || []).length, 3);
+  assert.match(social, /normalizeMood\(req\.body\?\.mood/);
 });

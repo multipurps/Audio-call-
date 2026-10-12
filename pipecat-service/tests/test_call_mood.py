@@ -95,7 +95,7 @@ def test_argue_stance_is_bounded_and_does_not_sound_like_a_debate_bot():
     assert "do not lie" in t.lower()
     assert "debate language" in t.lower() and "therapist" in t.lower()   # named as things NOT to do
     assert "clearly ask to end the call" in t.lower()                      # a way out is always there
-    assert "small practical facts" in t.lower()                            # logistics still work
+    assert "never agree" in t.lower() and "no \"you're right\"" in t.lower()   # literal: no agreement of any kind
 
 
 def test_only_angry_argue_is_argue():
@@ -142,3 +142,21 @@ async def test_a_database_without_the_mood_column_still_resolves_the_call():
     row = await _find_call_row(rest, session_id="call-c1", platform="whatsapp")
     assert row and "mood" not in row                       # falls back, call is unaffected
     assert rest.tried[:2] == [_CALL_COLUMNS_MOOD, _CALL_COLUMNS_FULL]
+
+
+def test_sassy_is_a_mood_with_its_own_line_and_no_argue():
+    from app.conversation_policy import is_argue
+    assert "sassy and rude" in MOOD_CONTROLS["sassy"]
+    assert not is_argue("sassy")
+    p = _prompt("sassy")
+    assert MOOD_CONTROLS["sassy"] in p
+    assert "Stance for this call" not in p
+
+
+def test_the_non_live_pipeline_also_gets_mood_and_argue():
+    from app.call_context import build_extra_context
+    ctx = _ctx("angry_argue") if "_ctx" in globals() else None
+    assert ctx is not None
+    text = build_extra_context(ctx)
+    assert MOOD_CONTROLS["angry"] in text and ARGUE_STANCE in text
+    assert MOOD_CONTROLS["angry"] not in build_extra_context(_ctx(""))

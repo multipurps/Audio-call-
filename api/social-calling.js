@@ -7,6 +7,7 @@ import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
 import { signalStartLink, signalLinkStatus, signalRemoveAccount, signalPlaceCall, signalHangup } from '../lib/signalClient.js';
 import { resolvePersonSession } from '../lib/personSession.js';
+import { normalizeMood } from '../lib/callMood.js';
 import {
   createCallRecord,
   markCallPlaced,
@@ -672,6 +673,7 @@ async function signalDisconnect(req, res, supabase, userId) {
 async function placeCall(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { platform, objective, instructions, contactId, contactName, sessionId } = req.body || {};
+  const mood = normalizeMood(req.body?.mood, req.body?.argue === true); // call mood from the app (null = natural)
   const to = String(req.body?.to || req.body?.toNumber || '').trim();
   if (platform !== 'telegram' && platform !== 'whatsapp' && platform !== 'signal') return res.status(400).json({ error: "platform must be 'telegram', 'whatsapp' or 'signal'" });
   if (!to) return res.status(400).json({ error: 'to required' });
@@ -707,6 +709,7 @@ async function placeCall(req, res, supabase, userId) {
       instructions: instructions || null,
       contactId: contactId || null,
       sessionId: effectiveSession,
+      mood,
     });
     try {
       // Place the call AND attach the assistant. This used to only start the
@@ -763,6 +766,7 @@ async function placeCall(req, res, supabase, userId) {
       instructions: instructions || null,
       contactId: contactId || null,
       sessionId: effectiveSession,
+      mood,
     });
     try {
       const started = await signalPlaceCall(sgRow.signal_number, to, { userId });
@@ -808,6 +812,7 @@ async function placeCall(req, res, supabase, userId) {
     instructions: instructions || null,
     contactId: contactId || null,
     sessionId: sessionId || null,
+    mood,
   });
   try {
     const data = await mpRelayRequest('/calls', {

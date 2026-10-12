@@ -12,6 +12,7 @@ import {
   referencesPriorCall,
 } from '../lib/memoryManager.js';
 import { maybeGenerateCallSummary } from '../lib/callSession.js';
+import { moodPromptLines } from '../lib/callMood.js';
 import { transcribeAudioBuffer, DEFAULT_STT_MODEL } from '../lib/sttClient.js';
 import { isSpeechLikePcm16, resolvePatterLlmConfig } from './audioUtils.js';
 import { Patter, Twilio, CustomLLM } from 'getpatter';
@@ -176,6 +177,7 @@ const SYSTEM_PROMPT_TEMPLATE = [
   `{objective}`,
   `{instructions_line}`,
   `{personality_line}`,
+  `{mood_line}`,
   `{memories_line}`,
   `{emotion_block}`,
   ``,
@@ -208,6 +210,7 @@ async function loadCallContext(callId) {
 
   const ctx = {
     objective: call.objective || '',
+    mood: call.mood || null,
     instructions: '',
     personality: '',
     userId: call.user_id,
@@ -276,6 +279,7 @@ export function contextToVariables(ctx) {
     objective: identity ? `What this call is for: ${ctx.objective}` : briefLines({ objective: ctx.objective }).join('\n'),
     instructions_line: identity ? (ctx.instructions ? `How to go about it: ${ctx.instructions}` : '') : brief.join('\n'),
     personality_line: ctx.personality ? `General manner: ${ctx.personality}` : '',
+    mood_line: moodPromptLines(ctx.mood).join('\n'),
     memories_line: ctx.memoryBlock
       ? ctx.memoryBlock
       : ctx.memories?.length
