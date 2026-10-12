@@ -687,10 +687,62 @@ let activeHeaderCall = null; // { id, toNumber, contactName } | null
 let headerCallChannel = null;
 let userCallsRealtimeChannel = null;
 
+// ---- Header logo: spins once and turns on the heartbeat glow only when a call starts ----
+// Outside a call the header shows the regular logo (no ring, no glow).
+const HEADER_SPIN_MS = 1800;
+let headerFxRaf = 0, headerFxBeatFrom = 0, headerFxG = 0.4;
+const headerFxSeed = Math.random() * 100;
+function headerFxLoop(now) {
+  const wrap = $('homeHeaderLogoWrap');
+  if (!wrap.classList.contains('calling')) { headerFxRaf = 0; return; }
+  let target = 0.5;
+  if (now >= headerFxBeatFrom) {
+    // Layered rhythm (swell + beat + voice-like flutter) so the glow breathes as if reacting to sound.
+    const t = (now - headerFxBeatFrom) / 1000 + headerFxSeed;
+    const beat = Math.pow(Math.max(0, Math.sin(t * 5.2)), 3) * 0.45;
+    const swell = (Math.sin(t * 1.3) + 1) / 2 * 0.35;
+    const voice = (Math.sin(t * 9.1) * Math.sin(t * 2.7) + 1) / 2 * 0.25;
+    target = Math.min(1, 0.12 + swell + beat + voice);
+  }
+  headerFxG += (target - headerFxG) * (target > headerFxG ? 0.35 : 0.08);
+  wrap.style.setProperty('--g', headerFxG.toFixed(3));
+  headerFxRaf = requestAnimationFrame(headerFxLoop);
+}
+function headerGlowOn() {
+  const wrap = $('homeHeaderLogoWrap');
+  wrap.classList.remove('hidden');
+  wrap.classList.add('calling');
+  if (!headerFxRaf) headerFxRaf = requestAnimationFrame(headerFxLoop);
+}
+function headerGlowOff() {
+  const wrap = $('homeHeaderLogoWrap');
+  wrap.classList.remove('calling', 'spin');
+  if (headerFxRaf) { cancelAnimationFrame(headerFxRaf); headerFxRaf = 0; }
+  headerFxBeatFrom = 0;
+  wrap.style.removeProperty('--g');
+}
+// One spin with the ring fading in, then the heartbeat starts. Resolves when the spin is done.
+function playHeaderCallIntro() {
+  const wrap = $('homeHeaderLogoWrap');
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const ms = reduce ? 400 : HEADER_SPIN_MS;
+  wrap.classList.remove('hidden', 'spin');
+  void wrap.offsetWidth;
+  if (!reduce) wrap.classList.add('spin');
+  headerFxBeatFrom = performance.now() + ms;
+  headerGlowOn();
+  return new Promise((resolve) => setTimeout(() => { wrap.classList.remove('spin'); resolve(); }, ms));
+}
+// Call initiated from chat: spin + glow in the header, then open the call screen on its own.
+function startCallWithHeaderFx(callId, toNumber, contactName) {
+  playHeaderCallIntro().then(() => {
+    if (activeHeaderCall && activeHeaderCall.id === callId) openCallScreen(callId, toNumber, contactName);
+  });
+}
+
 function trackActiveCall(callId, toNumber, contactName) {
   activeHeaderCall = { id: callId, toNumber, contactName };
-  $('homeHeaderLogoWrap').classList.remove('hidden');
-  $('homeHeaderLogoWrap').classList.add('calling');
+  headerGlowOn();
   if (headerCallChannel) supabase.removeChannel(headerCallChannel);
   headerCallChannel = supabase
     .channel(`header-call-${callId}`)
@@ -702,7 +754,7 @@ function trackActiveCall(callId, toNumber, contactName) {
 
 function clearActiveCall() {
   activeHeaderCall = null;
-  $('homeHeaderLogoWrap').classList.remove('calling');
+  headerGlowOff();
   if (headerCallChannel) { supabase.removeChannel(headerCallChannel); headerCallChannel = null; }
 }
 
@@ -801,7 +853,7 @@ async function handleChatResponse(data, isCall, onReply) {
     if (data.callId && data.toNumber) {
       trackActiveCall(data.callId, data.toNumber, data.contactName);
       clearPreCallContext();
-      openCallScreen(data.callId, data.toNumber, data.contactName);
+      startCallWithHeaderFx(data.callId, data.toNumber, data.contactName);
     }
     if (onReply) await onReply('', data);
     return;
@@ -809,7 +861,7 @@ async function handleChatResponse(data, isCall, onReply) {
   if (data.callId && data.toNumber) {
     trackActiveCall(data.callId, data.toNumber, data.contactName);
     clearPreCallContext();
-    openCallScreen(data.callId, data.toNumber, data.contactName);
+    startCallWithHeaderFx(data.callId, data.toNumber, data.contactName);
   }
   // The server can pick a different line than the UI's sticky selection -
   // e.g. the user typed "call him on WhatsApp" while the badge still said
@@ -1181,8 +1233,7 @@ function minimizeCallScreenToChat() {
   stopRingback();
   $('callScreen').classList.add('hidden');
   if (assistantCallOpen || activeCallScreenId) {
-    $('homeHeaderLogoWrap').classList.remove('hidden');
-    $('homeHeaderLogoWrap').classList.add('calling');
+    headerGlowOn();
   }
 }
 
@@ -1193,7 +1244,7 @@ function endAssistantCall() {
   $('callScreen').classList.add('hidden');
   $('callScreen').classList.remove('assistantMode');
   $('callContactAvatar').style.display = '';
-  if (!activeHeaderCall) $('homeHeaderLogoWrap').classList.remove('calling');
+  if (!activeHeaderCall) headerGlowOff();
   callTranscriptForSummary = [];
 }
 
@@ -1206,7 +1257,7 @@ function openAssistantCallScreen() {
   assistantCallOpen = true;
   assistantMuted = false;
   callTranscriptForSummary = [];
-  $('callScreen').classList.remove('hidden', 'captionsHidden');
+  $('callScreen').classList.remove('captionsHidden');
   $('callScreen').classList.add('assistantMode');
   $('callFaceTimeBtn')?.classList.add('active');
   $('callAudioBtn').innerHTML = MORE_BTN_HTML;
@@ -1217,8 +1268,7 @@ function openAssistantCallScreen() {
   $('waveRow').classList.remove('speaking');
   $('callMuteBtn').classList.remove('active');
   setCallStatePill('connecting', 'Connecting…');
-  $('homeHeaderLogoWrap').classList.remove('hidden');
-  $('homeHeaderLogoWrap').classList.add('calling');
+  playHeaderCallIntro().then(() => { if (assistantCallOpen) $('callScreen').classList.remove('hidden'); });
 
   const startedAt = Date.now();
   clearInterval(callTimerInterval);
@@ -1868,7 +1918,7 @@ function renderCallPlanAction(bubble, plan) {
       if (revision === chatRevision) {
         clearPreCallContext();
         renderHomeMessages(data.messages || [], false);
-        openCallScreen(data.callId, data.toNumber, data.contactName);
+        startCallWithHeaderFx(data.callId, data.toNumber, data.contactName);
       }
     } catch (err) {
       // Keep disabled on ambiguous network failures; reload the persisted plan
