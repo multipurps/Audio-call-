@@ -23,8 +23,8 @@ def test_default_is_still_fish():
 
 
 @pytest.mark.parametrize("prov,cls_path", [
-    ("elevenlabs", "pipecat.services.elevenlabs.tts.ElevenLabsTTSService"),
-    ("cartesia", "pipecat.services.cartesia.tts.CartesiaTTSService"),
+    ("elevenlabs", "pipecat.services.elevenlabs.tts.ElevenLabsHttpTTSService"),
+    ("cartesia", "pipecat.services.cartesia.tts.CartesiaHttpTTSService"),
 ])
 def test_build_tts_uses_the_users_saved_voice_and_key(prov, cls_path):
     pytest.importorskip("pipecat")
@@ -33,9 +33,14 @@ def test_build_tts_uses_the_users_saved_voice_and_key(prov, cls_path):
     mod, cls = cls_path.rsplit(".", 1)
     s = dataclasses.replace(load_settings(dict(BASE)), tts_provider=prov, tts_test_voice_id="vendor-voice-123",
                             tts_test_api_key="user-key-abcdefgh", tts_voice_id="fish-clone-id-99999", tts_voice_is_per_call=True)
-    tts = build_tts(s)
+    async def _build():
+        return build_tts(s)
+
+    tts = asyncio.run(_build())
     assert isinstance(tts, getattr(importlib.import_module(mod), cls))
     assert tts._settings.voice == "vendor-voice-123"   # never the Fish clone id
+    # HTTP (one request per sentence), never the websocket service that dropped the audio
+    assert "Http" in type(tts).__mro__[1].__name__ or "Http" in type(tts).__name__
     assert "user-key-abcdefgh" in s.secret_values()   # redacted from logs
 
 
