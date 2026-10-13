@@ -1203,3 +1203,8 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 /* Keep the button labels readable over the bright end of the glow. */
 .callGlow img{opacity:.8;}
 .callSheet .callBtn{color:#f2e6e3; text-shadow:0 1px 10px rgba(0,0,0,.75), 0 0 2px rgba(0,0,0,.6);}
+
+/* Mute icon: a plain microphone; the slash and its cut-out appear only while actually muted. */
+#callMuteBtn .micOff, #callMuteBtn .micSlash{display:none;}
+#callMuteBtn.active .micOn{display:none;}
+#callMuteBtn.active .micOff, #callMuteBtn.active .micSlash{display:inline;}

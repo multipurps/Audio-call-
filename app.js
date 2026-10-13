@@ -1266,7 +1266,7 @@ function openAssistantCallScreen() {
   $('callTitleText').textContent = 'Emysa';
   $('transcriptPanel').textContent = '';
   $('waveRow').classList.remove('speaking');
-  $('callMuteBtn').classList.remove('active');
+  $('callMuteBtn').classList.remove('active'); $('callMuteBtn').setAttribute('aria-pressed', 'false');
   setCallStatePill('connecting', 'Connecting…');
   playHeaderCallIntro().then(() => { if (assistantCallOpen) $('callScreen').classList.remove('hidden'); });
 
@@ -1288,7 +1288,7 @@ function openAssistantCallScreen() {
   };
   $('callMuteBtn').onclick = () => {
     assistantMuted = !assistantMuted;
-    $('callMuteBtn').classList.toggle('active', assistantMuted);
+    $('callMuteBtn').classList.toggle('active', assistantMuted); $('callMuteBtn').setAttribute('aria-pressed', String(assistantMuted));
     applyCallPill(assistantCallPill({ muted: assistantMuted }));
     if (appCall) appCall.muted = assistantMuted;
   };
@@ -2184,8 +2184,6 @@ function applyCallStatusUpdate(callRow) {
 let callEndShownFor = null;
 
 function openCallScreen(callId, toNumber, contactName) {
-  // The glow GIF is large; fetch it the first time a call screen opens, not at app start.
-  const glow = $('callGlowImg'); if (glow && !glow.getAttribute('src')) glow.src = glow.dataset.src;
   const isSameCall = activeCallScreenId === callId && !$('callScreen').classList.contains('hidden');
   activeCallScreenId = callId;
   $('callScreen').classList.remove('hidden', 'captionsHidden');
@@ -2256,7 +2254,7 @@ function openCallScreen(callId, toNumber, contactName) {
 
   $('callMuteBtn').onclick = async () => {
     callAiMuted = !callAiMuted;
-    $('callMuteBtn').classList.toggle('active', callAiMuted);
+    $('callMuteBtn').classList.toggle('active', callAiMuted); $('callMuteBtn').setAttribute('aria-pressed', String(callAiMuted));
     applyCallPill(answeredCallPill({ aiMuted: callAiMuted }));
     await authedFetch('/api/calls?action=mute', {
       method: 'POST',
@@ -5579,3 +5577,13 @@ async function askNotificationsOnInstall() {
   if (!consented) banner.classList.remove('hidden');
   else if (notificationsAskable()) document.addEventListener('pointerup', askNotificationsOnInstall, { once: true });
 })();
+
+
+// Call-screen glow GIF (large): fetched the first time the call screen is shown, by any path (a normal call or
+// Call Emysa), not at app start.
+{
+  const screen = document.getElementById('callScreen');
+  const glow = document.getElementById('callGlowImg');
+  const loadGlow = () => { if (glow && !glow.getAttribute('src') && !screen.classList.contains('hidden')) glow.src = glow.dataset.src; };
+  if (screen && glow) { new MutationObserver(loadGlow).observe(screen, { attributes: true, attributeFilter: ['class'] }); loadGlow(); }
+}
