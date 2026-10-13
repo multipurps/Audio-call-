@@ -25,3 +25,12 @@ test('number beats contact id beats name beats call id; different people stay ap
   assert.notEqual(personKeyForCall({ id: '1', contact_name: 'Emysa' }), personKeyForCall({ id: '2', contact_name: 'Victor' }));
   assert.equal(personKeyForCall({ id: '9' }), 'i:9');
 });
+
+test('Recent top row and select bar clear the notch, and the select button sits left of the search bar', () => {
+  const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(css, /#screen-recent \.recentTopRow\{[^}]*var\(--safe-top\)/);
+  assert.match(css, /#screen-recent \.recentSelectBar\{[^}]*var\(--safe-top\)/);
+  assert.match(css, /#screen-recent \.recentTopRow \.searchBar\{[^}]*margin:0/);
+  assert.ok(html.indexOf('id="recentSelectBtn"') < html.indexOf('id="recentSearch"'));
+});
