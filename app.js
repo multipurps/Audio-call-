@@ -2839,6 +2839,10 @@ function personKeyForCall(c) {
   const digits = String(c.to_number || '').replace(/\D/g, '');
   if (digits.length >= 7) return `p:${digits}`;
   if (c.contact_id) return `c:${c.contact_id}`;
+  // Calls with neither a usable number nor a contact id (e.g. calls to Emysa herself) used to
+  // fall through to one row per call. Group them by name instead.
+  const name = String(c.contact_name || '').trim().toLowerCase();
+  if (name) return `n:${name}`;
   return `i:${c.id}`;
 }
 
