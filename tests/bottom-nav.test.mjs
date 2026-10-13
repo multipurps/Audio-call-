@@ -20,3 +20,11 @@ test('bottom nav: the pill script is loaded and drives the active tab', () => {
   assert.match(js, /\.tabBtn\.active/);
   assert.match(js, /requestAnimationFrame/);
 });
+
+test('bottom nav: a scrim sits under the icons so scrolling content cannot collide with them', () => {
+  const css = read('styles.css');
+  assert.match(css, /#tabScrim\{[^}]*pointer-events:none/);
+  assert.match(css, /#tabScrim\{[^}]*backdrop-filter:blur/);
+  const html = read('index.html');
+  assert.ok(html.indexOf('id="tabScrim"') > 0 && html.indexOf('id="tabScrim"') < html.indexOf('id="tabBar"'), 'scrim must come before the nav');
+});
