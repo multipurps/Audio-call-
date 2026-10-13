@@ -5655,11 +5655,15 @@ async function askNotificationsOnInstall() {
 })();
 
 
-// Call-screen glow GIF (large): fetched the first time the call screen is shown, by any path (a normal call or
-// Call Emysa), not at app start.
+// Call-screen glow (a 183 KB animated WebP): warmed up shortly after the app starts so it is ready before the first
+// call, and fetched at once if the call screen appears first, by any path (a normal call or Call Emysa).
 {
   const screen = document.getElementById('callScreen');
   const glow = document.getElementById('callGlowImg');
-  const loadGlow = () => { if (glow && !glow.getAttribute('src') && !screen.classList.contains('hidden')) glow.src = glow.dataset.src; };
-  if (screen && glow) { new MutationObserver(loadGlow).observe(screen, { attributes: true, attributeFilter: ['class'] }); loadGlow(); }
+  const loadGlow = () => { if (glow && !glow.getAttribute('src')) glow.src = glow.dataset.src; };
+  if (screen && glow) {
+    glow.addEventListener('error', () => { glow.parentElement.hidden = true; }); // never show a broken-image icon
+    new MutationObserver(() => { if (!screen.classList.contains('hidden')) loadGlow(); }).observe(screen, { attributes: true, attributeFilter: ['class'] });
+    (window.requestIdleCallback || ((f) => setTimeout(f, 3500)))(loadGlow, { timeout: 6000 });
+  }
 }
