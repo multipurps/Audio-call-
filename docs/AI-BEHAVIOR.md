@@ -34,6 +34,9 @@ Not covered: `server/patter-relay.js` (legacy Twilio Patter path) and `server-so
 The Test tab compares the published config with the proposed one on sample lines. Both models are tested as text
 through Luna; this checks wording and rule-following, not audio, interruptions or GPT-Live voice latency.
 
+## Model safety
+The OpenAI Sol models (gpt-6-sol, gpt-6.1-sol) are hard-blocked. `lib/modelGuard.js` and `pipecat-service/app/config.py` swap any model name containing the token "sol" for the safe default before a request is built, whatever an env var or caller passes. Only gpt-6-luna and gpt-live-1 are used for conversation.
+
 ## Call Emysa (training call)
 Admin tab **Call Emysa** starts a live call with the raw Emysa users will get, with the same call audio and a live transcript.
 - Runs on the latest **draft** guidance and draft knowledge (`sql/042_ai_trainer.sql`, `p_use_draft`), so changes can be heard before publishing.

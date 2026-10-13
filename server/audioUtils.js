@@ -1,3 +1,4 @@
+import { allowedModel } from '../lib/modelGuard.js';
 // Pure audio & per-call session utilities for the Twilio Media Streams relays.
 // Kept free of external runtime dependencies so unit tests and serverless checks
 // can import and verify WAV framing and per-call voice isolation directly.
@@ -94,7 +95,7 @@ export function resolvePatterLlmConfig(env = process.env) {
   }
   return {
     provider: 'openai',
-    model: env.LLM_MODEL || env.LUNA_MODEL || 'gpt-6-luna',
+    model: allowedModel(env.LLM_MODEL || env.LUNA_MODEL, 'gpt-6-luna'),
     apiKey: lunaKey,
     baseUrl: env.LLM_BASE_URL || env.LUNA_BASE_URL || 'https://api.openai.com/v1',
     temperature: 0.65,

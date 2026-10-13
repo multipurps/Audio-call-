@@ -74,3 +74,23 @@ def test_trainer_registry_and_draft_flag():
     assert trainer_engine("call-x") == "live"
     clear_trainer("call-x")
     assert trainer_engine("call-x") is None
+
+
+def test_sol_models_are_never_resolved():
+    from app.config import DEFAULT_LIVE_MODEL, DEFAULT_LLM_MODEL, allowed_model, is_blocked_model, load_settings
+
+    for n in ("gpt-6-sol", "gpt-6.1-sol", "openai/gpt-6-sol", "GPT-6.1-SOL"):
+        assert is_blocked_model(n), n
+    for n in ("gpt-6-luna", "gpt-live-1", "solid-model", "", None):
+        assert not is_blocked_model(n), n
+    assert allowed_model("gpt-6.1-sol", "gpt-6-luna") == "gpt-6-luna"
+
+    env = {"ASSISTANT_LLM_MODEL": "gpt-6.1-sol", "ASSISTANT_LIVE_MODEL": "gpt-6-sol", "OPENAI_API_KEY": "k", "ASSISTANT_MOCK_MODE": "true"}
+    s = load_settings(env)
+    assert s.live_model == DEFAULT_LIVE_MODEL
+    assert s.resolved_llm_model() == DEFAULT_LLM_MODEL
+    s2 = load_settings({**env, "ASSISTANT_LLM_MODEL": "gpt-6-luna"})
+    import dataclasses
+
+    s2 = dataclasses.replace(s2, live_backend_model="gpt-6.1-sol")
+    assert s2.resolved_live_backend_model() == "gpt-6-luna"

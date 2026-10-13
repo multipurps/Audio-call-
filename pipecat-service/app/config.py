@@ -63,6 +63,26 @@ DEFAULT_LLM_MODEL = "gpt-6-luna"
 CALL_ENGINES = ("auto", "live", "classic")
 DEFAULT_CALL_ENGINE = "auto"
 DEFAULT_LIVE_MODEL = "gpt-live-1"
+
+_BLOCKED_MODEL = re.compile(r"(^|[^a-z0-9])sol($|[^a-z0-9])")
+
+
+def is_blocked_model(name: str | None) -> bool:
+    """The OpenAI "Sol" models (gpt-6-sol, gpt-6.1-sol...) must never be called."""
+    return bool(_BLOCKED_MODEL.search((name or "").lower()))
+
+
+def allowed_model(name: str | None, fallback: str) -> str:
+    """Return name, or fallback when it is empty or a blocked (Sol) model."""
+    n = (name or "").strip()
+    if not n:
+        return fallback
+    if is_blocked_model(n):
+        import logging
+
+        logging.getLogger(__name__).warning("blocked model %r; using %r instead", n, fallback)
+        return fallback
+    return n
 DEFAULT_LIVE_VOICE = "gleam"
 
 #: GPT-Live built-in voices, copied from OpenAI's "Managing GPT-Live sessions" guide
@@ -443,7 +463,7 @@ class Settings:
         }
 
     def resolved_live_backend_model(self) -> str:
-        return self.live_backend_model or self.resolved_llm_model()
+        return allowed_model(self.live_backend_model, self.resolved_llm_model())
 
     def live_api_key(self) -> str | None:
         return self.openai_api_key or self.luna_api_key
@@ -485,7 +505,7 @@ class Settings:
 
     def resolved_llm_model(self) -> str:
         if self.llm_model:
-            return self.llm_model
+            return allowed_model(self.llm_model, DEFAULT_LLM_MODEL)
         # luna and openai both run on OpenAI; the default model is the same.
         return DEFAULT_LLM_MODEL
 
@@ -532,7 +552,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         llm_max_tokens=_env_int(env, "ASSISTANT_LLM_MAX_TOKENS", 200, minimum=1),
         llm_reasoning_effort=(_env(env, "ASSISTANT_LLM_REASONING_EFFORT") or "none").strip().lower(),
         call_engine=(_env(env, "ASSISTANT_CALL_ENGINE") or DEFAULT_CALL_ENGINE).strip().lower(),
-        live_model=_env(env, "ASSISTANT_LIVE_MODEL", DEFAULT_LIVE_MODEL) or DEFAULT_LIVE_MODEL,
+        live_model=allowed_model(_env(env, "ASSISTANT_LIVE_MODEL", DEFAULT_LIVE_MODEL), DEFAULT_LIVE_MODEL),
         caller_state_enabled=_env_bool(env, "CALLER_STATE_ENABLED", True),
         live_voice=(_env(env, "ASSISTANT_LIVE_VOICE", DEFAULT_LIVE_VOICE) or DEFAULT_LIVE_VOICE).strip().lower(),
         live_base_url=_env(env, "ASSISTANT_LIVE_BASE_URL", DEFAULT_LIVE_BASE_URL) or DEFAULT_LIVE_BASE_URL,
