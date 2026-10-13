@@ -38,10 +38,11 @@ through Luna; this checks wording and rule-following, not audio, interruptions o
 The OpenAI Sol models (gpt-6-sol, gpt-6.1-sol) are hard-blocked. `lib/modelGuard.js` and `pipecat-service/app/config.py` swap any model name containing the token "sol" for the safe default before a request is built, whatever an env var or caller passes. Only gpt-6-luna and gpt-live-1 are used for conversation.
 
 ## Call Emysa (training call)
-Admin tab **Call Emysa** starts a live call with the raw Emysa users will get, with the same call audio and a live transcript.
-- Runs on the latest **draft** guidance and draft knowledge (`sql/042_ai_trainer.sql`, `p_use_draft`), so changes can be heard before publishing.
-- Raw: no user memory, profile, contacts or saved voice settings. Not billed, no summary or push (platform `app`).
-- Engine pick: GPT-Live (default voice) or Luna (classic path, default voice).
-- Auth: `?action=ai-train-call-start` (admin only) signs a token under the `trainercall:` prefix; the voice service only treats a session as a trainer call after verifying it (`app/app_call.py::verify_any_app_call_token`).
-- Teaching: mark an Emysa line Wrong or Good; it becomes a draft correction or example. Nothing is promoted automatically. Publish it in the Knowledge tab, or use "Save and publish".
-- The call row is kept under the admin's own account as "Emysa training" so the transcript can be reviewed.
+Admin tab **Call Emysa** opens the normal Emysa call screen in training mode (`/?trainer=1`). It is the same screen, mic, audio and live transcript users get.
+- Runs the raw Emysa on the latest **draft** guidance and draft knowledge (`sql/042_ai_trainer.sql`). No user memory, profile, contacts or saved voice settings.
+- **She learns by herself.** While the call runs (every 15 s) and once more when it ends, the app calls `ai-train-learn`. The server reads the new transcript lines and asks Luna for the lasting lessons the trainer taught. Each one is saved as a **draft** note tagged `from-training-call`. Existing drafts are updated instead of duplicated, a lesson that would change a published note becomes a new draft that says what it replaces, and anything that looks like a secret is dropped.
+- New memories are used from the **next** training call (instructions are fixed when a call starts).
+- Review: the tab lists what she learned; edit, delete, publish one, or publish all. The Knowledge tab shows the same notes. Users only get a memory after it is published.
+- Not billed (`sql/043_training_calls_free.sql`: the minutes trigger skips `to_number = 'Emysa training'`), no call summary (platform `app` calls are skipped by the summary code), never treated as a briefing.
+- Auth: `ai-train-call-start` and `ai-train-learn` are admin only. The start action signs a `trainercall:` token; the voice service only treats a call as training after verifying it.
+- Engine: GPT-Live by default; the Advanced link runs the Luna (custom-voice) path. Both read the same memories.

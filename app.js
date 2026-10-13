@@ -302,6 +302,7 @@ function startPendingPoll() {
 async function enterApp(session) {
   currentSession = session;
   currentUser = session.user;
+  if (TRAINER_URL && !window.__trainerGateShown) { window.__trainerGateShown = true; setTimeout(showTrainerGate, 900); }
   // This Supabase project may be shared with other apps of yours — mark this
   // user as belonging to Audio Call so the admin's user list can filter to
   // just this app instead of showing every account on the shared project.
@@ -1250,14 +1251,17 @@ function endAssistantCall() {
   $('callContactAvatar').style.display = '';
   if (!activeHeaderCall) headerGlowOff();
   callTranscriptForSummary = [];
+  if (TRAINER_URL) setTimeout(showTrainerGate, 1500);
 }
 
-function openAssistantCallScreen() {
+function openAssistantCallScreen(opts) {
   if (assistantCallOpen) {
     $('callScreen').classList.remove('hidden');
     return;
   }
-  if (needsTopUp()) { sendToAddTime(); return; } // no minutes: skip the call screen entirely
+  const trainer = opts && opts.trainer === true;
+  trainerCall = trainer ? { engine: opts.engine === 'luna' ? 'luna' : 'live', nextIndex: 0, busy: false, timer: null } : null;
+  if (!trainer && needsTopUp()) { sendToAddTime(); return; } // no minutes: skip the call screen entirely
   assistantCallOpen = true;
   assistantMuted = false;
   callTranscriptForSummary = [];
@@ -1267,7 +1271,7 @@ function openAssistantCallScreen() {
   $('callAudioBtn').innerHTML = MORE_BTN_HTML;
   $('callAudioBtn').onclick = () => openCallMoreMenu();
   $('callContactAvatar').style.display = 'none';
-  $('callTitleText').textContent = 'Emysa';
+  $('callTitleText').textContent = trainer ? 'Emysa (training)' : 'Emysa';
   $('transcriptPanel').textContent = '';
   $('waveRow').classList.remove('speaking');
   $('callMuteBtn').classList.remove('active'); $('callMuteBtn').setAttribute('aria-pressed', 'false');
@@ -1308,6 +1312,53 @@ function openAssistantCallScreen() {
   startAppCallSession();
 }
 
+// ---- Admin training call (opened from the admin "Call Emysa" tab as /?trainer=1) --------------------
+// The same call screen and the same live session as a normal call, but the service starts it as a
+// raw Emysa on draft guidance. While it runs, the server reads the transcript and saves what Emysa was
+// taught as draft memories (Admin > AI behavior > Knowledge). The server refuses anyone who is not an admin.
+const TRAINER_URL = new URLSearchParams(location.search).get('trainer') === '1';
+const TRAINER_ENGINE = new URLSearchParams(location.search).get('engine') === 'luna' ? 'luna' : 'live';
+let trainerCall = null;
+
+async function trainerLearn(t, callId, { force = false } = {}) {
+  if (!t || !callId || (t.busy && !force)) return;
+  t.busy = true;
+  try {
+    const resp = await authedFetch('/api/admin?action=ai-train-learn', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callId, fromIndex: t.nextIndex }),
+    });
+    const d = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      if (Number.isFinite(d.nextIndex)) t.nextIndex = d.nextIndex;
+      for (const n of d.saved || []) showToast(`${n.action === 'updated' ? 'Updated' : 'Learned'}: ${n.title}`);
+    }
+  } catch {} finally { t.busy = false; }
+}
+
+async function trainerFinish(t, callId) {
+  // Give the service a moment to save the last turns, then take one final pass.
+  await new Promise((r) => setTimeout(r, 2500));
+  await trainerLearn(t, callId, { force: true });
+}
+
+function showTrainerGate() {
+  if (!TRAINER_URL || assistantCallOpen || document.getElementById('trainerGate')) return;
+  const gate = document.createElement('div');
+  gate.id = 'trainerGate';
+  gate.style.cssText = 'position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(11,11,11,.94);';
+  const box = document.createElement('div');
+  box.style.cssText = 'max-width:380px;width:100%;text-align:center;color:var(--text);';
+  const h = document.createElement('div'); h.style.cssText = 'font-size:22px;font-weight:600;margin-bottom:10px;'; h.textContent = 'Train Emysa';
+  const p = document.createElement('div'); p.style.cssText = 'color:var(--muted);line-height:1.5;margin-bottom:22px;';
+  p.textContent = 'A live call with the raw Emysa. She learns from what you tell her and saves it as draft memories you can edit or delete in the admin. Nothing reaches users until you publish it.';
+  const go = document.createElement('button'); go.type = 'button';
+  go.style.cssText = 'background:var(--accent);color:var(--on-accent);border:0;border-radius:999px;padding:14px 28px;font-size:16px;font-weight:600;';
+  go.textContent = 'Start training call';
+  go.onclick = () => { gate.remove(); openAssistantCallScreen({ trainer: true, engine: TRAINER_ENGINE }); };
+  box.append(h, p, go); gate.append(box); document.body.append(gate);
+}
+
 // ---- In-app Emysa live call ------------------------------------------------
 // One continuous GPT-Live session over a websocket to the assistant service:
 // the microphone streams up the whole call, Emysa's voice streams back as the
@@ -1322,6 +1373,7 @@ function stopAppCallSession({ hangUp = false } = {}) {
   appCall = null;
   if (!call) return;
   clearInterval(call.transcriptTimer);
+  if (trainerCall) { const t = trainerCall; trainerCall = null; clearInterval(t.timer); if (call.callId) trainerFinish(t, call.callId); }
   // The call was a briefing: once the service has saved the transcript, turn it
   // into a call plan in chat (which the user still has to confirm).
   if (call.briefable && call.callId) setTimeout(() => submitAppCallBrief(call.callId), 1800);
@@ -1397,10 +1449,10 @@ async function startAppCallSession() {
 
   let started;
   try {
-    const resp = await authedFetch('/api/calls?action=app-call-start', {
+    const resp = await authedFetch(trainerCall ? '/api/admin?action=ai-train-call-start' : '/api/calls?action=app-call-start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: currentChatSessionId }),
+      body: JSON.stringify(trainerCall ? { engine: trainerCall.engine } : { sessionId: currentChatSessionId }),
     });
     started = await resp.json().catch(() => ({}));
     if (!resp.ok) {
@@ -1578,7 +1630,8 @@ async function startAppCallSession() {
       if (info.kind === 'ended') { call.ended = true; finishAppCallUi('Call ended', { close: true }); return; }
       if (msg.type === 'ready') {
         call.opened = true;
-        call.briefable = true;
+        call.briefable = !trainerCall;
+        if (trainerCall) { const t = trainerCall; t.timer = setInterval(() => trainerLearn(t, call.callId), 15000); }
         startMic();
         applyCallPill(assistantCallPill({ muted: assistantMuted }));
         call.transcriptTimer = setInterval(pollTranscript, 1200);
