@@ -2184,6 +2184,8 @@ function applyCallStatusUpdate(callRow) {
 let callEndShownFor = null;
 
 function openCallScreen(callId, toNumber, contactName) {
+  // The glow GIF is large; fetch it the first time a call screen opens, not at app start.
+  const glow = $('callGlowImg'); if (glow && !glow.getAttribute('src')) glow.src = glow.dataset.src;
   const isSameCall = activeCallScreenId === callId && !$('callScreen').classList.contains('hidden');
   activeCallScreenId = callId;
   $('callScreen').classList.remove('hidden', 'captionsHidden');
