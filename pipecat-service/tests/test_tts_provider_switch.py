@@ -147,3 +147,34 @@ def test_a_switched_off_test_voice_is_not_used(monkeypatch):
     prefs = asyncio.run(call_context.fetch_voice_prefs(s, "user-1", "sess-1"))
     assert prefs.test_tts_provider is None and prefs.test_tts_api_key is None
     assert prefs.live_voice_id == "marin"
+
+
+class TestTestVoiceModelOverride:
+    def _settings(self, provider, model=None):
+        from app.config import Settings
+
+        return Settings(
+            tts_provider=provider,
+            tts_test_api_key="k",
+            tts_test_voice_id="voice-1",
+            tts_test_model=model,
+            openai_api_key="x",
+            fish_api_key="x",
+        )
+
+    def test_default_keeps_the_provider_default_model(self):
+        from app.providers import _test_voice_kwargs
+
+        assert _test_voice_kwargs(self._settings("elevenlabs")) == {"voice": "voice-1"}
+
+    async def test_override_reaches_the_service_settings(self):
+        from app.providers import build_tts
+
+        tts = build_tts(self._settings("elevenlabs", "eleven_multilingual_v2"))
+        assert tts._settings.model == "eleven_multilingual_v2"
+        assert tts._settings.voice == "voice-1"
+
+    async def test_unset_elevenlabs_model_is_flash(self):
+        from app.providers import build_tts
+
+        assert build_tts(self._settings("elevenlabs"))._settings.model == "eleven_flash_v2_5"

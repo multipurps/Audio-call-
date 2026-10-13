@@ -321,7 +321,7 @@ def build_tts(settings: Settings) -> Any:
         return CartesiaHttpTTSService(
             api_key=settings.tts_test_api_key,
             sample_rate=settings.bridge_sample_rate,
-            settings=CartesiaHttpTTSService.Settings(voice=settings.tts_test_voice_id),
+            settings=CartesiaHttpTTSService.Settings(**_test_voice_kwargs(settings)),
         )
 
     raise ValueError(f"unsupported TTS provider {settings.tts_provider!r}")
@@ -372,6 +372,15 @@ def provider_summary(settings: Settings) -> dict[str, Any]:
     }
 
 
+def _test_voice_kwargs(settings: Settings) -> dict[str, Any]:
+    """Voice (and, only when ASSISTANT_TEST_TTS_MODEL is set, model) for a test voice."""
+    kwargs: dict[str, Any] = {"voice": settings.tts_test_voice_id}
+    model = (settings.tts_test_model or "").strip()
+    if model:
+        kwargs["model"] = model
+    return kwargs
+
+
 def _build_elevenlabs_http(settings: Settings) -> Any:
     """ElevenLabs over HTTP streaming. Owns its aiohttp session and closes it when
     the call's pipeline is cleaned up (no leaked session per call)."""
@@ -392,7 +401,7 @@ def _build_elevenlabs_http(settings: Settings) -> Any:
         api_key=settings.tts_test_api_key,
         aiohttp_session=session,
         sample_rate=settings.bridge_sample_rate,
-        settings=ElevenLabsHttpTTSService.Settings(voice=settings.tts_test_voice_id),
+        settings=ElevenLabsHttpTTSService.Settings(**_test_voice_kwargs(settings)),
     )
     tts._owned_session = session
     return tts

@@ -252,6 +252,9 @@ class Settings:
     #: test settings at call start; never from the environment.
     tts_test_voice_id: str | None = None
     tts_test_api_key: str | None = None
+    #: Model for the test voice (ASSISTANT_TEST_TTS_MODEL). Empty = the provider service's own
+    #: default, which for ElevenLabs is eleven_flash_v2_5 (the speed-first, lowest-fidelity model).
+    tts_test_model: str | None = None
     #: Log a per-turn latency breakdown (endpointing, STT, LLM, TTS) from
     #: Pipecat's own metrics. Costs nothing on the audio path.
     latency_log: bool = True
@@ -547,6 +550,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         tts_temperature=_clamp_float(_env(env, "ASSISTANT_TTS_TEMPERATURE"), -1, 0.0, 1.0) if _env(env, "ASSISTANT_TTS_TEMPERATURE") else None,
         tts_top_p=_clamp_float(_env(env, "ASSISTANT_TTS_TOP_P"), -1, 0.0, 1.0) if _env(env, "ASSISTANT_TTS_TOP_P") else None,
         tts_model=_env(env, "ASSISTANT_TTS_MODEL"),
+        tts_test_model=_env(env, "ASSISTANT_TEST_TTS_MODEL"),
         openai_api_key=_env(env, "OPENAI_API_KEY"),
         luna_api_key=luna_key,
         fish_api_key=_env(env, "FISH_API_KEY"),

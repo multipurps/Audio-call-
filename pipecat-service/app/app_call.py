@@ -44,6 +44,13 @@ from app.protocol import (
 )
 
 BROWSER_SAMPLE_RATE = 16000
+#: Mic audio that waited longer than this before the bridge read it is dropped. The
+#: bridge starts reading only after the conversation has started (context lookup,
+#: voice choice, pipeline build: ~2.5 s warm, ~10 s on a cold instance), while the
+#: browser streams the mic from the moment the socket opens. Without this the first
+#: read returned that whole backlog in one burst (730 frames, ~15 s of audio, in the
+#: first 5 s window of a measured cold call) and the opening line queued behind it.
+STALE_UPLINK_SECS = 1.0
 MAX_APP_CALL_TOKEN_TTL_SECS = 2 * 3600
 TOKEN_SKEW_SECS = 60.0
 
@@ -113,20 +120,62 @@ class BrowserAcafSocket:
         self._t0 = time.monotonic()
         self._call_active_sent = False
         self._pending: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        # Everything the browser sends is read here as soon as the socket is up, stamped,
+        # and handed to the bridge on request, so audio that went stale while the call
+        # was starting can be discarded instead of replayed (see STALE_UPLINK_SECS).
+        self._inbox: asyncio.Queue[tuple[float, dict[str, Any]]] = asyncio.Queue()
+        self._pump_task: asyncio.Task[None] | None = None
+        self._stale_frames = 0
+        self._stale_bytes = 0
+
+    def _ensure_pump(self) -> None:
+        if self._pump_task is None:
+            self._pump_task = asyncio.ensure_future(self._pump())
+
+    async def _pump(self) -> None:
+        """Read the browser socket continuously; the only caller of ``self._ws.receive()``."""
+        try:
+            while True:
+                message = await self._ws.receive()
+                self._inbox.put_nowait((time.monotonic(), message))
+                if message.get("type") == "websocket.disconnect":
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a dead socket ends the call through the normal path
+            self._inbox.put_nowait((time.monotonic(), {"type": "websocket.disconnect"}))
 
     # -- the AcafBridge-facing surface ---------------------------------
 
     async def receive_text(self) -> str:
         """The bridge's first read is the hello; the service writes it, not the browser."""
+        self._ensure_pump()
         return self._hello
 
     async def receive(self) -> dict[str, Any]:
-        if not self._pending.empty():
-            return self._pending.get_nowait()
-        message = await self._ws.receive()
-        if message.get("type") == "websocket.disconnect":
-            return message
-        data = message.get("bytes")
+        while True:
+            if not self._pending.empty():
+                return self._pending.get_nowait()
+            self._ensure_pump()
+            queued_at, message = await self._inbox.get()
+            if message.get("type") == "websocket.disconnect":
+                return message
+            data = message.get("bytes")
+            if data is not None and time.monotonic() - queued_at > STALE_UPLINK_SECS:
+                self._stale_frames += 1
+                self._stale_bytes += len(data)
+                continue
+            break
+        if self._stale_frames:
+            logger.info(
+                "discarded mic audio captured while the call was starting",
+                extra={
+                    "frames": self._stale_frames,
+                    "audioSecs": round(self._stale_bytes / (BROWSER_SAMPLE_RATE * 2), 1),
+                },
+            )
+            self._stale_frames = 0
+            self._stale_bytes = 0
         if data is not None:
             self._seq += 1
             frame = AudioFrame.audio_in(
@@ -175,6 +224,8 @@ class BrowserAcafSocket:
             await self._ws.send_text(json.dumps({"type": kind}))
 
     async def close(self) -> None:
+        if self._pump_task is not None and not self._pump_task.done():
+            self._pump_task.cancel()
         try:
             await self._ws.send_text(json.dumps({"type": "ended"}))
             await self._ws.close(code=1000)
