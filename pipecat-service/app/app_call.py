@@ -74,7 +74,7 @@ def sign_app_call_token(
     return f"{exp}.{user_id}.{sig}"
 
 
-def verify_app_call_token(secret: str, token: str, *, session_id: str) -> str:
+def verify_app_call_token(secret: str, token: str, *, session_id: str, prefix: str = "appcall") -> str:
     """Return the token's user id, or raise :class:`AppCallTokenError`."""
     if not secret:
         raise AppCallTokenError("app calls are not configured")
@@ -93,10 +93,21 @@ def verify_app_call_token(secret: str, token: str, *, session_id: str) -> str:
         raise AppCallTokenError("token expiry out of range")
     if not user_id or not sig:
         raise AppCallTokenError("malformed token")
-    expected = hmac.new(secret.encode(), f"appcall:{session_id}:{user_id}:{exp}".encode(), hashlib.sha256).hexdigest()
+    expected = hmac.new(secret.encode(), f"{prefix}:{session_id}:{user_id}:{exp}".encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, sig):
         raise AppCallTokenError("signature mismatch")
     return user_id
+
+
+def verify_any_app_call_token(secret: str, token: str, *, session_id: str) -> tuple[str, bool]:
+    """(user id, is_trainer). A trainer token is signed under its own prefix, so a normal
+    user token can never be presented as one."""
+    try:
+        return verify_app_call_token(secret, token, session_id=session_id), False
+    except AppCallTokenError as exc:
+        if str(exc) != "signature mismatch":
+            raise
+    return verify_app_call_token(secret, token, session_id=session_id, prefix="trainercall"), True
 
 
 class BrowserAcafSocket:

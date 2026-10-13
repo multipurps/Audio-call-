@@ -33,3 +33,12 @@ Not covered: `server/patter-relay.js` (legacy Twilio Patter path) and `server-so
 ## Testing
 The Test tab compares the published config with the proposed one on sample lines. Both models are tested as text
 through Luna; this checks wording and rule-following, not audio, interruptions or GPT-Live voice latency.
+
+## Call Emysa (training call)
+Admin tab **Call Emysa** starts a live call with the raw Emysa users will get, with the same call audio and a live transcript.
+- Runs on the latest **draft** guidance and draft knowledge (`sql/042_ai_trainer.sql`, `p_use_draft`), so changes can be heard before publishing.
+- Raw: no user memory, profile, contacts or saved voice settings. Not billed, no summary or push (platform `app`).
+- Engine pick: GPT-Live (default voice) or Luna (classic path, default voice).
+- Auth: `?action=ai-train-call-start` (admin only) signs a token under the `trainercall:` prefix; the voice service only treats a session as a trainer call after verifying it (`app/app_call.py::verify_any_app_call_token`).
+- Teaching: mark an Emysa line Wrong or Good; it becomes a draft correction or example. Nothing is promoted automatically. Publish it in the Knowledge tab, or use "Save and publish".
+- The call row is kept under the admin's own account as "Emysa training" so the transcript can be reviewed.

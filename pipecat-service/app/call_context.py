@@ -1080,6 +1080,7 @@ async def resolve_call_context(
     session_id: str,
     platform: str,
     user_id: str | None,
+    trainer: bool = False,
 ) -> CallContext | None:
     """Find the ``calls`` row for this bridged call, within a bounded wait.
 
@@ -1146,17 +1147,17 @@ async def resolve_call_context(
         contact_name, memories, contact_memory, summaries, profile, attempt = await asyncio.gather(
             _fetch_contact_name(rest, contact_id=contact_id, to_number=to_number, session_id=session_id),
             _fetch_memories(rest, user_id=db_user_id, contact_id=memory_contact_id, session_id=session_id)
-            if settings.enable_persistent_memory and db_user_id and memory_contact_id
+            if settings.enable_persistent_memory and db_user_id and memory_contact_id and not trainer
             else _empty(),
             _fetch_contact_memory(rest, user_id=db_user_id, contact_id=memory_contact_id, session_id=session_id)
-            if settings.enable_persistent_memory and db_user_id and memory_contact_id
+            if settings.enable_persistent_memory and db_user_id and memory_contact_id and not trainer
             else _empty(),
             _fetch_prior_summaries(
                 rest, user_id=db_user_id, contact_id=memory_contact_id, session_id=session_id, exclude_call_id=call_id
             )
-            if db_user_id
+            if db_user_id and not trainer
             else _empty(),
-            _fetch_profile(rest, user_id=db_user_id) if db_user_id else _default_profile(),
+            _fetch_profile(rest, user_id=db_user_id) if db_user_id and not trainer else _default_profile(),
             _fetch_attempt_context(rest, user_id=db_user_id, row=row, session_id=session_id),
         )
         language = profile["language"]

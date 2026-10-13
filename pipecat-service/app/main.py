@@ -310,18 +310,20 @@ async def _handle_app_call(session_id: str, websocket: WebSocket, state: Service
     """One in-app Emysa call: the browser talks to the same GPT-Live conversation
     a WhatsApp call uses (the conversation, not this handler, picks the engine
     and voice from the user's saved choice)."""
-    from app.app_call import AppCallTokenError, BrowserAcafSocket, verify_app_call_token
+    from app.app_call import AppCallTokenError, BrowserAcafSocket, verify_any_app_call_token
+    from app.global_config import clear_trainer, mark_trainer
 
     settings = state.settings
     if state.shutting_down:
         await websocket.close(code=1013)
         return
     token = websocket.query_params.get("token") or ""
+    is_trainer = False
     try:
-        user_id = (
-            "mock-user" if settings.mock_mode
-            else verify_app_call_token(settings.bridge_secret or "", token, session_id=session_id)
-        )
+        if settings.mock_mode:
+            user_id = "mock-user"
+        else:
+            user_id, is_trainer = verify_any_app_call_token(settings.bridge_secret or "", token, session_id=session_id)
     except AppCallTokenError as exc:
         logger.warning("app call auth refused", extra={"sessionId": session_id, "reason": str(exc)})
         with contextlib.suppress(Exception):
@@ -331,6 +333,9 @@ async def _handle_app_call(session_id: str, websocket: WebSocket, state: Service
         return
 
     await websocket.accept()
+    if is_trainer:
+        # Admin training call: raw Emysa on the draft config. Engine is the admin's pick.
+        mark_trainer(session_id, websocket.query_params.get("engine") or "live")
     peer = BrowserAcafSocket(websocket, secret=settings.bridge_secret or "", session_id=session_id, user_id=user_id)
     bridge: AcafBridge | None = None
     try:
@@ -351,6 +356,7 @@ async def _handle_app_call(session_id: str, websocket: WebSocket, state: Service
             await websocket.send_json({"type": "error", "reason": "call-failed"})
             await websocket.close(code=1011)
     finally:
+        clear_trainer(session_id)
         if bridge is not None:
             state.active_bridges.discard(bridge)
             with contextlib.suppress(Exception):

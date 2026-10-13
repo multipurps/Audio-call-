@@ -23,6 +23,22 @@ _TIMEOUT_SECS = 2.5
 _MAX_BLOCK_CHARS = 5200
 _cache: dict[tuple[str, str, str], tuple[float, tuple[int, str]]] = {}
 
+#: Sessions started by the admin "Call Emysa" training call, session id -> "live" | "luna".
+#: Filled only after the signed trainer token was verified (app/main.py), never from client input.
+_TRAINERS: dict[str, str] = {}
+
+
+def mark_trainer(session_id: str, engine: str = "live") -> None:
+    _TRAINERS[session_id] = "luna" if engine == "luna" else "live"
+
+
+def trainer_engine(session_id: str) -> str | None:
+    return _TRAINERS.get(session_id)
+
+
+def clear_trainer(session_id: str) -> None:
+    _TRAINERS.pop(session_id, None)
+
 HEADER = (
     "House guidance from the Emysa team (applies to every call; the instructions "
     "for this call still take priority):"
@@ -52,7 +68,9 @@ def render_section(block: str) -> str:
     return f"{HEADER}\n{block}" if block else ""
 
 
-async def fetch_global_block(settings: Any, *, model: str, mode: str, call_context: Any = None, session_id: str = "-") -> str:
+async def fetch_global_block(
+    settings: Any, *, model: str, mode: str, call_context: Any = None, session_id: str = "-", draft: bool = False
+) -> str:
     """Rendered guidance for this call, or "" if none is published or the fetch fails."""
     url = getattr(settings, "supabase_url", None)
     key = getattr(settings, "supabase_service_role_key", None)
@@ -60,7 +78,7 @@ async def fetch_global_block(settings: Any, *, model: str, mode: str, call_conte
         return ""
     query = _query_for(call_context)
     cache_key = (model, mode, query)
-    hit = _cache.get(cache_key)
+    hit = None if draft else _cache.get(cache_key)  # training calls always read the latest draft
     now = time.monotonic()
     if hit and now - hit[0] < _TTL_SECS:
         return render_section(hit[1][1])
@@ -69,16 +87,17 @@ async def fetch_global_block(settings: Any, *, model: str, mode: str, call_conte
             resp = await client.post(
                 f"{url.rstrip('/')}/rest/v1/rpc/ai_global_context",
                 headers={"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json={"p_model": model, "p_mode": mode, "p_query": query},
+                json={"p_model": model, "p_mode": mode, "p_query": query, **({"p_use_draft": True} if draft else {})},
             )
         if resp.status_code >= 400:
             raise RuntimeError(f"HTTP {resp.status_code}")
         data = resp.json() or {}
         block = str(data.get("block") or "")[:_MAX_BLOCK_CHARS]
         version = int(data.get("version") or 0)
-        if len(_cache) > 200:
-            _cache.clear()
-        _cache[cache_key] = (now, (version, block))
+        if not draft:
+            if len(_cache) > 200:
+                _cache.clear()
+            _cache[cache_key] = (now, (version, block))
         logger.info(f"[global-ai] session={session_id} model={model} mode={mode} version={version} chars={len(block)}")
         return render_section(block)
     except Exception as exc:  # noqa: BLE001 - never block a call on guidance

@@ -42,7 +42,7 @@ from loguru import logger
 from app.call_context import CallContext, TranscriptLog, fetch_voice_prefs, resolve_call_context, stt_keyterms
 from app.call_wrapup import WrapUpSupervisor, parse_time_budget
 from app.config import Settings, normalise_live_voice
-from app.global_config import call_mode, fetch_global_block
+from app.global_config import call_mode, fetch_global_block, trainer_engine
 from app.monitor import DIRECTION_CALLER, DIRECTION_EMYSA, get_hub
 
 #: Last-resort opener, spoken verbatim only when the model cannot open the call
@@ -778,6 +778,7 @@ class CallConversation(_BaseConversation):
             session_id=self._session_id,
             platform=self.platform or "unknown",
             user_id=self.user_id,
+            trainer=trainer_engine(self._session_id) is not None,
         )
         extra_context: str | None = None
         if self.call_context is not None:
@@ -858,7 +859,9 @@ class CallConversation(_BaseConversation):
             clog("INFO", sid, f"[CALL ENGINE] selected={self._engine_label()}", reason=self._engine_reason)
             return
         uid = (getattr(self.call_context, "user_id", None) if self.call_context else None) or self.user_id
-        prefs = await fetch_voice_prefs(self._settings, uid, sid) if uid else None
+        trainer = trainer_engine(sid)
+        # Training call: raw Emysa. The admin's own saved voices and settings never apply.
+        prefs = await fetch_voice_prefs(self._settings, uid, sid) if uid and trainer is None else None
         hello_clone = self._settings.tts_voice_id if self._settings.tts_voice_is_per_call else None
         custom_id = (prefs.custom_voice_id if prefs and prefs.custom_voice_id else None) or hello_clone
         use_custom = prefs.use_custom_voice if prefs and prefs.use_custom_voice is not None else True
@@ -884,6 +887,8 @@ class CallConversation(_BaseConversation):
             updates.update(live_voice=chosen, live_voice_source="user")
         else:
             updates.update(live_voice_source="env-default")
+        if trainer == "luna":
+            updates["call_engine"] = "classic"  # train the Luna + custom-voice path
         self._settings = dataclasses.replace(self._settings, **updates)
 
         self.engine = self._settings.engine_for_call()
@@ -982,6 +987,7 @@ class CallConversation(_BaseConversation):
             mode=call_mode(self.platform, self.is_app_call),
             call_context=self.call_context,
             session_id=self._session_id,
+            draft=trainer_engine(self._session_id) is not None,
         )
         if self.engine == "live":
             from app.live import (

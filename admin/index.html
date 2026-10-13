@@ -108,6 +108,7 @@
     <section class="aSec" id="sec-credits"></section>
     <section class="aSec" id="sec-costs"></section>
     <section class="aSec" id="sec-ai"></section>
+    <section class="aSec" id="sec-train"></section>
     <section class="aSec" id="sec-admins"></section>
     <section class="aSec" id="sec-content">
       <div class="aCard"><div class="l">Welcome, login &amp; sign-up backgrounds</div>
@@ -139,7 +140,7 @@
     <div class="brand"><img src="../icon-192.png" alt="">Emysa Admin</div>
     <button class="nav on" data-s="overview">Overview</button><button class="nav" data-s="users">Users</button>
     <button class="nav" data-s="usage">Usage</button><button class="nav" data-s="credits">Credits</button>
-    <button class="nav" data-s="costs">Costs &amp; providers</button><button class="nav" data-s="ai">AI behavior</button><button class="nav" data-s="content">Content &amp; push</button>
+    <button class="nav" data-s="costs">Costs &amp; providers</button><button class="nav" data-s="ai">AI behavior</button><button class="nav" data-s="train">Call Emysa</button><button class="nav" data-s="content">Content &amp; push</button>
     <button class="nav" id="navAdmins" data-s="admins" style="display:none;">Admins</button>
     <button class="nav" id="signOutBtn" style="margin-top:auto;">Sign out</button>
   </nav>
@@ -166,7 +167,7 @@
   // standalone app. Tying the import to a version string that changes
   // every deploy forces a genuinely new request each time instead of
   // silently continuing to run whatever was cached from before.
-  import(`./admin.js?v=2026-10-13.1`).catch((err) => showBootFailure('Failed to load admin.js', err));
+  import(`./admin.js?v=2026-10-13.2`).catch((err) => showBootFailure('Failed to load admin.js', err));
 </script>
 <script>
   if ('serviceWorker' in navigator) {

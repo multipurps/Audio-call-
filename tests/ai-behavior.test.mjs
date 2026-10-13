@@ -38,3 +38,37 @@ test('fetchGlobalAi returns the block and caches; failures return an empty block
   assert.equal(globalAiSection(''), '');
   assert.match(globalAiSection('x'), /House guidance/);
 });
+
+test('trainer call start refuses without bridge secret and signs a trainer-prefixed token', async () => {
+  const { handleAiAction } = await import('../lib/aiBehaviorAdmin.js');
+  const mkRes = () => { const r = { code: 0, body: null, status(c) { r.code = c; return r; }, json(b) { r.body = b; return r; } }; return r; };
+  const saved = { s: process.env.ASSISTANT_BRIDGE_SECRET, u: process.env.PUBLIC_ASSISTANT_WS_URL };
+  const inserted = [];
+  const sb = { from: (t) => ({
+    insert: (row) => { inserted.push([t, row]); return { select: () => ({ single: async () => ({ data: { id: 'row-1' }, error: null }) }), then: (f) => f({ error: null }) }; },
+  }) };
+  const access = { email: 'a@b.c', user: { id: 'admin-1' } };
+  try {
+    delete process.env.ASSISTANT_BRIDGE_SECRET; process.env.PUBLIC_ASSISTANT_WS_URL = 'wss://voice.example.com';
+    let r = mkRes(); await handleAiAction('ai-train-call-start', { method: 'POST', body: {} }, r, sb, access);
+    assert.equal(r.code, 501);
+    process.env.ASSISTANT_BRIDGE_SECRET = 'shh';
+    r = mkRes(); await handleAiAction('ai-train-call-start', { method: 'POST', body: { engine: 'luna' } }, r, sb, access);
+    assert.equal(r.code, 200);
+    assert.equal(r.body.engine, 'luna');
+    const url = new URL(r.body.url);
+    assert.equal(url.searchParams.get('engine'), 'luna');
+    const [exp, uid, sig] = url.searchParams.get('token').split('.');
+    const { createHmac } = await import('crypto');
+    const want = createHmac('sha256', 'shh').update(`trainercall:${r.body.sessionId}:${uid}:${exp}`).digest('hex');
+    assert.equal(sig, want);
+    assert.equal(uid, 'admin-1');
+    const callRow = inserted.find(([t]) => t === 'calls')[1];
+    assert.equal(callRow.platform, 'app'); assert.equal(callRow.user_id, 'admin-1'); assert.equal(callRow.to_number, 'Emysa training');
+    r = mkRes(); await handleAiAction('ai-train-call-start', { method: 'GET', body: {} }, r, sb, access);
+    assert.equal(r.code, 405);
+  } finally {
+    if (saved.s === undefined) delete process.env.ASSISTANT_BRIDGE_SECRET; else process.env.ASSISTANT_BRIDGE_SECRET = saved.s;
+    if (saved.u === undefined) delete process.env.PUBLIC_ASSISTANT_WS_URL; else process.env.PUBLIC_ASSISTANT_WS_URL = saved.u;
+  }
+});
