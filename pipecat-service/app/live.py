@@ -157,7 +157,12 @@ def _live_persona() -> str:
     return "\n\n".join(out)
 
 
-def build_live_system_prompt(settings: Settings, extra_context: str | None = None, call_context: Any = None) -> str:
+def build_live_system_prompt(
+    settings: Settings,
+    extra_context: str | None = None,
+    call_context: Any = None,
+    global_block: str | None = None,
+) -> str:
     """Instructions for a GPT-Live session. Fixed for the session's lifetime.
 
     Assembled in the fixed section order of app/conversation_policy.py unless an
@@ -171,7 +176,7 @@ def build_live_system_prompt(settings: Settings, extra_context: str | None = Non
     return build_structured_live_prompt(
         persona=persona,
         personality=personality,
-        policies=_live_policies_for(call_context),
+        policies=_live_policies_for(call_context) + (f"\n\n{global_block.strip()}" if (global_block or "").strip() else ""),
         end_call_tool=END_CALL_TOOL,
         call_context=call_context,
         extra_context=extra_context,

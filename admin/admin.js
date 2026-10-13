@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { loadAiBehavior } from './aiBehavior.js?v=2026-10-13.1';
 
 const SUPABASE_URL = 'https://gucblbvfzuraaozswfwd.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1Y2JsYnZmenVyYWFvenN3ZndkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0NzQ0ODQsImV4cCI6MjA5MTA1MDQ4NH0.OCsEC_FfOJmoL5sQWP8zYnw9SmWuy4xggfcpIIxQw-c';
@@ -124,8 +125,8 @@ const card = (l, v, s = '', wide = false) => `<div class="aCard${wide ? ' wide' 
 const fail = (el, err) => { el.innerHTML = `<div class="aHint">${esc(err.message)}</div>`; };
 
 let range = 30, usersCache = [], current = 'overview';
-const TITLES = { overview: 'Overview', users: 'Users', usage: 'Usage', credits: 'Credits', costs: 'Costs & providers', content: 'Content & push', admins: 'Admins' };
-const loaders = { overview: loadOverview, users: loadUsers, usage: loadUsage, credits: loadCredits, costs: loadCosts, content: loadBackgrounds, admins: loadAdmins };
+const TITLES = { overview: 'Overview', users: 'Users', usage: 'Usage', credits: 'Credits', costs: 'Costs & providers', ai: 'AI behavior', content: 'Content & push', admins: 'Admins' };
+const loaders = { overview: loadOverview, users: loadUsers, usage: loadUsage, credits: loadCredits, costs: loadCosts, ai: () => loadAiBehavior($('sec-ai'), { api, esc }), content: loadBackgrounds, admins: loadAdmins };
 
 function openSection(name) {
   current = name;

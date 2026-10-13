@@ -7,6 +7,7 @@ import {
   shouldEndCall,
 } from '../lib/emotionEngine.js';
 import { createChatCompletion } from '../lib/llmClient.js';
+import { fetchGlobalAi, globalAiSection } from '../lib/globalAi.js';
 import { moodPromptLines } from '../lib/callMood.js';
 import {
   retrieveRelevantMemories,
@@ -217,6 +218,10 @@ async function transcribe(mulawAudio) {
 }
 
 async function think(state, latestCallerText = '') {
+  // Admin-published guidance, fetched once per call and kept for its whole life.
+  if (state.globalAiBlock === undefined) {
+    state.globalAiBlock = (await fetchGlobalAi({ model: 'luna', mode: 'phone', query: `${state.objective || ''} ${state.instructions || ''}` })).block;
+  }
   const messages = state.history.map((h) => ({
     role: h.speaker === 'ai' ? 'assistant' : 'user',
     content: h.content,
@@ -256,6 +261,7 @@ export function buildSystemPrompt(state) {
         ? `Things worth remembering from past conversations: ${state.memories.join('; ')}`
         : '',
     emotionXml,
+    globalAiSection(state.globalAiBlock),
     ``,
     `Sound like an actual human on the phone, not a script:`,
     `- Keep turns short — a sentence, maybe two. Real phone conversations are back-and-forth, not monologues.`,

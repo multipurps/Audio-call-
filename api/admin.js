@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import webpush from 'web-push';
 import { getServiceClient, getAdminAccess, normEmail } from '../lib/supabaseAdmin.js';
+import { AI_ACTIONS, handleAiAction } from '../lib/aiBehaviorAdmin.js';
 
 // Every admin-only action lives here behind ?action=..., instead of one
 // file per action — Vercel's Hobby plan caps a deployment at 12 serverless
@@ -30,6 +31,7 @@ export default async function handler(req, res) {
   if (!access.role) return res.status(403).json({ error: 'Not authorized', status: access.status });
   if (OWNER_ONLY.has(action) && access.role !== 'owner') return res.status(403).json({ error: 'Only the owner can manage admins.' });
 
+  if (AI_ACTIONS.has(action)) return handleAiAction(action, req, res, supabase, access);
   switch (action) {
     case 'create-landing-upload': return createLandingUpload(req, res, supabase);
     case 'confirm-landing-upload': return confirmLandingUpload(req, res, supabase);

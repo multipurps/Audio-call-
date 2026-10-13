@@ -193,6 +193,7 @@ def build_system_prompt(
     settings: Settings,
     extra_context: str | None = None,
     emotion_state: EmotionState | None = None,
+    global_block: str | None = None,
 ) -> str:
     """Compose the system prompt, optionally with per-call context and emotion state.
 
@@ -208,6 +209,8 @@ def build_system_prompt(
         prompt = f"{prompt}\n\n{build_personality_context()}"
     emotion_block = format_emotion_state_block(emotion_state)
     prompt = f"{prompt}\n\n{emotion_block}"
+    if global_block and global_block.strip():
+        prompt = f"{prompt}\n\n{global_block.strip()}"
     if extra_context:
         prompt = f"{prompt}\n\nContext for this call:\n{extra_context}"
     return prompt
@@ -224,6 +227,7 @@ def build_pipeline(
     transcript: Any = None,
     language: str | None = None,
     stt_keyterms: list[str] | None = None,
+    global_block: str | None = None,
 ) -> tuple[Any, Any]:
     """Assemble the real Pipecat pipeline.
 
@@ -272,7 +276,7 @@ def build_pipeline(
     # Held as a mutable dict so the emotion block can be refreshed per turn.
     system_msg: dict[str, str] = {
         "role": "system",
-        "content": build_system_prompt(settings, extra_context, emotion_state["state"]),
+        "content": build_system_prompt(settings, extra_context, emotion_state["state"], global_block),
     }
 
     def _refresh_system() -> None:
@@ -283,7 +287,7 @@ def build_pipeline(
         updated state with zero extra LLM calls.
         """
         system_msg["content"] = build_system_prompt(
-            settings, extra_context, emotion_state["state"]
+            settings, extra_context, emotion_state["state"], global_block
         )
 
     class _TranscriptNote(FrameProcessor):

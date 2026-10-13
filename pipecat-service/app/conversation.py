@@ -42,6 +42,7 @@ from loguru import logger
 from app.call_context import CallContext, TranscriptLog, fetch_voice_prefs, resolve_call_context, stt_keyterms
 from app.call_wrapup import WrapUpSupervisor, parse_time_budget
 from app.config import Settings, normalise_live_voice
+from app.global_config import call_mode, fetch_global_block
 from app.monitor import DIRECTION_CALLER, DIRECTION_EMYSA, get_hub
 
 #: Last-resort opener, spoken verbatim only when the model cannot open the call
@@ -974,6 +975,14 @@ class CallConversation(_BaseConversation):
 
         extra_context = self._extra_context
         rate = self._rate
+        # Admin-published guidance, fetched once; this call keeps it for its whole life.
+        global_block = await fetch_global_block(
+            self._settings,
+            model="live" if self.engine == "live" else "luna",
+            mode=call_mode(self.platform, self.is_app_call),
+            call_context=self.call_context,
+            session_id=self._session_id,
+        )
         if self.engine == "live":
             from app.live import (
                 LiveCallState,
@@ -988,7 +997,7 @@ class CallConversation(_BaseConversation):
                 settings=self._settings,
                 transport=_TransportShim(BridgeInput(), self._output),
                 context=self._context,
-                system_instruction=build_live_system_prompt(self._settings, extra_context, self.call_context),
+                system_instruction=build_live_system_prompt(self._settings, extra_context, self.call_context, global_block),
                 transcript=self.transcript,
                 state=self._live_state,
                 on_end_call=self._schedule_assistant_hangup,
@@ -1016,6 +1025,7 @@ class CallConversation(_BaseConversation):
                 transcript=self.transcript,
                 language=self.call_context.language if self.call_context else None,
                 stt_keyterms=stt_keyterms(self.call_context),
+                global_block=global_block,
             )
         observers = [CallLogObserver(self._session_id, self._settings.secret_values())]
         if self._settings.latency_log:

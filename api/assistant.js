@@ -1,4 +1,5 @@
 import { normalizeMood, moodOfCall } from '../lib/callMood.js';
+import { fetchGlobalAi, globalAiSection } from '../lib/globalAi.js';
 import { userError } from '../lib/userFacing.js';
 import { LANGUAGE_NAMES } from '../lib/callLanguages.js';
 // Languages the transcription model accepts as a pinned language. Igbo is not
@@ -514,6 +515,7 @@ async function sendMessage(req, res, supabase, userId) {
   const userLanguage = LANGUAGE_NAMES[langProfile?.language] || 'English';
   const contactsList = (contacts || []).map((c) => `- ${c.name}`).join('\n') || '(no contacts saved yet)';
   const emotionBlock = formatEmotionStateBlock(emotionState);
+  const globalAi = await fetchGlobalAi({ model: 'luna', mode: 'app', query: text, supabase });
   const systemPrompt = [
     'You are Emysa — a warm, emotionally observant, witty, and grounded personal companion and calling assistant.',
     `LANGUAGE: always reply in ${userLanguage}, the language chosen in Settings. If the user's text looks like another language it is most likely a speech-to-text mistake: do not switch languages, answer in ${userLanguage} or ask them to repeat. Only change language if they explicitly ask you to.`,
@@ -522,6 +524,7 @@ async function sendMessage(req, res, supabase, userId) {
     contactsList,
     memoryBundle.promptBlock ? `\n${memoryBundle.promptBlock}` : '',
     `\n${emotionBlock}`,
+    globalAiSection(globalAi.block) ? `\n${globalAiSection(globalAi.block)}` : '',
     '',
     'HUMAN PERSONALITY & CONVERSATION STYLE:',
     '- Speak like a perceptive, caring human friend — never a scripted corporate bot. Use natural contractions and rhythm.',
