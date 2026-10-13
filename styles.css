@@ -1208,3 +1208,22 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 #callMuteBtn .micOff, #callMuteBtn .micSlash{display:none;}
 #callMuteBtn.active .micOn{display:none;}
 #callMuteBtn.active .micOff, #callMuteBtn.active .micSlash{display:inline;}
+
+/* ---------- Recent: multi-select ---------- */
+.recentTopRow{display:flex; align-items:center; gap:10px; margin-bottom:18px;}
+.recentTopRow .searchBar{flex:1; margin-bottom:0; min-width:0;}
+.recentSelectBtn{flex:none; width:46px; height:46px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--text); background:var(--glass-bg); border:1px solid var(--glass-border);}
+.recentSelectBtn svg{width:22px; height:22px;}
+.recentSelectBtn:active{opacity:.7;}
+.recentSelectBar{display:flex; align-items:center; justify-content:space-between; gap:10px; height:46px; margin-bottom:18px; font-size:15px;}
+.recentSelectBar.hidden,.recentTopRow.hidden{display:none;}
+.recentSelectBar button{font-size:15px; font-weight:500; color:var(--text); padding:8px 4px;}
+.recentSelectBar button.danger{color:var(--danger, #ff6b6b);}
+.recentSelectBar button:disabled{opacity:.4;}
+#recentSelectCount{color:var(--muted);}
+.recentCheck{flex:none; width:24px; height:24px; border-radius:50%; border:1.5px solid var(--dim); display:flex; align-items:center; justify-content:center; color:var(--on-accent);}
+.recentCheck .ic{width:14px; height:14px; opacity:0;}
+.recentRow.selected .recentCheck{background:var(--accent); border-color:var(--accent);}
+.recentRow.selected .recentCheck .ic{opacity:1;}
+.recentRow.selecting .recentInfoBtn{display:none;}
+.recentRow.locked{opacity:.45;}

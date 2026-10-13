@@ -3,13 +3,20 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const src = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
-const body = src.slice(src.indexOf('function personKeyForCall'), src.indexOf('function renderCallsList'));
+const body = src.slice(src.indexOf('function personKeyForCall'), src.indexOf('let recentSelecting'));
 const personKeyForCall = new Function(`${body}; return personKeyForCall;`)();
 
 test('calls to Emysa with no number or contact id collapse into one person', () => {
   const a = personKeyForCall({ id: '1', contact_name: 'Emysa', to_number: null });
   const b = personKeyForCall({ id: '2', contact_name: ' emysa ', to_number: '' });
   assert.equal(a, b);
+});
+
+test('the real shape: contact_name empty and to_number is the text "Emysa"', () => {
+  assert.equal(
+    personKeyForCall({ id: '1', contact_name: null, to_number: 'Emysa' }),
+    personKeyForCall({ id: '2', contact_name: null, to_number: 'emysa ' }),
+  );
 });
 
 test('number beats contact id beats name beats call id; different people stay apart', () => {

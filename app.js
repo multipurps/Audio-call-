@@ -2841,9 +2841,23 @@ function personKeyForCall(c) {
   if (c.contact_id) return `c:${c.contact_id}`;
   // Calls with neither a usable number nor a contact id (e.g. calls to Emysa herself) used to
   // fall through to one row per call. Group them by name instead.
-  const name = String(c.contact_name || '').trim().toLowerCase();
+  // The "number" of a call to Emysa herself is the text "Emysa", so fall back to it too.
+  const name = String(c.contact_name || c.to_number || '').trim().toLowerCase();
   if (name) return `n:${name}`;
   return `i:${c.id}`;
+}
+
+let recentSelecting = false;
+const recentSelected = new Set();
+let recentGroups = new Map();
+const LIVE_CALL = ['queued', 'ringing', 'in_progress', 'in-progress'];
+
+function updateRecentSelectBar() {
+  $('recentTopRow').classList.toggle('hidden', recentSelecting);
+  $('recentSelectBar').classList.toggle('hidden', !recentSelecting);
+  const n = recentSelected.size;
+  $('recentSelectCount').textContent = `${n} selected`;
+  $('recentSelectDelete').disabled = n === 0;
 }
 
 function renderCallsList(calls) {
@@ -2860,9 +2874,11 @@ function renderCallsList(calls) {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(c);
   }
-  for (const group of groups.values()) {
+  recentGroups = groups;
+  for (const [groupKey, group] of groups) {
     const c = group.find((x) => x.contact_name) || group[0];
     const latest = group[0];
+    const groupLive = group.some((x) => LIVE_CALL.includes(x.status));
     const isKnown = !!c.contact_name;
     const name = c.contact_name || latest.to_number;
     const el = document.createElement('div');
@@ -2881,6 +2897,7 @@ function renderCallsList(calls) {
     const countBadge = group.length > 1 ? `<span class="recentCount">${group.length}</span>` : '';
 
     el.innerHTML = `
+      ${recentSelecting ? '<span class="recentCheck"><svg class="ic"><use href="#ic-check"/></svg></span>' : ''}
       ${avatarHtml}
       <div class="recentBody">
         <div class="recentTop">
@@ -2897,9 +2914,21 @@ function renderCallsList(calls) {
     // chats works: placing a call folds them into one).
     const sessionId = group.map((x) => x.session_id).find(Boolean);
     const open = () => {
+      if (recentSelecting) {
+        if (groupLive) return; // a call in progress can't be deleted
+        if (recentSelected.has(groupKey)) recentSelected.delete(groupKey); else recentSelected.add(groupKey);
+        el.classList.toggle('selected', recentSelected.has(groupKey));
+        updateRecentSelectBar();
+        return;
+      }
       if (sessionId) { openChatSession(sessionId); showTab('chat'); }
       else details();
     };
+    if (recentSelecting) {
+      el.classList.add('selecting');
+      el.classList.toggle('selected', recentSelected.has(groupKey));
+      el.classList.toggle('locked', groupLive);
+    }
     el.tabIndex = 0;
     el.setAttribute('role', 'button');
     el.setAttribute('aria-label', `Open conversation with ${name}`);
@@ -2908,7 +2937,7 @@ function renderCallsList(calls) {
     list.appendChild(el);
 
     const live = group.some((x) => ['queued', 'ringing', 'in_progress', 'in-progress'].includes(x.status));
-    if (!live) {
+    if (!live && !recentSelecting) {
       const ids = group.map((x) => x.id);
       const sessions = [...new Set(group.map((x) => x.session_id).filter(Boolean))];
       makeSwipeDelete(el, async () => {
@@ -3336,8 +3365,51 @@ $('recentChatMenu').querySelector('[data-action="delete"]').addEventListener('cl
 });
 
 $('recentSearch').addEventListener('input', () => {
+  renderCallsList(filteredCalls());
   const q = $('recentSearch').value.trim().toLowerCase();
   renderRecentChatsList(!q ? recentChatSessions : recentChatSessions.filter((s) => (s.call_label || s.title || '').toLowerCase().includes(q)));
+});
+
+function setRecentSelecting(on) {
+  recentSelecting = on;
+  recentSelected.clear();
+  updateRecentSelectBar();
+  renderCallsList(filteredCalls());
+}
+
+function filteredCalls() {
+  const q = $('recentSearch').value.trim().toLowerCase();
+  if (!q) return lastLoadedCalls;
+  return lastLoadedCalls.filter((c) => `${c.contact_name || ''} ${c.to_number || ''}`.toLowerCase().includes(q));
+}
+
+$('recentSelectBtn').addEventListener('click', () => setRecentSelecting(true));
+$('recentSelectCancel').addEventListener('click', () => setRecentSelecting(false));
+$('recentSelectDelete').addEventListener('click', async () => {
+  const picked = [...recentSelected].map((k) => recentGroups.get(k)).filter(Boolean);
+  if (!picked.length) return;
+  const people = picked.length;
+  if (!confirm(`Delete ${people} chat${people === 1 ? '' : 's'}? This can't be undone.`)) return;
+  const btn = $('recentSelectDelete');
+  btn.disabled = true;
+  const ids = picked.flatMap((g) => g.map((x) => x.id));
+  const sessions = [...new Set(picked.flatMap((g) => g.map((x) => x.session_id)).filter(Boolean))];
+  try {
+    const r = await authedFetch('/api/calls?action=delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callIds: ids }) });
+    if (!r.ok) throw new Error('delete failed');
+    for (const sid of sessions) {
+      await authedFetch('/api/assistant?action=deleteSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: sid }) }).catch(() => {});
+      if (sid === currentChatSessionId) startNewChat();
+    }
+    const gone = new Set(ids);
+    lastLoadedCalls = lastLoadedCalls.filter((x) => !gone.has(x.id));
+    recentChatSessions = recentChatSessions.filter((x) => !sessions.includes(x.id));
+    showToast(`${people} chat${people === 1 ? '' : 's'} deleted`);
+    setRecentSelecting(false);
+  } catch {
+    showToast('Could not delete. Try again.');
+    btn.disabled = false;
+  }
 });
 
 async function loadCalls() {
