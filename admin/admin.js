@@ -37,16 +37,24 @@ $('googleSignIn').addEventListener('click', () => {
   });
 });
 
+// Resuming a minimized app makes supabase-js emit SIGNED_IN / TOKEN_REFRESHED again. For the person who
+// is already inside the panel that must not re-run start-up, which would jump back to Overview (and stop
+// a live Call Emysa session). enteredFor is the user the panel is currently showing.
+let enteredFor = null;
+const alreadyInPanel = (session) => Boolean(session?.user && enteredFor === session.user.id && !$('adminApp').classList.contains('hidden'));
+
 supabase.auth.onAuthStateChange((_event, session) => {
   currentSession = session;
+  if (alreadyInPanel(session)) return;
   if (session?.user) enterAdmin();
-  else showSignInForm();
+  else { enteredFor = null; showSignInForm(); }
 });
 
 let myRole = null;
 
 // Not an admin (yet): say where this account stands, and let it ask.
 function showNotAdmin(access) {
+  enteredFor = null;
   const status = access?.status || 'none';
   const copy = {
     none: ['Not an admin yet', 'This account is not an admin. You can ask the owner for access.'],
@@ -95,6 +103,7 @@ async function enterAdmin() {
     $('notAdminBox').classList.add('hidden');
     document.getElementById('authScreen').classList.add('hidden');
     $('adminApp').classList.remove('hidden');
+    enteredFor = currentSession?.user?.id || null;
     initPanel((await usersResp.json()).users);
   } catch (err) {
     // A thrown error in here used to leave the splash screen stuck forever
@@ -129,9 +138,11 @@ let range = 30, usersCache = [], current = 'overview';
 const TITLES = { overview: 'Overview', users: 'Users', usage: 'Usage', credits: 'Credits', costs: 'Costs & providers', ai: 'AI behavior', train: 'Call Emysa', content: 'Content & push', admins: 'Admins' };
 const loaders = { overview: loadOverview, users: loadUsers, usage: loadUsage, credits: loadCredits, costs: loadCosts, ai: () => loadAiBehavior($('sec-ai'), { api, esc }), train: () => loadTrainerCall($('sec-train'), { api, esc, supabase }), content: loadBackgrounds, admins: loadAdmins };
 
+const SECTION_KEY = 'adminSection';
 function openSection(name) {
   if (current === 'train' && name !== 'train') stopTrainerCall();
   current = name;
+  try { localStorage.setItem(SECTION_KEY, name); } catch { /* private mode: it just will not be remembered */ }
   $('adminApp').classList.remove('open');
   document.querySelectorAll('.aSec').forEach((el) => el.classList.toggle('on', el.id === `sec-${name}`));
   document.querySelectorAll('#aDrawer .nav[data-s]').forEach((el) => el.classList.toggle('on', el.dataset.s === name));
@@ -152,7 +163,10 @@ function initPanel(users) {
       loaders[current]();
     };
   });
-  openSection('overview');
+  // Back where they left off (a reload after the phone discarded the page lands here too).
+  let saved = null;
+  try { saved = localStorage.getItem(SECTION_KEY); } catch { /* ignore */ }
+  openSection(saved && loaders[saved] && (saved !== 'admins' || myRole === 'owner') ? saved : 'overview');
 }
 const emailOf = (id) => usersCache.find((u) => u.id === id)?.email || id.slice(0, 8);
 
@@ -517,7 +531,7 @@ function withTimeout(promise, ms) {
 withTimeout(supabase.auth.getSession(), 8000)
   .then(({ data }) => {
     currentSession = data.session;
-    if (data.session?.user) enterAdmin();
+    if (data.session?.user) { if (!alreadyInPanel(data.session)) enterAdmin(); }
     else showSignInForm();
   })
   .catch((err) => {
