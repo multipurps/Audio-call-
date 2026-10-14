@@ -1,6 +1,4 @@
-# Emysa
-
-Emysa is an AI phone-calling assistant.
+# Audio Call
 
 ## License
 
