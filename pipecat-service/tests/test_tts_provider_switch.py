@@ -178,3 +178,47 @@ class TestTestVoiceModelOverride:
         from app.providers import build_tts
 
         assert build_tts(self._settings("elevenlabs"))._settings.model == "eleven_flash_v2_5"
+
+
+def test_voice_pref_reads_overlap_instead_of_running_one_after_another(monkeypatch):
+    """Measured: the three serial reads cost 0.9-1.2 s of call start. Each fake read takes
+    0.2 s, so serial would be >= 0.6 s and concurrent is about 0.2 s."""
+    import time
+
+    from app import call_context
+
+    class SlowRest:
+        def __init__(self, *a, **k): pass
+        async def aclose(self): pass
+        async def select(self, table, **k):
+            await asyncio.sleep(0.2)
+            return {
+                "voice_preferences": [{"live_voice_id": "marin"}],
+                "voice_profiles": [{"provider_voice_id": "fishclone12345", "status": "ready"}],
+                "voice_test_settings": [],
+            }[table]
+
+    monkeypatch.setattr(call_context, "_Rest", SlowRest)
+    s = dataclasses.replace(load_settings(dict(BASE)), supabase_url="https://x.supabase.co", supabase_service_role_key="s" * 30)
+    started = time.monotonic()
+    prefs = asyncio.run(call_context.fetch_voice_prefs(s, "user-1", "sess-1"))
+    elapsed = time.monotonic() - started
+    assert prefs.live_voice_id == "marin" and prefs.custom_voice_id == "fishclone12345"
+    assert elapsed < 0.45, f"reads look serial: {elapsed:.2f}s"
+
+
+def test_a_failed_prefs_read_still_returns_none_and_closes_the_client(monkeypatch):
+    from app import call_context
+
+    closed = []
+
+    class BrokenRest:
+        def __init__(self, *a, **k): pass
+        async def aclose(self): closed.append(True)
+        async def select(self, table, **k):
+            raise RuntimeError("timeout")
+
+    monkeypatch.setattr(call_context, "_Rest", BrokenRest)
+    s = dataclasses.replace(load_settings(dict(BASE)), supabase_url="https://x.supabase.co", supabase_service_role_key="s" * 30)
+    assert asyncio.run(call_context.fetch_voice_prefs(s, "user-1", "sess-1")) is None
+    assert closed == [True]

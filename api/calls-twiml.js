@@ -10,10 +10,12 @@
 // audio-level detection, and pass the result here as AnsweredBy *before*
 // this webhook fires — so a voicemail never reaches the relay at all, it's
 // hung up right here instead.
+import { guardTwilioWebhook } from '../lib/twilioSignature.js';
 import { getServiceClient } from '../lib/supabaseAdmin.js';
 import { describeCallEnd } from '../lib/callOutcome.js';
 
 export default async function handler(req, res) {
+  if (!guardTwilioWebhook(req, res)) return;
   const callId = req.query?.callId || (req.body && req.body.callId) || '';
   const answeredBy = req.body?.AnsweredBy || '';
 

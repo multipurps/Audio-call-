@@ -4,6 +4,7 @@
 // there's no pre-existing calls row yet — this creates one first, with
 // direction:'inbound' and to_number set to the *caller's* number (since
 // that's who Emysa is actually talking to here).
+import { guardTwilioWebhook } from '../lib/twilioSignature.js';
 import { getServiceClient } from '../lib/supabaseAdmin.js';
 
 function xml(res, body) {
@@ -12,6 +13,7 @@ function xml(res, body) {
 }
 
 export default async function handler(req, res) {
+  if (!guardTwilioWebhook(req, res)) return;
   const to = req.body?.To || '';
   const from = req.body?.From || '';
   const callSid = req.body?.CallSid || '';

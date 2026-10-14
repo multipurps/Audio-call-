@@ -1026,24 +1026,12 @@ async def fetch_voice_prefs(settings: Settings, user_id: str, session_id: str) -
     if settings.mock_mode or not user_id or not settings.supabase_url or not settings.supabase_service_role_key:
         return None
     rest = _Rest(settings.supabase_url, settings.supabase_service_role_key, timeout_secs=4.0)
-    try:
-        prefs_rows = await rest.select(
-            "voice_preferences",
-            select="live_voice_id,use_custom_voice",
-            filters={"user_id": f"eq.{user_id}"},
-            limit=1,
-        )
-        clone_rows = await rest.select(
-            "voice_profiles",
-            select="provider_voice_id,status",
-            filters={"user_id": f"eq.{user_id}"},
-            limit=1,
-        )
+
+    async def _test_rows() -> list[dict]:
         # The voice the user is testing (own key, saved in the app). Read on its own
         # so a missing table or a hiccup here never loses the normal prefs.
-        test_rows: list[dict] = []
         try:
-            test_rows = await rest.select(
+            return await rest.select(
                 "voice_test_settings",
                 select="*",
                 filters={"user_id": f"eq.{user_id}"},
@@ -1051,6 +1039,26 @@ async def fetch_voice_prefs(settings: Settings, user_id: str, session_id: str) -
             )
         except Exception as exc:  # noqa: BLE001
             _log("INFO", session_id, "[CALL ENGINE] no test-voice settings", error=type(exc).__name__)
+            return []
+
+    try:
+        # The three reads are independent, so they run together: one round trip of wall
+        # time instead of three (the serial reads were measured at 0.9-1.2 s of call start).
+        prefs_rows, clone_rows, test_rows = await asyncio.gather(
+            rest.select(
+                "voice_preferences",
+                select="live_voice_id,use_custom_voice",
+                filters={"user_id": f"eq.{user_id}"},
+                limit=1,
+            ),
+            rest.select(
+                "voice_profiles",
+                select="provider_voice_id,status",
+                filters={"user_id": f"eq.{user_id}"},
+                limit=1,
+            ),
+            _test_rows(),
+        )
     except Exception as exc:  # noqa: BLE001 - a missing table must not take the call down
         _log("WARNING", session_id, "[CALL ENGINE] could not read voice preferences", error=type(exc).__name__, detail=str(exc)[:160])
         return None

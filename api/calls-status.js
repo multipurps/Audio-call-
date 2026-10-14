@@ -1,9 +1,11 @@
+import { guardTwilioWebhook } from '../lib/twilioSignature.js';
 import { getServiceClient } from '../lib/supabaseAdmin.js';
 import { maybeGenerateCallSummary } from '../lib/callSession.js';
 import { describeCallEnd } from '../lib/callOutcome.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  if (!guardTwilioWebhook(req, res)) return;
   const supabase = getServiceClient();
 
   const callId = req.query?.callId;
