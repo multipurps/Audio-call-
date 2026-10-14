@@ -120,3 +120,40 @@ test('copy buttons exist for every page that produces a link', () => {
   assert.match(app, /copy: \$\('addTimeCopy'\)/);
   assert.match(app, /copy: \$\('premiumCopy'\)/);
 });
+
+import { pickFirstCallChannel, firstCallPrompt, firstCallExplainer } from '../lib/firstCall.js';
+
+test('first request uses the line the person linked', () => {
+  assert.equal(pickFirstCallChannel({ channels: { whatsapp: true } }), 'whatsapp');
+  assert.equal(pickFirstCallChannel({ channels: { telegram: true } }), 'telegram');
+  assert.equal(pickFirstCallChannel({ channels: { phone: true } }), 'phone');
+  assert.equal(pickFirstCallChannel({ channels: {} }), null);
+});
+
+test('with several lines the one already selected in chat wins, otherwise a fixed order', () => {
+  const all = { phone: true, whatsapp: true, telegram: true };
+  assert.equal(pickFirstCallChannel({ selected: 'phone', channels: all }), 'phone');
+  assert.equal(pickFirstCallChannel({ channels: all }), 'whatsapp');
+  assert.equal(pickFirstCallChannel({ channels: { phone: true, telegram: true } }), 'telegram');
+});
+
+test('a selected line that is no longer linked, or Telegram while disabled, is never used', () => {
+  assert.equal(pickFirstCallChannel({ selected: 'whatsapp', channels: { phone: true } }), 'phone');
+  assert.equal(pickFirstCallChannel({ channels: { telegram: true }, telegramEnabled: false }), null);
+});
+
+test('the example request names the platform; phone stays plain', () => {
+  assert.equal(firstCallPrompt('Ada', 'whatsapp'), 'Call Ada on WhatsApp and tell them I said hello.');
+  assert.equal(firstCallPrompt('Ada', 'telegram'), 'Call Ada on Telegram and tell them I said hello.');
+  assert.equal(firstCallPrompt('Ada', 'phone'), 'Call Ada and tell them I said hello.');
+  assert.equal(firstCallPrompt('Ada', null), 'Call Ada and tell them I said hello.');
+  assert.equal(firstCallExplainer('Ada', 'whatsapp'), 'This is your first request. Emysa will call Ada on WhatsApp for you.');
+});
+
+test('the tutorial selects the chosen line explicitly before filling the prompt', () => {
+  const app = read('app.js');
+  const step = app.slice(app.indexOf("id: 'first-request'"), app.indexOf("id: 'mood'"));
+  assert.match(step, /pickFirstCallChannel\(/);
+  assert.match(step, /setCallChannel\(ctx\.data\.channel, \{ focus: false \}\)/);
+  assert.ok(step.indexOf('setCallChannel') < step.indexOf('firstCallPrompt('), 'line is selected before the prompt is written');
+});

@@ -8,6 +8,7 @@ import { DEFAULT_MOOD, selectMood, toggleArgue, argueVisible, moodButtonLabel, m
 import { answeredCallPill, assistantCallPill, listenInPill, liveCallView, endedCallLabel, formatCallTimer, TERMINAL_STATUSES } from './lib/callStatus.js';
 import { userError, friendlyAccountName } from './lib/userFacing.js';
 import * as Tutorial from './lib/tutorial.js';
+import { pickFirstCallChannel, firstCallPrompt, firstCallExplainer } from './lib/firstCall.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // Installed PWAs (especially iOS "Add to Home Screen") can keep showing a
@@ -4065,15 +4066,19 @@ Tutorial.register(FIRST_CALL_TUTORIAL, {
     },
     {
       id: 'first-request', target: '#briefInput', avoid: ['#moodFloat'], interactive: true, side: 'top',
-      text: (ctx) => `This is your first request. Emysa will call ${tutorialContactName(ctx)} for you.`,
-      onEnter: (ctx) => {
+      text: (ctx) => firstCallExplainer(tutorialContactName(ctx), ctx.data.channel),
+      onEnter: async (ctx) => {
         tutorialEnsureTab('chat');
+        // Use the line they linked, and select it, so the first request cannot fail on "which line?".
+        if (!lineState.loaded) await loadLineState();
+        ctx.data.channel = pickFirstCallChannel({ selected: currentCallChannel(), channels: lineState.channels, telegramEnabled: TELEGRAM_ENABLED });
+        if (ctx.data.channel && ctx.data.channel !== currentCallChannel()) setCallChannel(ctx.data.channel, { focus: false });
         const name = tutorialContactName(ctx);
         const input = $('briefInput');
         // Not focused on purpose: the keyboard would cover the tooltip. Set only if the box is empty
         // so Back/Next never overwrites something the person typed.
         if (name && !input.value.trim()) {
-          input.value = `Call ${name} and tell them I said hello.`;
+          input.value = firstCallPrompt(name, ctx.data.channel);
           input.dispatchEvent(new Event('input'));
         }
       },
