@@ -16,17 +16,14 @@ test('Emysa call playback starts with a real cushion that deepens mid-sentence, 
   assert.equal(PLAYBACK_DEFAULTS.jitterMax, 0.6);
 });
 
-test('the in-app call, the training call and both listen-in lanes all use the one shared scheduler', () => {
+test('the in-app call (which the training call now runs through) and both listen-in lanes use the one shared scheduler', () => {
   assert.match(app, /import \{ createPlayback \} from '\.\/lib\/appCallPlayback\.js'/);
-  assert.match(trainer, /import \{ createPlayback \} from '\.\.\/lib\/appCallPlayback\.js'/);
   assert.equal((app.match(/createPlayback\(/g) || []).length, 3, 'in-app call + two listen-in lanes');
-  assert.match(trainer, /createPlayback\(/);
 });
 
 test('no call site keeps a private scheduler that throws away the newest audio when behind', () => {
   assert.ok(!/nextTime > now \+ MAX_LAG\) return/.test(app), 'old in-app / listen-in drop');
-  assert.ok(!/nextTime > now \+ 2\.5\) return/.test(trainer), 'old training-call drop');
-  assert.ok(!/createBufferSource\(\)/.test(trainer), 'training call schedules through the shared module');
+  assert.ok(!/createBufferSource\(\)/.test(trainer), 'the training call must not grow a private scheduler again');
 });
 
 test('the listen-in lanes keep their wider cap: a late word beats a missing one', () => {
