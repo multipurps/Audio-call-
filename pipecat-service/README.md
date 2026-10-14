@@ -1,25 +1,17 @@
-# Audio Call Assistant (Pipecat service)
+# Voice assistant service (Pipecat)
 
-The AI voice assistant that answers live Telegram calls. A separate Render Web
-Service — it does not replace or modify the MadelineProto integration, the
-existing Twilio relay, or the Vercel functions.
-
-```
-Telegram <-> MadelineProto (mp-relay, PHP) <--ACAF--> this service (Pipecat)
-                                                  |
-                              VAD -> STT -> LLM -> Fish Audio TTS
-```
-
-Live call audio never passes through Vercel.
+The real-time AI voice assistant behind Emysa's calls. It runs as a separate Render
+Web Service and speaks the ACAF audio bridge protocol over a WebSocket (`/stream`),
+with health checks at `/healthz` and `/readyz`. Call audio does not pass through Vercel.
 
 ## Documents
 
 | Document | Contents |
 | --- | --- |
-| [`../docs/AI-VOICE-ASSISTANT-REPORT.md`](../docs/AI-VOICE-ASSISTANT-REPORT.md) | Inspection report, dependency report, the ten findings |
-| [`../docs/ASSISTANT-DEPLOYMENT.md`](../docs/ASSISTANT-DEPLOYMENT.md) | Architecture, deployment, env vars, testing, limitations |
+| [`../docs/ASSISTANT-DEPLOYMENT.md`](../docs/ASSISTANT-DEPLOYMENT.md) | Architecture, deployment, environment variables, testing |
 | [`../docs/ACAF-PROTOCOL.md`](../docs/ACAF-PROTOCOL.md) | Wire protocol reference |
-| [`../docs/MP-RELAY-INTEGRATION.md`](../docs/MP-RELAY-INTEGRATION.md) | PHP-side spec + reference adapter |
+| [`../docs/MP-RELAY-INTEGRATION.md`](../docs/MP-RELAY-INTEGRATION.md) | Telegram relay integration spec |
+| [`../docs/AI-VOICE-ASSISTANT-REPORT.md`](../docs/AI-VOICE-ASSISTANT-REPORT.md) | Historical inspection report |
 
 ## Run it
 
@@ -36,46 +28,44 @@ curl localhost:8080/readyz
 ## Test it
 
 ```bash
-python -m pytest          # 327 tests, no credentials required
+python -m pytest          # no credentials required
 ```
 
 ## Layout
 
 ```
 app/
-  protocol.py        ACAF frame + control codec, sequence tracking
-  audio.py           G.711 mu-law, PCM16 helpers, stateful resampler
-  config.py          env-driven settings, fail-fast validation
-  logging_setup.py   JSON logs, secret redaction, audio-safe logging
-  serializer.py      ACAF <-> Pipecat frames (TelegramFrameSerializer)
-  backpressure.py    bounded drop-oldest queue, adaptive skipping
-  session.py         CallSession / SessionRegistry: lifecycle, heartbeat, reaping
-  transport.py       AcafBridge: handshake, auth, pump loops, teardown
-  providers.py       STT/LLM/TTS factories + mock implementations
-  pipeline.py        Pipecat pipeline assembly
-  main.py            FastAPI: /stream, /healthz, /readyz, graceful shutdown
-  adapters/
-    base.py          TransportAdapter interface (receiveAudio/sendAudio/stop)
-    telegram.py      Telegram ACAF adapter
-    mock.py          self-driving synthetic call
-tests/               327 tests
+  main.py                FastAPI entrypoint: ACAF WebSocket bridge, health checks, shutdown
+  protocol.py            ACAF v1 frame and control codec
+  transport.py           ACAF bridge: one WebSocket connection per live call
+  session.py             Per-call lifecycle: heartbeat, timeout, reconnect, cleanup
+  serializer.py          ACAF <-> Pipecat frame serializer
+  audio.py               Audio conversion primitives
+  backpressure.py        Bounded outbound queue with drop-oldest backpressure
+  config.py              Environment configuration
+  logging_setup.py       Structured logging that does not leak audio or credentials
+  providers.py           STT / LLM / TTS factories and mock implementations
+  pipeline.py            Pipecat pipeline assembly
+  live.py                Speech-to-speech call engine
+  conversation.py        Conversation runner between the bridge and Pipecat
+  conversation_policy.py Conversational behaviour policy
+  call_context.py        Pre-call context and live persistence against the app database
+  call_state.py          Call-attempt facts for the call context
+  call_wrapup.py         Decides when a call should wrap up
+  caller_state.py        Caller interaction state
+  emotion.py             Emotional state tracking
+  expressive_context.py  Expressive manner for the voice pipeline
+  vocal.py               Contextual vocalisations and delivery markers
+  global_config.py       Admin-controlled global AI guidance
+  monitor.py             Live call monitoring for the signed-in app user
+  app_call.py            Browser entry point for the in-app call
+  prewarm.py             Startup work done at boot instead of during a call
+  adapters/              Transport adapters (base interface, Telegram, mock)
+tests/
 ```
 
-## Two design decisions worth knowing before editing
+## Design notes
 
-**The bridge carries PCM16, not Opus.** Pipecat 1.11 has no Opus decoder, and
-MadelineProto already carries a pure-PHP OGG Opus muxer. Decoding on the PHP
-side keeps a Telegram-specific codec out of the Pipecat process and keeps a
-native libopus build out of this image. See `app/serializer.py`.
-
-**Pipecat's streaming resampler is not used on the audio path.** Measured:
-fed 20 ms telephony frames, `create_stream_resampler()` returns 0 bytes for
-~6 frames then bursts ~3 KB. That is ~120 ms of dead air and output that breaks
-telephony frame cadence. `app/audio.py`'s deterministic resampler is used
-instead. The measurement is recorded in `app/serializer.py`.
-
-## Not production-verified yet
-
-The pipeline has never carried a real call, because the Telegram call transport
-does not exist yet (it lives in `multipurps/mp-relay`, PHP). See
-"Known limitations" in [`../docs/ASSISTANT-DEPLOYMENT.md`](../docs/ASSISTANT-DEPLOYMENT.md).
+The bridge carries PCM16 audio, and `app/audio.py` provides a deterministic
+resampler used on the audio path instead of Pipecat's streaming resampler. The
+reasoning and measurements are recorded in `app/serializer.py`.

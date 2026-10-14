@@ -1,126 +1,63 @@
 # Emysa
 
-Emysa — an Android/web AI phone-calling assistant, in the spirit of Mitra/Osmo: tell it
-what you need done, it makes a real call, handles the conversation, and
-reports back.
+Emysa is an AI phone-calling assistant. You tell it what you need done; after you
+confirm, it places the call, handles the conversation and reports back in the app.
 
-## Architecture
+## Components
 
-Three deployables:
-
-1. **Web app** (`index.html`, `styles.css`, `app.js`, `api/*.js`) — a
-   mobile-first PWA plus Vercel serverless functions (11 endpoints in `api/`,
-   staying within the 12-function Vercel Hobby cap): auth, admin approval,
-   contacts, voice cloning, call plans & confirmation, social calling
-   (`WaCalls` for WhatsApp, `mp-relay` for Telegram), tiered memories, and
-   call history. Deploys to Vercel.
-
-2. **Twilio Relay Server** (`server/patter-relay.js` and `server/relay.js`) —
-   persistent Node processes that Twilio's Media Streams WebSocket connects to
-   for the live audio of an in-progress PSTN call. Uses GPT Luna (`gpt-6-luna`)
-   via OpenAI's Chat Completions API (optional fal OpenRouter fallback),
-   OpenAI transcription (`gpt-4o-mini-transcribe`) with a speech-vs-noise gate,
-   Fish Audio TTS with per-call voice isolation, OpenFeelz-inspired emotional
-   intelligence, and Letta-inspired 4-tier persistent memory.
-   Groq was removed from every provider role (LLM, STT, vision, TTS was never
-   Groq) — see `docs/CALL-SYSTEM-IMPLEMENTATION-REPORT.md`.
-
-3. **Pipecat Voice Service** (`pipecat-service/`) — Python FastAPI + Pipecat
-   real-time audio bridge used by `mp-relay` and WaCalls over the ACAF
-   WebSocket protocol for Telegram/WhatsApp calling. Supports GPT Luna
-   (`ASSISTANT_LLM_PROVIDER=luna`), OpenAI transcription
-   (`ASSISTANT_STT_PROVIDER=openai`, `gpt-4o-mini-transcribe`), Fish Audio
-   TTS, Silero VAD, emotional state tracking, and `[[END_CALL]]` call
-   termination. It also resolves the app's `calls` row at call start (goal,
-   memories, prior summaries), persists the live transcript per turn, and
-   reports the call's end back so the shared summary runs.
-
-## Emotional Intelligence & Persistent Memory
-
-- **GPT Luna Primary LLM (`lib/llmClient.js`, `pipecat-service/app/config.py`)**:
-  Defaults to `gpt-6-luna` via `LUNA_API_KEY` / `OPENAI_API_KEY`, with an
-  optional Fal OpenRouter fallback (`FAL_KEY`). There is no Groq endpoint any
-  more: `LLM_PROVIDER=groq` resolves to the OpenAI primary rather than
-  silently targeting a removed provider.
-- **OpenFeelz-Inspired Emotional State (`lib/emotionEngine.js`, `pipecat-service/app/emotion.py`)**:
-  Models OCEAN personality traits, continuous PAD (Pleasure, Arousal, Dominance)
-  + relational dimensions (Connection, Curiosity, Energy, Trust), exponential
-  time decay toward personality baseline, and a multi-stage rumination buffer
-  with zero extra LLM calls per turn.
-- **Letta-Inspired 4-Tier Memory (`lib/memoryManager.js`, `api/memories.js`, `sql/016_memory_and_emotion.sql`)**:
-  Separates memory into `working`, `semantic` (facts/preferences), `episodic`
-  (call/chat summaries), and `emotional` (relationship notes) tiers stored in
-  Supabase with hybrid relevance + recency + importance retrieval, contradiction
-  resolution, and automatic secret/PII scrubbing.
-
-## SQL Migrations
-
-Run the SQL migrations in `sql/` in order against your Supabase project:
-- `001_schema.sql` through `015_call_plans.sql` (`006_chat_sessions.sql` and
-  `007_assistant.sql` are order-independent)
-- `016_memory_and_emotion.sql` (adds tiered memory columns on `memories` and
-  creates the `emotional_states` table with RLS policies)
-
-## Design
-
-Matches the visual language of `live-call`: same theme-variable system
-(Coffee & Emerald / Midnight & Cyan / Forest & Gold), same floating
-bottom-tab-bar pattern. Two explicit choices carried over from that app,
-both intentional:
-
-- No emoji anywhere in the UI.
-- No `safe-area-inset` padding anywhere — the app bleeds edge to edge,
-  including under the notch and home indicator. This is a deliberate
-  tradeoff (some tap targets sit in the gesture zone) rather than an
-  oversight.
+| Path | What it is |
+| --- | --- |
+| `index.html`, `app.js`, `styles.css`, `admin/`, `api/` | Mobile-first web app (PWA) and its serverless functions, deployed to Vercel (`vercel.json`). |
+| `server/` | Node relay that carries the live audio of a phone call (Twilio Media Streams). Deployed to Render. |
+| `server-social/` | Separate Node relay for linked Telegram and WhatsApp accounts. See [`server-social/README-social.md`](server-social/README-social.md). |
+| `pipecat-service/` | Python voice assistant service (FastAPI + Pipecat). See [`pipecat-service/README.md`](pipecat-service/README.md). |
+| `signal-bridge/` | Bridge for Signal calls, connected to the voice assistant service. |
+| `telegram-call-bridge/` | Prototype Telegram call bridge. See [`telegram-call-bridge/README.md`](telegram-call-bridge/README.md). |
+| `lib/` | Shared server-side modules used by `api/` and the relays. |
+| `sql/` | Supabase migrations. |
+| `tests/` | JavaScript tests. |
 
 ## Setup
 
-1. Create a Supabase project, run `sql/001_schema.sql`.
+1. Create a Supabase project and apply every file in `sql/` in filename order.
 2. Enable Google as an auth provider in Supabase.
-3. Set `SUPABASE_URL` / `SUPABASE_ANON_KEY` in `app.js`.
-4. Deploy the root of this repo to Vercel; set the env vars in
-   `.env.example` (Vercel section) in the project settings.
-5. Deploy `server/` to Render as a background/web service; set the env
-   vars in `.env.example` (relay section) there. Point `RELAY_WS_URL`
-   (in Vercel) at its `wss://` URL.
-6. Sign up in the app, then approve your own account directly in Supabase
-   (`update user_approvals set approved = true where user_id = '...'`) —
-   after that, sign in as `ADMIN_EMAIL` unlocks the admin endpoints for
-   approving everyone else.
+3. Set the Supabase project URL and public anon key in `app.js`, `admin/admin.js`
+   and `landing.js`.
+4. Deploy the repository root to Vercel and set the environment variables listed in
+   `.env.example`.
+5. Deploy `server/` to Render (`npm start`) and set the relay variables from
+   `.env.example`. Set `RELAY_WS_URL` in Vercel to the relay's `wss://` URL.
+6. Sign up in the app, then approve your own account in Supabase
+   (`update user_approvals set approved = true where user_id = '<your user id>';`).
+   Signing in as `ADMIN_EMAIL` unlocks the admin functions for approving other users.
 
-## Status
+The voice assistant service, social relay and bridges are deployed separately; see
+their READMEs and the documents below.
 
-Initial scaffold: auth + approval gate, AI caller CRUD, voice cloning,
-call initiation with usage limits, call history, and a working relay-server
-skeleton with the full Twilio <-> OpenAI <-> Fish Audio loop wired up. Not yet
-tuned against real calls: silence-detection timing in the relay, WAV framing
-for OpenAI transcription, and the IVR/hold-music handling from the original spec
-still need real-call testing before this is production-ready. Status of every
-path (and what has NOT been verified on a real line) is tracked in
-`docs/CALL-SYSTEM-IMPLEMENTATION-REPORT.md`.
+## Tests
 
-Home screen is now a chat with the assistant ("Mitra"-style), not a raw
-number composer: `contacts` (name -> phone number, managed from the Contacts tab) let you say "call Juicy Jay" instead of typing digits; `POST
-/api/assistant?action=send` runs one LLM call (GPT Luna on OpenAI) to decide
-call vs. retry vs. plain reply, then prepares a Phone call for explicit in-chat
-confirmation; `api/calls-status.js` posts a
-follow-up message (busy / no answer / finished) back into the same thread
-once Twilio's status webhook fires, so the chat updates on its own while
-you keep using the app. Voice input (the wave icon) records with
-`MediaRecorder` and transcribes via OpenAI (`gpt-4o-mini-transcribe`) — the
-same transcription API the relays use. All of this needs `OPENAI_API_KEY` (or
-`LUNA_API_KEY`) set in the Vercel project (see `.env.example`) and
-`sql/007_assistant.sql` run against Supabase
-before it'll do anything; until then `api/assistant.js` replies with an
-explicit "not configured yet" message instead of failing silently.
+```bash
+npm install
+npm test                # JavaScript tests
+npm run check:deploy    # verifies the files the Vercel deployment needs
+```
 
-## Mobile navigation and call confirmation
+Python tests for `pipecat-service/` are described in its README.
 
-The nav/call redesign reuses the existing PWA and provider integrations. Phone
-calls now require a persisted script summary and an explicit **Call Now** action;
-Home's **Call Emysa** uses a clearly labeled Twilio callback to the user's phone.
+## Documentation
 
-**Deployment requires `sql/015_call_plans.sql` and a relay redeploy.** See
-[the redesign deployment and validation guide](docs/NAV-AND-CALL-REDESIGN.md)
-for schema changes, callback semantics, API compatibility, and test commands.
+| Document | Contents |
+| --- | --- |
+| [`docs/ASSISTANT-DEPLOYMENT.md`](docs/ASSISTANT-DEPLOYMENT.md) | Voice assistant service: deployment, environment variables, testing |
+| [`docs/ACAF-PROTOCOL.md`](docs/ACAF-PROTOCOL.md) | Audio bridge wire protocol |
+| [`docs/MP-RELAY-INTEGRATION.md`](docs/MP-RELAY-INTEGRATION.md) | Telegram relay integration spec |
+| [`docs/ADD-TIME-PAYMENTS.md`](docs/ADD-TIME-PAYMENTS.md) | Paying for call minutes |
+| [`docs/AI-BEHAVIOR.md`](docs/AI-BEHAVIOR.md) | Admin-controlled AI behavior and shared knowledge |
+| [`docs/LANDING.md`](docs/LANDING.md) | Public landing page and routing notes |
+| [`docs/PHASE3-WHATSAPP-MEMORY.md`](docs/PHASE3-WHATSAPP-MEMORY.md) | Imported WhatsApp history and per-contact memory |
+| [`docs/AI-VOICE-ASSISTANT-REPORT.md`](docs/AI-VOICE-ASSISTANT-REPORT.md) | Historical inspection report for the voice assistant service |
+
+## License
+
+Apache License 2.0. See [`LICENSE`](LICENSE). Third-party notices are in
+`vendor/` and `telegram-call-bridge/NOTICE`.

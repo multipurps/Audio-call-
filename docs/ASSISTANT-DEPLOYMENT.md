@@ -164,7 +164,7 @@ all codec work belongs on the PHP side, which already has it.
 
 | Variable | Notes |
 | --- | --- |
-| `ASSISTANT_BRIDGE_URL` | e.g. `wss://audio-call-assistant.onrender.com/stream` |
+| `ASSISTANT_BRIDGE_URL` | e.g. `wss://<assistant-host>/stream` |
 | `ASSISTANT_BRIDGE_SECRET` | Must equal the value above. |
 | `ASSISTANT_BRIDGE_SAMPLE_RATE` | Must equal the value above. |
 | `MP_RELAY_INTERNAL_SECRET` | Already required; now documented. |

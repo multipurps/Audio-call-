@@ -30,17 +30,6 @@ Call:  caller id -> normalise number -> that user's contact -> approved memories
    with header `x-internal-secret` (same secrets as the other relay callbacks).
    The Python call assistant also resolves it itself from the call row's number.
 
-## Reference repositories: what they actually are
-
-| Repo | What it demonstrates | What was reused |
-|---|---|---|
-| samirsalman/whatsvector | One iOS-only bracket format, 2-digit year, 24h. Multi-line messages are dropped. One Qdrant vector per message, an agent with a search tool. No zip, no memories, no review, one user. | The idea of embedding "who / when / what" together and merging messages into larger chunks (its own TODO). |
-| AkhshanAchu/Whatsapp-RAG-v2 | Streamlit app for one iOS format; local pandas, sentence-transformers, TF-IDF and pickle caches; local Ollama. One chat, no database, no auth. | Media/call-line classification, and the keyword plus semantic hybrid idea. Nothing else (pickle caches are unsafe for user uploads). |
-| visheshkhurana/chatvault-ai | Closest to our stack: Supabase, pgvector, Android and iOS regexes, contact memory table with confidence. But contacts are created from display names, message ids can collide, dates are assumed day-first, tenant isolation relies on passing `p_user_id` to functions through the service role, and memories have no review status. | The table/function shape for pgvector search and the idea of a per-contact memory table. The isolation, matching and review model here is different on purpose. |
-| AtharvaMaik/COPYHERR | Persona fine-tuning: a pronoun/keyword regex picks "lore" lines from an Android export. Not a memory system. | Nothing. Cloning someone's personality from their messages is not what this feature does, and a keyword regex is the "every sentence is a fact" mistake this design avoids. |
-
-None of them is a production implementation for Emysa.
-
 ## Isolation
 
 * Every row has `user_id`; RLS allows only `auth.uid() = user_id`.
@@ -57,8 +46,7 @@ None of them is a production implementation for Emysa.
 
 ## Limitations
 
-See the final report in the pull request / chat; the important ones: timestamps are
-the export's local time stored as UTC, group chats analyse only the two chosen people,
+Timestamps are the export's local time stored as UTC, group chats analyse only the two chosen people,
 media is counted but never read, WhatsApp `@lid` caller ids carry no number and cannot
 be matched, matching needs full international numbers, and live-call retrieval of
 history snippets is available through the endpoint but is not yet a mid-call tool.
