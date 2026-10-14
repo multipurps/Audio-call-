@@ -257,25 +257,20 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 .channelBadge .dot{width:6px; height:6px; border-radius:50%; background:var(--accent);}
 .homeHeaderTitle{display:flex; flex-direction:column; align-items:center; gap:6px; font-size:15px; font-weight:650; color:var(--dim); flex:1; min-width:0;}
 .homeHeaderLogo{width:38px; height:38px; border-radius:50%; object-fit:cover; box-shadow:0 4px 14px rgba(0,0,0,0.4); display:block;}
-.homeHeaderLogoWrap{position:relative; margin-bottom:-16px; cursor:pointer; --g:.5; --cream:255,241,208;}
+.homeHeaderLogoWrap{position:relative; margin-bottom:-16px; cursor:pointer; --g:.5;}
 .homeHeaderLogo{position:relative; z-index:1;}
-/* Regular logo by default. Ring + heartbeat glow exist only while a call is starting or live (.calling). */
-.hlHalo,.hlRing{position:absolute; border-radius:50%; pointer-events:none; opacity:0; transition:opacity .8s;}
-.hlHalo{
-  inset:-14px;
-  background:radial-gradient(circle closest-side,
-    rgba(var(--cream),calc(.55 + var(--g)*.4)) 66%,
-    rgba(var(--cream),calc(.22 + var(--g)*.25)) calc(76% + var(--g)*6%),
-    rgba(var(--cream),0) 100%);
-  filter:blur(3px);
-}
+/* Regular logo by default. A plain ring in the app cream (--accent), no glow, exists only while a call is starting or live (.calling);
+   the heartbeat only breathes the ring's brightness and size. */
 .hlRing{
-  inset:-3px; border:3px solid rgba(var(--cream),calc(.55 + var(--g)*.45));
-  box-shadow:0 0 calc(4px + var(--g)*14px) calc(1px + var(--g)*3px) rgba(var(--cream),calc(.35 + var(--g)*.4)),
-    inset 0 0 calc(3px + var(--g)*8px) rgba(var(--cream),calc(.2 + var(--g)*.35));
-  filter:blur(.6px);
+  position:absolute; inset:-3px; border-radius:50%; pointer-events:none;
+  border:2.5px solid var(--accent); box-sizing:border-box;
+  opacity:0; transform:scale(1);
 }
-.homeHeaderLogoWrap.calling .hlHalo,.homeHeaderLogoWrap.calling .hlRing{opacity:1;}
+.homeHeaderLogoWrap.calling .hlRing{
+  opacity:calc(.55 + var(--g)*.45); transform:scale(calc(1 + var(--g)*.05));
+  animation:hlRingIn .6s ease-out both;
+}
+@keyframes hlRingIn{from{clip-path:circle(0% at 50% 50%);}to{clip-path:circle(150% at 50% 50%);}}
 .homeHeaderLogoWrap.spin .homeHeaderLogo{animation:headerLogoSpin 1.8s cubic-bezier(.65,0,.25,1) 1 both;}
 @keyframes headerLogoSpin{from{transform:rotate(0);}to{transform:rotate(360deg);}}
 @media (prefers-reduced-motion:reduce){.homeHeaderLogoWrap.spin .homeHeaderLogo{animation:none;}}
