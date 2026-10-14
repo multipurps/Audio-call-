@@ -1,22 +1,40 @@
-// The Emysa call's playback must not go back to a tiny fixed cushion: that broke the voice up
-// whenever a streamed (test / clone) voice delivered a chunk late.
+// The Emysa call's playback must not go back to a tiny fixed cushion (that broke the voice up
+// whenever a streamed voice delivered a chunk late), and must never silently discard audio.
+// Behaviour is tested in app-call-playback-scheduler.test.mjs; this file pins the wiring.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { PLAYBACK_DEFAULTS } from '../lib/appCallPlayback.js';
 
-const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
+const app = read('../app.js');
+const trainer = read('../admin/trainerCall.js');
 
-test('Emysa call playback starts with a real cushion and re-primes with it after an underrun', () => {
-  assert.match(app, /const JITTER_START = 0\.2;/);
-  assert.match(app, /call\.jitter = JITTER_START;/);
-  assert.match(app, /call\.nextTime = now \+ call\.jitter;/);
-  assert.ok(!/now \+ \(call\.nextTime \? 0\.03/.test(app), 'the 30 ms re-prime that chained gaps must stay gone');
+test('Emysa call playback starts with a real cushion that deepens mid-sentence, up to a ceiling', () => {
+  assert.equal(PLAYBACK_DEFAULTS.jitterStart, 0.2);
+  assert.equal(PLAYBACK_DEFAULTS.jitterStep, 0.1);
+  assert.equal(PLAYBACK_DEFAULTS.jitterMax, 0.6);
 });
 
-test('a mid-sentence underrun deepens the cushion, up to a ceiling', () => {
-  assert.match(app, /call\.jitter = Math\.min\(JITTER_MAX, call\.jitter \+ JITTER_STEP\);/);
+test('the in-app call, the training call and both listen-in lanes all use the one shared scheduler', () => {
+  assert.match(app, /import \{ createPlayback \} from '\.\/lib\/appCallPlayback\.js'/);
+  assert.match(trainer, /import \{ createPlayback \} from '\.\.\/lib\/appCallPlayback\.js'/);
+  assert.equal((app.match(/createPlayback\(/g) || []).length, 3, 'in-app call + two listen-in lanes');
+  assert.match(trainer, /createPlayback\(/);
 });
 
-test('the listen-in no longer skips the callee once it is only a couple of seconds behind', () => {
-  assert.match(app, /const MAX_LAG = 5; /);
+test('no call site keeps a private scheduler that throws away the newest audio when behind', () => {
+  assert.ok(!/nextTime > now \+ MAX_LAG\) return/.test(app), 'old in-app / listen-in drop');
+  assert.ok(!/nextTime > now \+ 2\.5\) return/.test(trainer), 'old training-call drop');
+  assert.ok(!/createBufferSource\(\)/.test(trainer), 'training call schedules through the shared module');
+});
+
+test('the listen-in lanes keep their wider cap: a late word beats a missing one', () => {
+  assert.match(app, /maxLag: 5/);
+});
+
+test('the in-app call draws pushed transcript turns at once, by line index, with the poll only as a slow fallback', () => {
+  assert.match(app, /msg\?\.type === 'transcript' && Number\.isFinite\(msg\.seq\)\) \{ showLine\(msg\.seq - 1/);
+  assert.match(app, /setInterval\(pollTranscript, 3000\)/);
+  assert.ok(!/setInterval\(pollTranscript, 1200\)/.test(app), 'the 1.2 s poll was the main transcript path');
 });

@@ -1,7 +1,8 @@
 import { normalizePhone } from './lib/phoneNumbers.js';
 import { decodeMonitorFrame } from './lib/monitorFrame.js';
-import { floatToPcm16k, decodeAppCallFrame, describeAppCallMessage, describeAppCallClose, describeMicError } from './lib/appCallAudio.js';
+import { createMicDownsampler, decodeAppCallFrame, describeAppCallMessage, describeAppCallClose, describeMicError } from './lib/appCallAudio.js';
 import { primeAudioSession, createCallOutput, watchLifecycle, pickOutputMode, micNeedsRestart } from './lib/appCallOutput.js';
+import { createPlayback } from './lib/appCallPlayback.js';
 import { describeMonitorMessage, describeMonitorClose, noAudioMessage, MONITOR_NO_AUDIO_MS } from './lib/monitorStatus.js';
 import { DEFAULT_MOOD, selectMood, toggleArgue, argueVisible, moodButtonLabel, moodPayload, moodChipVisible } from './lib/moodPicker.js';
 import { answeredCallPill, assistantCallPill, listenInPill, liveCallView, endedCallLabel, formatCallTimer, TERMINAL_STATUSES } from './lib/callStatus.js';
@@ -1382,7 +1383,14 @@ function stopAppCallSession({ hangUp = false } = {}) {
   if (hangUp) setTimeout(closeSoon, 300); else closeSoon();
   try { call.stream?.getTracks().forEach((t) => t.stop()); } catch {}
   try { call.micNode?.disconnect(); call.source?.disconnect(); } catch {}
-  for (const src of call.sources || []) { try { src.stop(); } catch {} }
+  try { call.playback?.clear(); } catch {}
+  try {
+    if (call.playback) {
+      const stats = call.playback.stats();
+      window.__emysaLastCallAudio = stats; // counts only, never audio or text; read it in the console
+      if (localStorage.getItem('emysaAudioDebug')) console.log('[call-audio] summary', stats);
+    }
+  } catch {}
   try { call.unwatch?.(); call.output?.dispose(); } catch {}
   $('waveRow')?.classList.remove('speaking');
 }
@@ -1485,25 +1493,22 @@ async function startAppCallSession() {
   const out = output.input; // reply audio is mixed here; never connected to ctx.destination in stream mode
   const call = {
     ws, stream, ctx, out, output, callId: started.callId, opened: false, explained: false, ended: false,
-    muted: assistantMuted, sources: new Set(), nextTime: 0, renderedLines: 0, transcriptTimer: null,
+    muted: assistantMuted, playback: null, renderedLines: 0, transcriptTimer: null,
     source: null, micNode: null, pending: [], pendingSamples: 0,
   };
   appCall = call;
-  // Playback cushion. The voice arrives in bursts (a streamed test voice especially), so a 60 ms
-  // cushion underran on the first late chunk and every chunk after it: a chain of tiny gaps heard
-  // as the voice breaking up. Start with a real cushion, re-prime with the full cushion after an
-  // underrun, and deepen it when the underrun happens mid-sentence (the same rule the listen-in
-  // uses). A long gap is just Emysa pausing, so it does not deepen the cushion.
-  const JITTER_START = 0.2;
-  const JITTER_MAX = 0.6;
-  const JITTER_STEP = 0.1;
-  const MAX_LAG = 2.5;
-  call.jitter = JITTER_START;
+  // Playback (cushion, underrun re-prime, stale-backlog policy) lives in lib/appCallPlayback.js,
+  // shared with the admin training call. It counts every decision; see call.playback.stats().
+  call.playback = createPlayback({
+    ctx, out, log: audioDebug,
+    onSpeaking: (on) => $('waveRow')?.classList.toggle('speaking', on && appCall === call),
+  });
 
   // -- microphone -> service ------------------------------------------------
+  const downsample = createMicDownsampler(ctx.sampleRate);
   const sendPcm = (floats) => {
     if (call.muted || ws.readyState !== WebSocket.OPEN) return;
-    const pcm = floatToPcm16k(floats, ctx.sampleRate);
+    const pcm = downsample(floats);
     if (pcm.length) ws.send(pcm.buffer);
   };
   call.source = ctx.createMediaStreamSource(stream);
@@ -1569,51 +1574,30 @@ async function startAppCallSession() {
   });
 
   // -- service -> speaker (gapless, interruptible) ----------------------------
-  const play = (frame) => {
-    const { rate, samples } = frame;
-    const audio = ctx.createBuffer(1, samples.length, rate);
-    const ch = audio.getChannelData(0);
-    for (let i = 0; i < samples.length; i++) ch[i] = samples[i] / 32768;
-    const src = ctx.createBufferSource();
-    src.buffer = audio;
-    src.connect(out);
-    const now = ctx.currentTime;
-    if (!call.nextTime) {
-      call.nextTime = now + call.jitter;
-    } else if (call.nextTime < now) {
-      if (now - call.nextTime < 1.0) call.jitter = Math.min(JITTER_MAX, call.jitter + JITTER_STEP);
-      call.nextTime = now + call.jitter;
-    }
-    if (call.nextTime > now + MAX_LAG) return;
-    src.start(call.nextTime);
-    call.nextTime += audio.duration;
-    call.sources.add(src);
-    $('waveRow')?.classList.add('speaking');
-    src.onended = () => {
-      call.sources.delete(src);
-      if (!call.sources.size && appCall === call) {
-        $('waveRow')?.classList.remove('speaking');
-      }
-    };
-  };
-  const clearPlayback = () => {
-    for (const src of call.sources) { try { src.stop(); } catch {} }
-    call.sources.clear();
-    call.nextTime = 0;
-    $('waveRow')?.classList.remove('speaking');
-  };
+  const play = (frame) => call.playback.play(frame);
+  const clearPlayback = () => call.playback.clear();
 
   // -- transcript from the call row -------------------------------------------
+  // Turns arrive two ways: pushed over this socket the moment they are recorded (instant), and
+  // from the call row in the database (the fallback, written ~1 s later). Both feed showLine by
+  // line index, so a turn is drawn once, in order, by whichever path gets there first.
+  const lineBuf = new Map();
+  const showLine = (idx, speaker, text) => {
+    if (idx < call.renderedLines || lineBuf.has(idx)) return;
+    lineBuf.set(idx, { speaker, text });
+    while (lineBuf.has(call.renderedLines)) {
+      const l = lineBuf.get(call.renderedLines);
+      lineBuf.delete(call.renderedLines);
+      if (l.text) appendCallTranscriptLine(l.speaker, l.text); // an empty turn still holds its place
+      call.renderedLines += 1;
+    }
+  };
   const pollTranscript = async () => {
     if (appCall !== call || !call.callId) return;
     try {
       const { data } = await supabase.from('calls').select('transcript').eq('id', call.callId).maybeSingle();
       const lines = Array.isArray(data?.transcript) ? data.transcript : [];
-      for (; call.renderedLines < lines.length; call.renderedLines++) {
-        const line = lines[call.renderedLines];
-        const text = line?.content || line?.text || '';
-        if (text) appendCallTranscriptLine(line?.speaker || line?.role, text);
-      }
+      lines.forEach((line, i) => showLine(i, line?.speaker || line?.role, line?.content || line?.text || ''));
     } catch {}
   };
 
@@ -1624,6 +1608,7 @@ async function startAppCallSession() {
       let msg = null;
       try { msg = JSON.parse(event.data); } catch {}
       if (msg?.type === 'interrupt') { clearPlayback(); return; }
+      if (msg?.type === 'transcript' && Number.isFinite(msg.seq)) { showLine(msg.seq - 1, msg.speaker, msg.content); return; }
       const info = describeAppCallMessage(msg);
       if (!info) return;
       if (info.kind === 'error') { console.warn('[call] service error', msg); call.explained = true; finishAppCallUi(info.text); return; }
@@ -1634,7 +1619,7 @@ async function startAppCallSession() {
         if (trainerCall) { const t = trainerCall; t.timer = setInterval(() => trainerLearn(t, call.callId), 15000); }
         startMic();
         applyCallPill(assistantCallPill({ muted: assistantMuted }));
-        call.transcriptTimer = setInterval(pollTranscript, 1200);
+        call.transcriptTimer = setInterval(pollTranscript, 3000); // fallback only; turns are pushed over the socket
       }
       return;
     }
@@ -2396,6 +2381,10 @@ function stopCallMonitor() {
   clearTimeout(mon.noAudioTimer);
   try { mon.ws?.close(); } catch {}
   for (const lane of Object.values(mon.lanes || {})) clearTimeout(lane.flushTimer);
+  try {
+    // Counts only (never audio or text): window.__emysaLastListenIn in the console.
+    window.__emysaLastListenIn = { caller: mon.lanes?.[1]?.playback?.stats(), emysa: mon.lanes?.[2]?.playback?.stats() };
+  } catch {}
   try { mon.ctx?.close(); } catch {}
   resetCallAudioBtn();
 }
@@ -2507,6 +2496,12 @@ function startCallMonitor(url, callId, unlockedCtx) {
     2: { nextTime: 0, jitter: 0.3, sources: new Set(), gain: ctx.createGain(), pending: [], pendingSamples: 0, pendingRate: 16000, flushTimer: null }, // Emysa
   };
   for (const lane of Object.values(lanes)) { lane.gain.gain.value = 1; lane.gain.connect(gain); }
+  // Scheduling per lane is the shared scheduler (lib/appCallPlayback.js): same cushion
+  // rules as before, but a lane that falls behind drops its STALE queued audio instead of
+  // discarding the newest words. A late word beats a missing one, so the cap stays 5 s.
+  const LANE_CFG = { jitterMax: 0.9, jitterStep: 0.1, maxLag: 5 };
+  lanes[1].playback = createPlayback({ ctx, out: lanes[1].gain, config: { ...LANE_CFG, jitterStart: 0.45 } });
+  lanes[2].playback = createPlayback({ ctx, out: lanes[2].gain, config: { ...LANE_CFG, jitterStart: 0.3 } });
 
   // Jitter buffer. Phone networks deliver audio in uneven bursts. Playing from
   // a ~0.3 s cushion absorbs that; the old 0.12 s cushion with a "restart if
@@ -2514,9 +2509,6 @@ function startCallMonitor(url, callId, unlockedCtx) {
   // the skipping. A late packet now just continues the timeline; only a lag of
   // more than ~1.5 s is trimmed, by dropping the oldest-queued audio's worth
   // of new input rather than stopping what is already playing.
-  const MAX_JITTER = 0.9;   // deepest cushion a lane may grow to
-  const JITTER_STEP = 0.1;  // growth per mid-speech underrun
-  const MAX_LAG = 5;       // listen-in: a late word beats a missing one
   function flushLane(lane) {
     clearTimeout(lane.flushTimer);
     if (!lane.pendingSamples) return;
@@ -2526,30 +2518,7 @@ function startCallMonitor(url, callId, unlockedCtx) {
     for (const chunk of lane.pending) { merged.set(chunk, offset); offset += chunk.length; }
     lane.pending = [];
     lane.pendingSamples = 0;
-    const audio = ctx.createBuffer(1, merged.length, rate);
-    const channel = audio.getChannelData(0);
-    for (let i = 0; i < merged.length; i++) channel[i] = merged[i] / 32768;
-    const source = ctx.createBufferSource();
-    source.buffer = audio;
-    source.connect(lane.gain);
-    const now = ctx.currentTime;
-    if (!lane.nextTime) {
-      lane.nextTime = now + lane.jitter;
-    } else if (lane.nextTime < now) {
-      // Underrun: the queued audio ran out before the next chunk arrived.
-      // Restarting with a ~50 ms cushion (the old behaviour) guaranteed the
-      // very next late chunk would underrun too - a chain of tiny gaps. Re-prime
-      // with the full cushion, and if this happened mid-speech (short gap)
-      // deepen the cushion so the next burst is absorbed. A long gap is just
-      // the other person pausing, so it does not grow the cushion.
-      if (now - lane.nextTime < 1.0) lane.jitter = Math.min(MAX_JITTER, lane.jitter + JITTER_STEP);
-      lane.nextTime = now + lane.jitter;
-    }
-    if (lane.nextTime > now + MAX_LAG) return; // far behind: skip this slice to catch up
-    source.start(lane.nextTime);
-    lane.nextTime += audio.duration;
-    lane.sources.add(source);
-    source.onended = () => lane.sources.delete(source);
+    lane.playback.play({ rate, samples: merged });
   }
   let lastEmysaAudioAt = 0;
 

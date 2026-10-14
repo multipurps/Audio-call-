@@ -33,6 +33,7 @@ from typing import Any
 
 from loguru import logger
 
+from app.monitor import get_hub
 from app.protocol import (
     CONTROL_CALL_ACTIVE,
     CONTROL_HANGUP,
@@ -138,6 +139,39 @@ class BrowserAcafSocket:
         self._pump_task: asyncio.Task[None] | None = None
         self._stale_frames = 0
         self._stale_bytes = 0
+        self._session_id = session_id
+        self._transcript_sub: Any = None
+        self._transcript_task: asyncio.Task[None] | None = None
+
+    def _ensure_transcript_feed(self) -> None:
+        """Push each finished transcript turn to the browser the moment it is recorded.
+
+        The browser used to learn about turns only by polling the database: the turn was
+        debounced 0.75 s, written to Supabase, then picked up by a 1.2 s poll (about 2 s or
+        more after the turn existed). MonitorHub already fans every turn out instantly to
+        listen-in sockets; this subscribes the call's own socket as a captions-only listener
+        (no audio frames). The database copy is still written and still polled as a fallback.
+        """
+        if self._transcript_task is not None:
+            return
+        sub = get_hub().subscribe(self._session_id, audio=False)
+        if sub is None:
+            return
+        self._transcript_sub = sub
+        self._transcript_task = asyncio.ensure_future(self._forward_transcript(sub))
+
+    async def _forward_transcript(self, sub: Any) -> None:
+        try:
+            while True:
+                item = await sub.get()
+                if item is None:
+                    return
+                if isinstance(item, dict):
+                    await self._ws.send_text(json.dumps(item))
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - captions are best-effort; the call must go on
+            logger.debug("app call transcript feed ended")
 
     def _ensure_pump(self) -> None:
         if self._pump_task is None:
@@ -161,6 +195,7 @@ class BrowserAcafSocket:
     async def receive_text(self) -> str:
         """The bridge's first read is the hello; the service writes it, not the browser."""
         self._ensure_pump()
+        self._ensure_transcript_feed()
         return self._hello
 
     async def receive(self) -> dict[str, Any]:
@@ -237,6 +272,11 @@ class BrowserAcafSocket:
     async def close(self) -> None:
         if self._pump_task is not None and not self._pump_task.done():
             self._pump_task.cancel()
+        if self._transcript_task is not None and not self._transcript_task.done():
+            self._transcript_task.cancel()
+        if self._transcript_sub is not None:
+            get_hub().unsubscribe(self._session_id, self._transcript_sub)
+            self._transcript_sub = None
         try:
             await self._ws.send_text(json.dumps({"type": "ended"}))
             await self._ws.close(code=1000)

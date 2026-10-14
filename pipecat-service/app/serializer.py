@@ -116,6 +116,13 @@ class TelegramFrameSerializer(FrameSerializer):
         bridge_channels: int = 1
         auto_hang_up: bool = True
         metrics_interval_secs: float = 15.0
+        #: Send reply audio at the rate the engine produced it, instead of converting it to
+        #: `bridge_sample_rate`. Only for peers that read the rate from every frame header
+        #: (the in-app browser call does). GPT-Live speaks at 24 kHz; squeezing that to 16 kHz
+        #: with a linear-interpolation resampler and no low-pass filter aliases the 8-12 kHz
+        #: band into the voice and strips the top octave, which is why a live call sounded
+        #: different from the same voice's preview. Carrier peers must leave this off.
+        native_output_rate: bool = False
 
     def __init__(
         self,
@@ -331,7 +338,10 @@ class TelegramFrameSerializer(FrameSerializer):
         if not pcm:
             return None
 
-        if frame.sample_rate != self._bridge_rate:
+        out_rate = self._bridge_rate
+        if self._params.native_output_rate:
+            out_rate = frame.sample_rate
+        elif frame.sample_rate != self._bridge_rate:
             pcm = self._resample(
                 pcm, frame.sample_rate, self._bridge_rate, direction="out"
             )
@@ -342,7 +352,7 @@ class TelegramFrameSerializer(FrameSerializer):
             pcm,
             sequence=self._out_sequence,
             timestamp_ms=int(time.monotonic() * 1000),
-            sample_rate=self._bridge_rate,
+            sample_rate=out_rate,
             channels=self._bridge_channels,
             encoding=Encoding.PCM_S16LE,
         )

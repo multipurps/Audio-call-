@@ -59,6 +59,10 @@ HELLO_TIMEOUT_SECS = 10.0
 #: a large one is either a bug or an attempt to exhaust memory.
 MAX_CONTROL_BYTES = 8 * 1024
 
+#: A socket write slower than this is counted as a stall in the call-end audio summary. Frames
+#: are 20 ms apart, so anything near this means the peer was not draining.
+SLOW_SEND_MS = 100.0
+
 
 class BridgeAuthError(RuntimeError):
     """Raised when the peer fails the `hello` handshake."""
@@ -89,6 +93,11 @@ class AcafBridge:
         self._tasks: list[asyncio.Task[Any]] = []
         self._frames_sent = 0
         self._frames_dropped = 0
+        #: Write-loop timing, counts and milliseconds only (never audio or text). A send that
+        #: blocks means the peer's socket is not draining; that is what fills the outbound
+        #: queue, so these two numbers say whether the transport or the pipeline is the slow side.
+        self._max_send_ms = 0.0
+        self._slow_sends = 0
         #: Scratch queue used only before the handshake completes.
         self._pre_session_queue: BoundedFrameQueue | None = None
         #: True once the peer has deliberately ended the call (hangup/stopped).
@@ -227,6 +236,7 @@ class AcafBridge:
         session = self.session
         session_id = session.session_id if session is not None else None
         if session is not None:
+            self._log_audio_summary(session)
             deliberate = (
                 self._peer_ended
                 or session.stopped
@@ -244,6 +254,24 @@ class AcafBridge:
             await self._send_control(CONTROL_STOPPED, reason=reason)
         with contextlib.suppress(Exception):
             await self._ws.close()
+
+    def _log_audio_summary(self, session: Any) -> None:
+        """One line per call: how much audio left the service and whether any was shed.
+
+        Counts and milliseconds only, rendered into the message text because structured
+        `extra=` fields never reach the Render log. This is the evidence for "did the service
+        drop audio on this call": outboundDropped > 0 means frames were shed from a full
+        queue; slowSends / maxSendMs > 0 means the peer socket stalled while we wrote.
+        """
+        with contextlib.suppress(Exception):
+            queue = session.outbound.stats()
+            logger.info(
+                f"[call {session.session_id}] bridge audio summary "
+                f"framesSent={self._frames_sent} outboundEnqueued={queue.enqueued} "
+                f"outboundDropped={queue.dropped} outboundHighWater={queue.high_water} "
+                f"slowSends={self._slow_sends} maxSendMs={round(self._max_send_ms, 1)} "
+                f"bargeIns={session.stats.barge_ins}"
+            )
 
     def stats(self) -> dict[str, Any]:
         return {
@@ -329,6 +357,9 @@ class AcafBridge:
             # Sending a hangup on every socket close would discard calls that
             # are being reconnected.
             auto_hang_up=False,
+            # The in-app browser call reads the rate from each frame, so it gets the engine's
+            # own rate (see InputParams.native_output_rate). Carrier peers keep the bridge rate.
+            native_output_rate=(session.platform == "app"),
         )
         return TelegramFrameSerializer(session.session_id, params=params)
 
@@ -556,19 +587,24 @@ class AcafBridge:
                     await asyncio.sleep(0.005)
                     continue
 
-                if not self.session.backpressure.should_send():
-                    # Skip this frame to halve the data rate. Counted so the
-                    # degradation is visible rather than silent.
-                    dropped = self._outbound.get()
-                    if dropped is not None:
-                        self._frames_dropped += 1
-                    continue
-
+                # Frames are NEVER thinned here. The old adaptive skip dropped every other
+                # frame once the queue passed 75% full. On live speech that is not a quieter
+                # version of the same audio: the receiver plays the surviving frames back to
+                # back, so the voice comes out chopped and garbled. When the peer cannot keep
+                # up, the bounded queue sheds its OLDEST frames in one contiguous cut (see
+                # BoundedFrameQueue.put), which is a clean gap instead of garble, and the
+                # shed frames are counted in the session's outbound-queue stats.
                 item = self._outbound.get()
                 if item is None:
                     continue
                 payload, byte_count = item  # type: ignore[misc]
+                sent_at = time.monotonic()
                 await self._ws.send_bytes(payload)
+                send_ms = (time.monotonic() - sent_at) * 1000.0
+                if send_ms > self._max_send_ms:
+                    self._max_send_ms = send_ms
+                if send_ms > SLOW_SEND_MS:
+                    self._slow_sends += 1
                 self.session.note_outbound(byte_count)
                 self._frames_sent += 1
         except asyncio.CancelledError:
