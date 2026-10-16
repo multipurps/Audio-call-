@@ -37,7 +37,7 @@
       "dest": "/home.html"
     },
     {
-      "src": "/(index\\.html|admin|admin/|admin/index\\.html)",
+      "src": "/(index\\.html|admin|admin/|admin/index\\.html|admin/call\\.html)",
       "headers": {
         "Cache-Control": "no-cache, must-revalidate"
       },

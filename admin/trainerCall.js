@@ -1,5 +1,5 @@
-// Admin "Call Emysa": opens the normal Emysa call screen in training mode (/?trainer=1) and lists
-// what she learned from your training calls. She saves lessons as draft memories on her own while you
+// Admin "Call Emysa": opens the Emysa call screen (admin/call.html, inside the admin PWA's own scope so
+// iOS keeps it in the installed app) and lists what she learned from your training calls. She saves lessons as draft memories on her own while you
 // talk. Each one can be edited, deleted or published here (and in the Knowledge tab). Users only get a
 // memory after you publish it.
 const TAG = 'from-training-call';
@@ -48,11 +48,11 @@ export async function loadTrainerCall(el, { api, esc }) {
       <div class="aCard wide">
         <div class="l">Call Emysa</div>
         <div class="v" style="font-size:18px">Train her by talking</div>
-        <div class="aHint" style="margin:8px 0 12px">Opens the normal Emysa call screen with the raw Emysa on your draft guidance. She learns from what you tell her and saves it as draft memories below. No one's memory is used, and the call is never billed. Her new memories are used from your next training call. Users get a memory only after you publish it.</div>
-        <a class="aBtn" href="/?trainer=1" target="_blank" rel="noopener" style="display:inline-block;text-decoration:none">Open call screen</a>
+        <div class="aHint" style="margin:8px 0 12px">Opens the Emysa call screen (inside this app) with the raw Emysa on your draft guidance. She learns from what you tell her and saves it as draft memories below. No one's memory is used, and the call is never billed. Her new memories are used from your next training call. Users get a memory only after you publish it.</div>
+        <a class="aBtn" href="./call.html" style="display:inline-block;text-decoration:none">Open call screen</a>
         <details style="margin-top:12px"><summary class="aHint" style="cursor:pointer">Advanced</summary>
           <div class="aHint" style="margin-top:8px">Both engines read the same memories. This only checks that a lesson also works on the custom-voice path.</div>
-          <a class="aBtn ghost" href="/?trainer=1&engine=luna" target="_blank" rel="noopener" style="display:inline-block;text-decoration:none;margin-top:8px">Test on Luna (custom-voice path)</a>
+          <a class="aBtn ghost" href="./call.html?engine=luna" style="display:inline-block;text-decoration:none;margin-top:8px">Test on Luna (custom-voice path)</a>
         </details>
       </div>
       <div class="aCard wide">

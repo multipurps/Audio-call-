@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0d0907">
+<title>Call Emysa</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="../icon-192.png">
+<!-- The app's own stylesheet: the call screen below is a copy of the app's #callScreen markup, so it
+     looks identical and picks up any future change to the call styles. This page lives inside /admin/
+     (the admin PWA's scope), so opening it never leaves the installed admin app. -->
+<link rel="stylesheet" href="../styles.css">
+<style>
+  #adminCall{position:absolute; inset:0; overflow:hidden; background:var(--coffee);}
+  /* The same screen as the app, filling this page. */
+  #adminCall #callScreen{position:absolute; inset:0; z-index:1;}
+  /* Five buttons do not fit the app's margins in a narrow admin window: share the row instead. */
+  #adminCall #callScreen.assistantMode .callControls{justify-content:space-around; padding-left:8px; padding-right:8px;}
+  #adminCall #callScreen.assistantMode .callBtn{margin:0;}
+  #trainGate, #trainEnd{position:absolute; inset:0; z-index:20; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(11,11,11,.94);}
+  #trainEnd{background:rgb(11,11,11);}
+  #trainGate.hidden, #trainEnd.hidden{display:none;}
+  .gateBox{max-width:380px; width:100%; text-align:center; color:var(--text);}
+  .gateBox h1{font-size:22px; font-weight:600; margin-bottom:10px;}
+  .gateBox p{color:var(--muted); line-height:1.5; margin-bottom:22px;}
+  .gateBtn{display:block; width:100%; background:var(--accent); color:var(--on-accent); border-radius:999px; padding:14px 28px; font-size:16px; font-weight:600; margin-bottom:12px;}
+  .gateBtn.ghost{background:var(--glass-bg); color:var(--text); border:1px solid var(--glass-border);}
+  .gateBtn:disabled{opacity:.45;}
+  #trainToast{position:absolute; left:50%; top:calc(var(--safe-top, 12px) + 64px); transform:translateX(-50%); z-index:30; max-width:86%; padding:10px 16px; border-radius:14px; background:var(--surface-3); color:var(--text); font-size:14px; text-align:center; box-shadow:0 8px 24px rgba(0,0,0,.45); opacity:0; pointer-events:none; transition:opacity .2s;}
+  #trainToast.show{opacity:1;}
+</style>
+</head>
+<body>
+<div id="adminCall">
+
+  <!-- Same markup as the app's call screen. Not used here: Listen and Keypad. The chevron and the
+       last button return to the admin (ending the call first), because a call cannot continue in the
+       background of a separate page. -->
+  <div id="callScreen" class="assistantMode">
+    <div class="callHeader">
+      <button type="button" class="callMinimizeBtn" id="callMinimizeBtn" aria-label="Back to admin" title="Back to admin">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="callAvatars">
+        <div class="callAvatar ai"><img id="callAiAvatar" src="../icon-192.png" alt=""></div>
+      </div>
+      <div class="callTitle" id="callTitleText">Emysa (training)</div>
+      <div class="callTimer pending" id="callTimer" aria-hidden="true">&nbsp;</div>
+      <div class="callStatePill" id="callStatePill" aria-live="polite" hidden></div>
+    </div>
+
+    <div class="callSheet">
+      <div class="callGlow" aria-hidden="true"><img id="callGlowImg" src="../assets/call/call-glow.webp" alt="" width="440" height="246" decoding="async" fetchpriority="low"></div>
+      <div class="transcriptPanel" id="transcriptPanel" aria-live="polite"></div>
+
+      <div class="waveRow" id="waveRow"><span></span><span></span><span></span><span></span><span></span></div>
+
+      <div class="callControls">
+        <div class="callControlsRow">
+          <button class="callBtn" id="callMuteBtn" aria-label="Mute your microphone">
+            <div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <defs><mask id="micSlashCut" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24"><rect width="24" height="24" fill="white"/><path d="M3.2 2.6L20.8 21.4" stroke="black" stroke-width="4.4" stroke-linecap="round"/></mask></defs>
+              <g class="micOn"><path fill-rule="evenodd" clip-rule="evenodd" d="M4 9C4.41421 9 4.75 9.33579 4.75 9.75V10.75C4.75 14.7541 7.99594 18 12 18C16.0041 18 19.25 14.7541 19.25 10.75V9.75C19.25 9.33579 19.5858 9 20 9C20.4142 9 20.75 9.33579 20.75 9.75V10.75C20.75 15.3298 17.2314 19.0879 12.75 19.4683V21.75C12.75 22.1642 12.4142 22.5 12 22.5C11.5858 22.5 11.25 22.1642 11.25 21.75V19.4683C6.7686 19.0879 3.25 15.3298 3.25 10.75V9.75C3.25 9.33579 3.58579 9 4 9Z" fill="currentColor"/><path opacity="0.75" d="M9.75 7.75C9.75 7.33579 9.41421 7 9 7H7.81597H6.29847C6.66598 4.17873 9.07855 2 12 2C14.9214 2 17.334 4.17873 17.7015 7H16.184L13.5 7C13.0858 7 12.75 7.33579 12.75 7.75C12.75 8.16421 13.0858 8.5 13.5 8.5L16.25 8.5H17.75V10H16.25H13.5C13.0858 10 12.75 10.3358 12.75 10.75C12.75 11.1642 13.0858 11.5 13.5 11.5H16.184H17.7015C17.334 14.3213 14.9214 16.5 12 16.5C9.07855 16.5 6.66598 14.3213 6.29847 11.5H7.81597H9C9.41421 11.5 9.75 11.1642 9.75 10.75C9.75 10.3358 9.41421 10 9 10H7.75H6.25V8.5H7.75H9C9.41421 8.5 9.75 8.16421 9.75 7.75Z" fill="currentColor"/><path d="M12.75 10.75C12.75 11.1642 13.0858 11.5 13.5 11.5H16.184H17.7015L17.75 10H16.25H13.5C13.0858 10 12.75 10.3358 12.75 10.75Z" fill="currentColor"/><path d="M12.75 7.75C12.75 8.16421 13.0858 8.5 13.5 8.5L16.25 8.5H17.75L17.7015 7H16.184L13.5 7C13.0858 7 12.75 7.33579 12.75 7.75Z" fill="currentColor"/><path d="M9.75 7.75C9.75 7.33579 9.41421 7 9 7H7.81597H6.29847L6.25 8.5H7.75H9C9.41421 8.5 9.75 8.16421 9.75 7.75Z" fill="currentColor"/><path d="M9.75 10.75C9.75 10.3358 9.41421 10 9 10H7.75H6.25L6.29847 11.5H7.81597H9C9.41421 11.5 9.75 11.1642 9.75 10.75Z" fill="currentColor"/></g>
+              <g class="micOff" mask="url(#micSlashCut)"><path fill-rule="evenodd" clip-rule="evenodd" d="M4 9C4.41421 9 4.75 9.33579 4.75 9.75V10.75C4.75 14.7541 7.99594 18 12 18C16.0041 18 19.25 14.7541 19.25 10.75V9.75C19.25 9.33579 19.5858 9 20 9C20.4142 9 20.75 9.33579 20.75 9.75V10.75C20.75 15.3298 17.2314 19.0879 12.75 19.4683V21.75C12.75 22.1642 12.4142 22.5 12 22.5C11.5858 22.5 11.25 22.1642 11.25 21.75V19.4683C6.7686 19.0879 3.25 15.3298 3.25 10.75V9.75C3.25 9.33579 3.58579 9 4 9Z" fill="currentColor"/><path opacity="0.75" d="M9.75 7.75C9.75 7.33579 9.41421 7 9 7H7.81597H6.29847C6.66598 4.17873 9.07855 2 12 2C14.9214 2 17.334 4.17873 17.7015 7H16.184L13.5 7C13.0858 7 12.75 7.33579 12.75 7.75C12.75 8.16421 13.0858 8.5 13.5 8.5L16.25 8.5H17.75V10H16.25H13.5C13.0858 10 12.75 10.3358 12.75 10.75C12.75 11.1642 13.0858 11.5 13.5 11.5H16.184H17.7015C17.334 14.3213 14.9214 16.5 12 16.5C9.07855 16.5 6.66598 14.3213 6.29847 11.5H7.81597H9C9.41421 11.5 9.75 11.1642 9.75 10.75C9.75 10.3358 9.41421 10 9 10H7.75H6.25V8.5H7.75H9C9.41421 8.5 9.75 8.16421 9.75 7.75Z" fill="currentColor"/><path d="M12.75 10.75C12.75 11.1642 13.0858 11.5 13.5 11.5H16.184H17.7015L17.75 10H16.25H13.5C13.0858 10 12.75 10.3358 12.75 10.75Z" fill="currentColor"/><path d="M12.75 7.75C12.75 8.16421 13.0858 8.5 13.5 8.5L16.25 8.5H17.75L17.7015 7H16.184L13.5 7C13.0858 7 12.75 7.33579 12.75 7.75Z" fill="currentColor"/><path d="M9.75 7.75C9.75 7.33579 9.41421 7 9 7H7.81597H6.29847L6.25 8.5H7.75H9C9.41421 8.5 9.75 8.16421 9.75 7.75Z" fill="currentColor"/><path d="M9.75 10.75C9.75 10.3358 9.41421 10 9 10H7.75H6.25L6.29847 11.5H7.81597H9C9.41421 11.5 9.75 11.1642 9.75 10.75Z" fill="currentColor"/></g>
+              <path class="micSlash" d="M3.2 2.6L20.8 21.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+            </svg></div>
+            Mute
+          </button>
+          <button class="callBtn active" id="callFaceTimeBtn" aria-label="Toggle live transcript">
+            <div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+            Captions
+          </button>
+          <button class="callBtn endCall" id="callEndBtn" aria-label="End call">
+            <div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 13.4782L8 12.8617C8 12.8617 8 11.3963 12 11.3963C16 11.3963 16 12.8617 16 12.8617V13.25C16 14.2064 16.7227 15.0192 17.7004 15.1625L19.7004 15.4556C20.9105 15.6329 22 14.7267 22 13.5429V11.4183C22 10.8313 21.8162 10.2542 21.3703 9.85601C20.2296 8.83732 17.4208 7 12 7C6.25141 7 3.44027 9.58269 2.44083 10.7889C2.1247 11.1704 2 11.6525 2 12.1414L2 14.0643C2 15.3623 3.29561 16.292 4.57997 15.9156L6.57997 15.3295C7.42329 15.0823 8 14.3305 8 13.4782Z" fill="currentColor"/></svg></div>
+            End
+          </button>
+          <button class="callBtn" id="callAddBtn" aria-label="Back to admin">
+            <div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 5h7v7H4zM13 5h7v7h-7zM4 14h7v6H4zM13 14h7v6h-7z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></div>
+            Admin
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Start screen. A tap is required on iPhone: audio and the microphone only start from a tap. -->
+  <div id="trainGate">
+    <div class="gateBox">
+      <h1>Train Emysa</h1>
+      <p id="gateText">A live call with the raw Emysa. She learns from what you tell her and saves it as draft memories you can edit or delete in the admin. Nothing reaches users until you publish it.</p>
+      <button type="button" class="gateBtn" id="gateStart" disabled>Start training call</button>
+      <button type="button" class="gateBtn ghost" id="gateBack">Back to admin</button>
+    </div>
+  </div>
+
+  <!-- Shown when the call is over. -->
+  <div id="trainEnd" class="hidden">
+    <div class="gateBox">
+      <h1 id="endTitle">Call ended</h1>
+      <p id="endText"></p>
+      <button type="button" class="gateBtn" id="endAgain">Call again</button>
+      <button type="button" class="gateBtn ghost" id="endBack">Back to admin</button>
+    </div>
+  </div>
+
+  <div id="trainToast" role="status" aria-live="polite"></div>
+</div>
+
+<script>
+  // Same loader pattern as the admin page: a plain "./call.js" URL is cached aggressively by the browser.
+  import('./call.js?v=2026-10-15.1').catch(function (err) {
+    var t = document.getElementById('gateText');
+    if (t) t.textContent = 'Could not load the call screen: ' + (err && err.message ? err.message : err);
+  });
+</script>
+<script>
+  // Standalone (installed) admin: body must be the true screen height, exactly as admin.js does it.
+  (function () {
+    var pwa = window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    if (pwa && window.screen.height) document.body.style.height = window.screen.height + 'px';
+  })();
+</script>
+</body>
+</html>
