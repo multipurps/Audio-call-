@@ -4171,22 +4171,42 @@ async function loadCallAnswering() {
   $('callAnsweringStatus').textContent = '';
 }
 $('callAnsweringToggle').addEventListener('click', async () => {
-  const turningOn = !$('callAnsweringToggle').classList.contains('on');
+  const toggle = $('callAnsweringToggle');
+  if (toggle.dataset.busy) return;
+  toggle.dataset.busy = '1';
+  toggle.style.opacity = '.6';
+  const turningOn = !toggle.classList.contains('on');
   $('callAnsweringStatus').textContent = turningOn ? 'Setting up your number…' : 'Turning off…';
-  const resp = await authedFetch(`/api/call-answering?action=${turningOn ? 'enable' : 'disable'}`, { method: 'POST' });
-  const data = await resp.json();
-  if (!resp.ok) { $('callAnsweringStatus').textContent = data.error || 'Something went wrong.'; return; }
-  await loadCallAnswering();
+  try {
+    const resp = await authedFetch(`/api/call-answering?action=${turningOn ? 'enable' : 'disable'}`, { method: 'POST' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) { $('callAnsweringStatus').textContent = data.error || 'Something went wrong.'; return; }
+    await loadCallAnswering();
+  } catch {
+    $('callAnsweringStatus').textContent = 'Something went wrong. Check your connection.';
+  } finally {
+    delete toggle.dataset.busy;
+    toggle.style.opacity = '';
+  }
 });
 $('callAnsweringSaveBtn').addEventListener('click', async () => {
+  const btn = $('callAnsweringSaveBtn');
+  if (btn.disabled) return;
+  setBtnLoading(btn, true, 'Saving…');
   $('callAnsweringSaveStatus').textContent = 'Saving…';
-  const resp = await authedFetch('/api/call-answering?action=update', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ greeting: $('callAnsweringGreeting').value, instructions: $('callAnsweringInstructions').value }),
-  });
-  const data = await resp.json();
-  $('callAnsweringSaveStatus').textContent = resp.ok ? 'Saved.' : (data.error || 'Could not save.');
+  try {
+    const resp = await authedFetch('/api/call-answering?action=update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ greeting: $('callAnsweringGreeting').value, instructions: $('callAnsweringInstructions').value }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    $('callAnsweringSaveStatus').textContent = resp.ok ? 'Saved.' : (data.error || 'Could not save.');
+  } catch {
+    $('callAnsweringSaveStatus').textContent = 'Could not save. Check your connection.';
+  } finally {
+    setBtnLoading(btn, false);
+  }
 });
 
 // ---------- Memories ----------
@@ -4588,12 +4608,18 @@ $('memoryAddForm')?.addEventListener('submit', async (e) => {
 
 $('memoriesClearAllBtn')?.addEventListener('click', async () => {
   if (!confirm('Clear all saved memories? This cannot be undone.')) return;
-  await authedFetch('/api/memories?clearAll=true', {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ clearAll: true }),
-  });
-  loadMemories();
+  const btn = $('memoriesClearAllBtn');
+  setBtnLoading(btn, true);
+  try {
+    await authedFetch('/api/memories?clearAll=true', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clearAll: true }),
+    });
+    await loadMemories();
+  } finally {
+    setBtnLoading(btn, false);
+  }
 });
 
 // ---------- Call Settings ----------
@@ -5119,24 +5145,19 @@ function renderWhatsappStatus(wa) {
   }
 }
 
-// Shows a spinner + label inside a button while its request runs, and blocks
-// double taps. Built with DOM nodes (no innerHTML).
+// Explicit loading state for a button (the global btnLoading.js already covers
+// buttons that disable themselves after a tap; this also sets a busy label).
+// The spinner is drawn by CSS; labels are set with textContent only.
 function setBtnLoading(btn, loading, loadingLabel) {
   if (!btn) return;
   if (loading) {
     if (btn.dataset.idleLabel === undefined) btn.dataset.idleLabel = btn.textContent;
     btn.disabled = true;
-    btn.classList.add('isLoading');
-    btn.setAttribute('aria-busy', 'true');
-    const spin = document.createElement('span');
-    spin.className = 'btnSpinner';
-    spin.setAttribute('aria-hidden', 'true');
-    btn.textContent = '';
-    btn.append(spin, document.createTextNode(loadingLabel || 'Please wait…'));
+    if (loadingLabel) btn.textContent = loadingLabel;
+    window.btnLoading?.start(btn);
   } else {
     btn.disabled = false;
-    btn.classList.remove('isLoading');
-    btn.removeAttribute('aria-busy');
+    window.btnLoading?.stop(btn);
     if (btn.dataset.idleLabel !== undefined) { btn.textContent = btn.dataset.idleLabel; delete btn.dataset.idleLabel; }
   }
 }

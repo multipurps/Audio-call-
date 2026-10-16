@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { loadAiBehavior } from './aiBehavior.js?v=2026-10-13.1';
-import { loadTrainerCall, stopTrainerCall } from './trainerCall.js?v=2026-10-14.2';
+import { loadTrainerCall, stopTrainerCall } from './trainerCall.js?v=2026-10-16.1';
 
 const SUPABASE_URL = 'https://gucblbvfzuraaozswfwd.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1Y2JsYnZmenVyYWFvenN3ZndkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0NzQ0ODQsImV4cCI6MjA5MTA1MDQ4NH0.OCsEC_FfOJmoL5sQWP8zYnw9SmWuy4xggfcpIIxQw-c';
@@ -494,20 +494,31 @@ $('removeHeroBtn').addEventListener('click', async () => {
 
 // ---------- announcements ----------
 $('announceSendBtn').addEventListener('click', async () => {
+  const btn = $('announceSendBtn');
+  if (btn.disabled) return;
   const title = $('announceTitle').value.trim();
   const body = $('announceBody').value.trim();
   if (!title || !body) { $('announceHint').textContent = 'Fill in both fields.'; return; }
   $('announceHint').textContent = 'Sending…';
-  const resp = await authedFetch('/api/admin?action=send-announcement', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, body }),
-  });
-  const data = await resp.json();
-  if (!resp.ok) { $('announceHint').textContent = data.error || 'Send failed.'; return; }
-  $('announceHint').textContent = `Sent to ${data.sent} of ${data.total} subscribed users.`;
-  $('announceTitle').value = '';
-  $('announceBody').value = '';
+  btn.disabled = true; // btnLoading.js shows the spinner while this is disabled
+  window.btnLoading?.start(btn);
+  try {
+    const resp = await authedFetch('/api/admin?action=send-announcement', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, body }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) { $('announceHint').textContent = data.error || 'Send failed.'; return; }
+    $('announceHint').textContent = `Sent to ${data.sent} of ${data.total} subscribed users.`;
+    $('announceTitle').value = '';
+    $('announceBody').value = '';
+  } catch {
+    $('announceHint').textContent = 'Send failed. Check your connection.';
+  } finally {
+    btn.disabled = false;
+    window.btnLoading?.stop(btn);
+  }
 });
 
 // Don't rely solely on onAuthStateChange to ever fire — check the current

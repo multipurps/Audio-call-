@@ -9,7 +9,8 @@
 <title>Emysa Admin</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="../icon-192.png">
-<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../styles.css?v=2026-10-16.1">
+<script src="../btnLoading.js?v=2026-10-16.1" defer></script>
 <style>
   #adminApp{position:absolute; top:0; left:0; right:0; bottom:0; height:100%; display:flex; flex-direction:column; background:var(--coffee); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif; --ink:var(--text); --mute:var(--muted); --acc:var(--accent); --card:var(--glass-bg); --line:var(--glass-border);}
   #adminApp *{box-sizing:border-box;}
@@ -167,7 +168,7 @@
   // standalone app. Tying the import to a version string that changes
   // every deploy forces a genuinely new request each time instead of
   // silently continuing to run whatever was cached from before.
-  import(`./admin.js?v=2026-10-14.2`).catch((err) => showBootFailure('Failed to load admin.js', err));
+  import(`./admin.js?v=2026-10-16.1`).catch((err) => showBootFailure('Failed to load admin.js', err));
 </script>
 <script>
   if ('serviceWorker' in navigator) {

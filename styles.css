@@ -1287,8 +1287,12 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 /* copy-link buttons that sit under "Open payment page" */
 .addTimeCopy{display:block; width:100%; margin-bottom:10px; padding:12px; border-radius:999px; text-align:center; font-size:14px; font-weight:600; color:var(--text); background:var(--glass-bg); border:1px solid var(--glass-border);}
 
-/* Button loading state (Telegram send code / verify) */
-.secondaryBtn.isLoading{opacity:.75; pointer-events:none;}
-.btnSpinner{display:inline-block; width:14px; height:14px; margin-right:8px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; vertical-align:-2px; animation:btnSpin .7s linear infinite;}
+/* Button loading state: applied by btnLoading.js to any button that disables
+   itself while its request runs (the spinner is drawn here, labels untouched). */
+button.isLoading{opacity:.8; pointer-events:none; cursor:progress;}
+button.isLoading::before{content:""; display:inline-block; flex:none; width:14px; height:14px; margin-right:8px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; vertical-align:-2px; box-sizing:border-box; animation:btnSpin .7s linear infinite;}
+button.isLoadingIcon{position:relative;}
+button.isLoadingIcon > *{visibility:hidden;}
+button.isLoadingIcon::before{position:absolute; top:50%; left:50%; width:16px; height:16px; margin:-8px 0 0 -8px;}
 @keyframes btnSpin{to{transform:rotate(360deg);}}
-@media (prefers-reduced-motion: reduce){.btnSpinner{animation-duration:2s;}}
+@media (prefers-reduced-motion: reduce){button.isLoading::before{animation-duration:2s;}}
