@@ -13,7 +13,8 @@
       "maxDuration": 60
     },
     "api/memories.js": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "includeFiles": "node_modules/fflate/**"
     }
   },
   "routes": [

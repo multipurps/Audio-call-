@@ -459,7 +459,13 @@ async function telegramStart(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { phone } = req.body || {};
   if (!phone || !phone.trim()) return res.status(400).json({ error: 'phone required (with country code, e.g. +234...)' });
-  await mpRelayRequest(`/sessions/${userId}/start`, { method: 'POST', body: { phone: phone.trim() } });
+  const started = await mpRelayRequest(`/sessions/${userId}/start`, { method: 'POST', body: { phone: phone.trim() } });
+  // The relay still holds a live Telegram login for this user (the app only
+  // thought it was signed out): no code is needed, just mark it connected.
+  if (started?.status === 'already_connected') {
+    await markTelegramConnected(supabase, userId);
+    return res.status(200).json({ status: 'connected' });
+  }
   // mp-relay only keeps MadelineProto's own session; this table is what the
   // Connected accounts screen and call placement read, so it must be written here.
   await saveTelegramAccount(supabase, userId, {

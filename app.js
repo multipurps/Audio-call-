@@ -5119,23 +5119,53 @@ function renderWhatsappStatus(wa) {
   }
 }
 
+// Shows a spinner + label inside a button while its request runs, and blocks
+// double taps. Built with DOM nodes (no innerHTML).
+function setBtnLoading(btn, loading, loadingLabel) {
+  if (!btn) return;
+  if (loading) {
+    if (btn.dataset.idleLabel === undefined) btn.dataset.idleLabel = btn.textContent;
+    btn.disabled = true;
+    btn.classList.add('isLoading');
+    btn.setAttribute('aria-busy', 'true');
+    const spin = document.createElement('span');
+    spin.className = 'btnSpinner';
+    spin.setAttribute('aria-hidden', 'true');
+    btn.textContent = '';
+    btn.append(spin, document.createTextNode(loadingLabel || 'Please wait…'));
+  } else {
+    btn.disabled = false;
+    btn.classList.remove('isLoading');
+    btn.removeAttribute('aria-busy');
+    if (btn.dataset.idleLabel !== undefined) { btn.textContent = btn.dataset.idleLabel; delete btn.dataset.idleLabel; }
+  }
+}
+
 $('telegramSendCodeBtn').addEventListener('click', async () => {
+  const btn = $('telegramSendCodeBtn');
+  if (btn.disabled) return;
   const phone = $('telegramPhoneInput').value.trim();
   $('telegramLoginError').textContent = '';
   if (!phone) { $('telegramLoginError').textContent = 'Enter your phone number.'; return; }
-  $('telegramSendCodeBtn').disabled = true;
+  setBtnLoading(btn, true, 'Sending code…');
   try {
     const resp = await authedFetch('/api/social-calling?action=telegram-start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone }),
     });
-    const data = await resp.json();
+    const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(userError(data.error, 'Could not send code'));
     $('telegramLoginForm').classList.add('hidden');
+    if (data.status === 'connected') {
+      // The server still had a valid Telegram login for this account: no code needed.
+      $('telegramOtpForm').classList.add('hidden');
+      loadSocialAccounts();
+      return;
+    }
     $('telegramOtpForm').classList.remove('hidden');
   } catch (err) {
     $('telegramLoginError').textContent = err.message;
   } finally {
-    $('telegramSendCodeBtn').disabled = false;
+    setBtnLoading(btn, false);
   }
 });
 
@@ -5144,7 +5174,7 @@ $('telegramVerifyBtn').addEventListener('click', async () => {
   const password = $('telegramPasswordInput').value;
   $('telegramLoginError').textContent = '';
   if (!code) { $('telegramLoginError').textContent = 'Enter the code Telegram sent you.'; return; }
-  $('telegramVerifyBtn').disabled = true;
+  setBtnLoading($('telegramVerifyBtn'), true, 'Verifying…');
   try {
     const resp = await authedFetch('/api/social-calling?action=telegram-verify', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, password }),
@@ -5161,7 +5191,7 @@ $('telegramVerifyBtn').addEventListener('click', async () => {
   } catch (err) {
     $('telegramLoginError').textContent = err.message;
   } finally {
-    $('telegramVerifyBtn').disabled = false;
+    setBtnLoading($('telegramVerifyBtn'), false);
   }
 });
 
