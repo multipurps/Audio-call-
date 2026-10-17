@@ -38,10 +38,11 @@ test('placing a WhatsApp call starts it and attaches the assistant to the SAME c
   assert.equal(res.data.callId, 'call-42');
   assert.equal(res.data.aiAttached, true);
   assert.deepEqual(f.calls.map((c) => `${c.method} ${c.path}`), [
+    'GET /api/sessions/wa-sess-1', // wakes the relay before the call is dialled
     'POST /api/sessions/wa-sess-1/calls',
     'POST /api/sessions/wa-sess-1/calls/call-42/ai',
   ]);
-  const attach = f.calls[1].body;
+  const attach = f.calls[2].body;
   assert.equal(attach.sessionId, 'chat-1');
   assert.equal(attach.peerNumber, '+1 415 555 2671');
 });
@@ -59,7 +60,7 @@ test('a start response without a call id is an error, and nothing is attached', 
   const res = await place(f);
   assert.equal(res.code, 502);
   assert.match(res.data.error, /call id/);
-  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls.filter((c) => c.method === 'POST').length, 1); // dialled once, nothing attached
 });
 
 test('a definite attach failure hangs the call up and reports it', async () => {
