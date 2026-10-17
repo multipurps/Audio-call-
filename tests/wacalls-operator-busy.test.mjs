@@ -78,3 +78,54 @@ test('other errors are not swallowed', async () => {
     await assert.rejects(wacallsPlaceAICall('u1', 's1', '+2348000000000', FAST), (e) => e.statusCode === 503);
   } finally { globalThis.fetch = realFetch; }
 });
+
+test('the relay is woken with a read BEFORE the call is placed', async () => {
+  dbRows = [];
+  const realFetch = globalThis.fetch;
+  const order = [];
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url);
+    if (u.endsWith('/api/sessions/s1') && (init.method || 'GET') === 'GET') { order.push('wake'); return json(200, { id: 's1' }); }
+    if (u.endsWith('/calls') && init.method === 'POST') { order.push('dial'); return json(200, { callId: 'c9' }); }
+    if (u.endsWith('/calls/c9/ai')) return json(200, { status: 'attached' });
+    return json(404, { error: 'unexpected ' + u });
+  };
+  try {
+    const out = await wacallsPlaceAICall('u1', 's1', '+2348000000000', FAST);
+    assert.equal(out.callId, 'c9');
+    assert.deepEqual(order, ['wake', 'dial']);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('a relay that is still waking does not stop the call, and the call is dialled exactly once', async () => {
+  dbRows = [];
+  const realFetch = globalThis.fetch;
+  let dials = 0;
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url);
+    if (u.endsWith('/api/sessions/s1') && (init.method || 'GET') === 'GET') throw Object.assign(new Error('timed out'), { name: 'AbortError' });
+    if (u.endsWith('/calls') && init.method === 'POST') { dials += 1; return json(200, { callId: 'c10' }); }
+    if (u.endsWith('/calls/c10/ai')) return json(200, { status: 'attached' });
+    return json(404, { error: 'unexpected ' + u });
+  };
+  try {
+    const out = await wacallsPlaceAICall('u1', 's1', '+2348000000000', FAST);
+    assert.equal(out.callId, 'c10');
+    assert.equal(dials, 1);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('a dial that times out is NOT retried (could ring the person twice)', async () => {
+  dbRows = [];
+  const realFetch = globalThis.fetch;
+  let dials = 0;
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url);
+    if (u.endsWith('/calls') && init.method === 'POST') { dials += 1; throw Object.assign(new Error('timed out'), { name: 'AbortError' }); }
+    return json(200, { id: 's1' });
+  };
+  try {
+    await assert.rejects(wacallsPlaceAICall('u1', 's1', '+2348000000000', FAST), (e) => e.name === 'AbortError');
+    assert.equal(dials, 1);
+  } finally { globalThis.fetch = realFetch; }
+});
