@@ -111,7 +111,7 @@
 
 <script>
   // Same loader pattern as the admin page: a plain "./call.js" URL is cached aggressively by the browser.
-  import('./call.js?v=2026-10-15.1').catch(function (err) {
+  import('./call.js?v=2026-10-17.1').catch(function (err) {
     var t = document.getElementById('gateText');
     if (t) t.textContent = 'Could not load the call screen: ' + (err && err.message ? err.message : err);
   });

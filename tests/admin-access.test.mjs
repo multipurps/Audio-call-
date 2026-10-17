@@ -13,7 +13,8 @@ function fakeSupabase({ users = {}, admin_access = [], push_subscriptions = [], 
       select() { return q; },
       eq(k, v) { filters.push((r) => r[k] === v); return q; },
       in(k, vs) { filters.push((r) => vs.includes(r[k])); return q; },
-      order() { return q; }, limit() { return q; },
+      order() { return q; }, limit() { return q; }, range() { return q; },
+      gte(k, v) { filters.push((r) => r[k] >= v); return q; },
       maybeSingle() { one = true; return q; },
       upsert(v, o = {}) { mode = 'upsert'; values = v; key = o.onConflict || 'id'; ignoreDup = Boolean(o.ignoreDuplicates); return q; },
       update(v) { mode = 'update'; values = v; return q; },
@@ -134,8 +135,8 @@ test('API: an approved admin reaches admin features but not admin management; th
   const tryApprove = await call(handler, 't_investor', 'admin-decide', { method: 'POST', body: { email: 'friend@example.com', decision: 'approve' } });
   assert.equal(tryApprove.code, 403);
   assert.equal(db.tables.admin_access.some((r) => r.email === 'friend@example.com'), false, 'nothing was written');
-  // Admin features are open to them (an unknown action reaches the switch, which is past the gate).
-  assert.equal((await call(handler, 't_investor', 'no-such-action')).code, 400);
+  // Past the gate only on purpose: an action nobody listed for them is refused, not "unknown".
+  assert.equal((await call(handler, 't_investor', 'no-such-action')).code, 403);
 
   assert.equal((await call(handler, 't_stranger', 'list-users')).code, 403);
   assert.equal((await call(handler, 't_stranger', 'grant-credit', { method: 'POST' })).code, 403);
@@ -240,4 +241,73 @@ test('alerts never throw: missing keys, no admins, no devices, a dead device and
 test('normEmail trims and lower-cases', () => {
   assert.equal(normEmail('  A@B.Co '), 'a@b.co');
   assert.equal(normEmail(null), '');
+});
+
+
+// ---- approved admins are read-only investors ----
+const investorDb = () => fakeSupabase({ users, admin_access: [{ email: 'investor@example.com', status: 'approved', user_id: 'u-inv' }] });
+
+test('API: an approved admin is refused everything that changes data or is owner-only, on the server', async () => {
+  const handler = await adminHandler(investorDb());
+  const blocked = [
+    ['GET', 'list-users'], ['POST', 'set-approval'], ['POST', 'grant-credit'], ['GET', 'credit-ledger'], ['POST', 'send-announcement'],
+    ['POST', 'create-background-upload'], ['POST', 'confirm-background'], ['POST', 'delete-background'],
+    ['POST', 'create-hero-upload'], ['POST', 'confirm-hero'], ['POST', 'delete-hero'],
+    ['POST', 'create-landing-upload'], ['POST', 'confirm-landing-upload'], ['POST', 'delete-landing-media'], ['POST', 'reorder-landing-media'],
+    ['GET', 'admin-list'], ['POST', 'admin-decide'],
+    ['POST', 'rates'], // reading the rates is allowed, changing them is not
+    // AI behavior and Call Emysa
+    ['GET', 'ai-overview'], ['POST', 'ai-config-save'], ['POST', 'ai-config-publish'], ['POST', 'ai-config-rollback'], ['GET', 'ai-knowledge-list'],
+    ['POST', 'ai-knowledge-save'], ['POST', 'ai-knowledge-status'], ['POST', 'ai-knowledge-delete'], ['GET', 'ai-knowledge-history'],
+    ['POST', 'ai-knowledge-restore'], ['POST', 'ai-preview'], ['POST', 'ai-test'], ['GET', 'ai-audit'],
+    ['POST', 'ai-train-call-start'], ['POST', 'ai-train-learn'],
+  ];
+  for (const [method, action] of blocked) {
+    const r = await call(handler, 't_investor', action, { method });
+    assert.equal(r.code, 403, `${method} ${action} must be refused for an approved admin`);
+  }
+  // The same calls are not blocked by the gate for the owner (they get past it and fail later or succeed).
+  for (const [method, action] of [['POST', 'ai-train-call-start'], ['GET', 'admin-list']]) {
+    assert.notEqual((await call(handler, 't_owner', action, { method })).code, 403, `${action} for the owner`);
+  }
+});
+
+test('API: an approved admin can read the investor figures, and only those', async () => {
+  const handler = await adminHandler(investorDb());
+  assert.equal((await call(handler, 't_investor', 'access-status')).data.role, 'admin');
+  for (const action of ['overview', 'analytics', 'rates']) {
+    let code; try { code = (await call(handler, 't_investor', action)).code; } catch { code = 'ran'; }
+    assert.notEqual(code, 403, `${action} must stay open to an approved admin`);
+  }
+});
+
+test('analytics: customers are masked for an approved admin and shown in full to the owner', async () => {
+  const now = new Date().toISOString();
+  const db = fakeSupabase({ users: { ...users, t_cust: { id: 'u-cust', email: 'jane.doe@gmail.com', email_confirmed_at: confirmed } }, admin_access: [{ email: 'investor@example.com', status: 'approved', user_id: 'u-inv' }] });
+  db.tables.calls = [{ user_id: 'u-cust', duration_seconds: 120, created_at: now }];
+  const handler = await adminHandler(db);
+  const inv = await call(handler, 't_investor', 'analytics');
+  assert.equal(inv.code, 200);
+  assert.deepEqual(inv.data.users.map((u) => u.email), ['ja***@gmail.com']);
+  assert.equal(JSON.stringify(inv.data).includes('jane.doe'), false);
+  const owner = await call(handler, 't_owner', 'analytics');
+  assert.deepEqual(owner.data.users.map((u) => u.email), ['jane.doe@gmail.com']);
+});
+
+test('maskEmail hides the name but keeps the domain', () => {
+  assert.equal(real.maskEmail('jane.doe@gmail.com'), 'ja***@gmail.com');
+  assert.equal(real.maskEmail('a@x.io'), 'a***@x.io');
+  assert.equal(real.maskEmail(''), '***');
+});
+
+import { readFileSync } from 'node:fs';
+test('admin page: investors only get Overview, Usage and Costs, read-only, with no purchase-alert setup', () => {
+  const src = readFileSync(new URL('../admin/admin.js', import.meta.url), 'utf8');
+  assert.match(src, /const INVESTOR_SECTIONS = \['overview', 'usage', 'costs'\]/);
+  assert.match(src, /if \(myRole !== 'owner' && !INVESTOR_SECTIONS\.includes\(el\.dataset\.s\)\) el\.style\.display = 'none'/);
+  assert.match(src, /if \(myRole === 'owner'\) \{\s*const usersResp/, 'only the owner loads the user list');
+  assert.match(src, /if \(myRole === 'owner'\) renderAlertsCard\(el\)/);
+  assert.match(src, /const ro = myRole !== 'owner'/);
+  const api = readFileSync(new URL('../api/admin.js', import.meta.url), 'utf8');
+  assert.match(api, /const INVESTOR_ACTIONS = new Set\(\['overview', 'analytics', 'rates'\]\)/);
 });

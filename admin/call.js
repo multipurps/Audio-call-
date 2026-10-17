@@ -71,13 +71,13 @@ function toast(text) {
 const goBack = () => { location.href = ADMIN_HOME; };
 
 // ---------- learning: the server reads the transcript and saves draft memories ----------
-async function learn(t, callId, { force = false } = {}) {
+async function learn(t, callId, { force = false, final = false } = {}) {
   if (!t || !callId || (t.busy && !force)) return;
   t.busy = true;
   try {
     const resp = await authedFetch('/api/admin?action=ai-train-learn', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ callId, fromIndex: t.nextIndex }),
+      body: JSON.stringify({ callId, fromIndex: t.nextIndex, final }),
     });
     const d = await resp.json().catch(() => ({}));
     if (resp.ok) {
@@ -89,7 +89,10 @@ async function learn(t, callId, { force = false } = {}) {
 async function learnFinal(t, callId) {
   // Give the service a moment to save the last turns, then take one final pass.
   await new Promise((r) => setTimeout(r, 2500));
-  await learn(t, callId, { force: true });
+  // Let a pass that is still running finish first, so the two never save the same lesson twice.
+  for (let i = 0; i < 60 && t.busy; i++) await new Promise((r) => setTimeout(r, 500));
+  // One last pass over the WHOLE call, so nothing taught in the middle is lost.
+  await learn(t, callId, { force: true, final: true });
 }
 
 // ---------- ending ----------

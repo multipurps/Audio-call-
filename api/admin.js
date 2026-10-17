@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import webpush from 'web-push';
-import { getServiceClient, getAdminAccess, normEmail } from '../lib/supabaseAdmin.js';
+import { getServiceClient, getAdminAccess, normEmail, maskEmail } from '../lib/supabaseAdmin.js';
 import { AI_ACTIONS, handleAiAction } from '../lib/aiBehaviorAdmin.js';
 
 // Every admin-only action lives here behind ?action=..., instead of one
@@ -11,9 +11,12 @@ import { AI_ACTIONS, handleAiAction } from '../lib/aiBehaviorAdmin.js';
 //
 // Two kinds of admin:
 //   owner  the ADMIN_EMAIL account. Every action, including approving admins.
-//   admin  an account the owner approved (sql/034_admin_access.sql). Every
-//          action except the OWNER_ONLY ones.
+//   admin  an account the owner approved (sql/034_admin_access.sql), meant for investors. READ ONLY:
+//          they may call only INVESTOR_ACTIONS below (revenue overview, usage and cost figures).
+//          Everything else (users, credits, AI behavior, Call Emysa, content, push, admin management)
+//          is refused here, whatever the admin page shows.
 const OWNER_ONLY = new Set(['admin-list', 'admin-decide']);
+const INVESTOR_ACTIONS = new Set(['overview', 'analytics', 'rates']);
 
 export default async function handler(req, res) {
   const supabase = getServiceClient();
@@ -29,7 +32,11 @@ export default async function handler(req, res) {
   if (action === 'request-access') return requestAccess(req, res, supabase, access);
 
   if (!access.role) return res.status(403).json({ error: 'Not authorized', status: access.status });
-  if (OWNER_ONLY.has(action) && access.role !== 'owner') return res.status(403).json({ error: 'Only the owner can manage admins.' });
+  if (access.role !== 'owner') {
+    if (OWNER_ONLY.has(action)) return res.status(403).json({ error: 'Only the owner can manage admins.' });
+    // Read only: an allow-list, so any action added later stays owner-only until it is listed here on purpose.
+    if (!INVESTOR_ACTIONS.has(action) || req.method !== 'GET') return res.status(403).json({ error: 'This account has read-only access.' });
+  }
 
   if (AI_ACTIONS.has(action)) return handleAiAction(action, req, res, supabase, access);
   switch (action) {
@@ -45,7 +52,7 @@ export default async function handler(req, res) {
     case 'create-hero-upload': return createHeroUpload(req, res, supabase);
     case 'confirm-hero': return confirmHero(req, res, supabase);
     case 'delete-hero': return deleteHero(req, res, supabase);
-    case 'analytics': return analytics(req, res, supabase);
+    case 'analytics': return analytics(req, res, supabase, access);
     case 'send-announcement': return sendAnnouncement(req, res, supabase);
     case 'overview': return overview(req, res, supabase);
     case 'credit-ledger': return creditLedger(req, res, supabase);
@@ -248,7 +255,7 @@ async function deleteHero(req, res, supabase) {
   return res.status(200).json({ ok: true });
 }
 
-async function analytics(req, res, supabase) {
+async function analytics(req, res, supabase, access) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
   const { data: authUsers, error: listErr } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
   if (listErr) return res.status(500).json({ error: listErr.message });
@@ -271,7 +278,8 @@ async function analytics(req, res, supabase) {
 
   const users = Array.from(byUser.entries())
     .map(([userId, row]) => ({
-      email: emailById.get(userId) || userId,
+      // Read-only admins see how much each customer uses, not who they are.
+      email: access.role === 'owner' ? (emailById.get(userId) || userId) : maskEmail(emailById.get(userId) || userId),
       calls: row.calls,
       minutes: Math.round(row.seconds / 60),
       lastActive: row.lastActive,

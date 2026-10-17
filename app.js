@@ -1322,13 +1322,13 @@ const TRAINER_URL = new URLSearchParams(location.search).get('trainer') === '1';
 const TRAINER_ENGINE = new URLSearchParams(location.search).get('engine') === 'luna' ? 'luna' : 'live';
 let trainerCall = null;
 
-async function trainerLearn(t, callId, { force = false } = {}) {
+async function trainerLearn(t, callId, { force = false, final = false } = {}) {
   if (!t || !callId || (t.busy && !force)) return;
   t.busy = true;
   try {
     const resp = await authedFetch('/api/admin?action=ai-train-learn', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ callId, fromIndex: t.nextIndex }),
+      body: JSON.stringify({ callId, fromIndex: t.nextIndex, final }),
     });
     const d = await resp.json().catch(() => ({}));
     if (resp.ok) {
@@ -1341,7 +1341,9 @@ async function trainerLearn(t, callId, { force = false } = {}) {
 async function trainerFinish(t, callId) {
   // Give the service a moment to save the last turns, then take one final pass.
   await new Promise((r) => setTimeout(r, 2500));
-  await trainerLearn(t, callId, { force: true });
+  for (let i = 0; i < 60 && t.busy; i++) await new Promise((r) => setTimeout(r, 500));
+  // One last pass over the whole call, so nothing taught in the middle is lost.
+  await trainerLearn(t, callId, { force: true, final: true });
 }
 
 function showTrainerGate() {

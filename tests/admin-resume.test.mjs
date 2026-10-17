@@ -20,6 +20,7 @@ test('signing out or losing admin access clears the remembered user', () => {
 test('the open section is remembered and restored, and Admins only for the owner', () => {
   assert.match(admin, /localStorage\.setItem\(SECTION_KEY, name\)/);
   const init = admin.slice(admin.indexOf('function initPanel'), admin.indexOf('function initPanel') + 1500);
-  assert.match(init, /loaders\[saved\] && \(saved !== 'admins' \|\| myRole === 'owner'\) \? saved : 'overview'/);
+  assert.match(init, /saved && canOpen\(saved\) \? saved : 'overview'/);
+  assert.match(admin, /const canOpen = \(name\) => Boolean\(loaders\[name\]\) && \(myRole === 'owner' \|\| INVESTOR_SECTIONS\.includes\(name\)\)/);
   assert.doesNotMatch(init, /openSection\('overview'\);\n\}/);
 });

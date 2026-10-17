@@ -98,13 +98,22 @@ async function enterAdmin() {
     myRole = access.role;
     // Approving other admins is the one thing only the owner can do.
     $('navAdmins').style.display = myRole === 'owner' ? '' : 'none';
-    const usersResp = await withTimeout(authedFetch('/api/admin?action=list-users'), 15000);
-    if (!usersResp.ok) throw new Error(`Could not load the admin panel (${usersResp.status}).`);
+    // Anyone else the owner approves is an investor with read-only access: the server only answers
+    // INVESTOR_ACTIONS for them, and the menu only offers those sections.
+    document.querySelectorAll('#aDrawer .nav[data-s]').forEach((el) => {
+      if (myRole !== 'owner' && !INVESTOR_SECTIONS.includes(el.dataset.s)) el.style.display = 'none';
+    });
+    let users = [];
+    if (myRole === 'owner') {
+      const usersResp = await withTimeout(authedFetch('/api/admin?action=list-users'), 15000);
+      if (!usersResp.ok) throw new Error(`Could not load the admin panel (${usersResp.status}).`);
+      users = (await usersResp.json()).users;
+    }
     $('notAdminBox').classList.add('hidden');
     document.getElementById('authScreen').classList.add('hidden');
     $('adminApp').classList.remove('hidden');
     enteredFor = currentSession?.user?.id || null;
-    initPanel((await usersResp.json()).users);
+    initPanel(users);
   } catch (err) {
     // A thrown error in here used to leave the splash screen stuck forever
     // with zero feedback — any network hiccup on the first fetch, and
@@ -135,11 +144,15 @@ const card = (l, v, s = '', wide = false) => `<div class="aCard${wide ? ' wide' 
 const fail = (el, err) => { el.innerHTML = `<div class="aHint">${esc(err.message)}</div>`; };
 
 let range = 30, usersCache = [], current = 'overview';
+// What a read-only (investor) admin may open. Must match INVESTOR_ACTIONS in api/admin.js.
+const INVESTOR_SECTIONS = ['overview', 'usage', 'costs'];
+const canOpen = (name) => Boolean(loaders[name]) && (myRole === 'owner' || INVESTOR_SECTIONS.includes(name));
 const TITLES = { overview: 'Overview', users: 'Users', usage: 'Usage', credits: 'Credits', costs: 'Costs & providers', ai: 'AI behavior', train: 'Call Emysa', content: 'Content & push', admins: 'Admins' };
 const loaders = { overview: loadOverview, users: loadUsers, usage: loadUsage, credits: loadCredits, costs: loadCosts, ai: () => loadAiBehavior($('sec-ai'), { api, esc }), train: () => loadTrainerCall($('sec-train'), { api, esc, supabase }), content: loadBackgrounds, admins: loadAdmins };
 
 const SECTION_KEY = 'adminSection';
 function openSection(name) {
+  if (!canOpen(name)) name = 'overview';
   if (current === 'train' && name !== 'train') stopTrainerCall();
   current = name;
   try { localStorage.setItem(SECTION_KEY, name); } catch { /* private mode: it just will not be remembered */ }
@@ -166,7 +179,7 @@ function initPanel(users) {
   // Back where they left off (a reload after the phone discarded the page lands here too).
   let saved = null;
   try { saved = localStorage.getItem(SECTION_KEY); } catch { /* ignore */ }
-  openSection(saved && loaders[saved] && (saved !== 'admins' || myRole === 'owner') ? saved : 'overview');
+  openSection(saved && canOpen(saved) ? saved : 'overview');
 }
 const emailOf = (id) => usersCache.find((u) => u.id === id)?.email || id.slice(0, 8);
 
@@ -188,7 +201,7 @@ async function loadOverview() {
       ${card('Avg per call', o.calls ? `${num(o.minutesUsed / o.calls)}m` : '—', `last ${o.days} days`)}
       <div class="aCard wide"><div class="l">Daily revenue</div><div class="aBars">${o.series.map((x) => `<i title="${x.d}: ${money(x.revenue, o.currency)}" style="height:${Math.max(2, (x.revenue / max) * 100)}%"></i>`).join('')}</div></div>
     </div>`;
-    renderAlertsCard(el);
+    if (myRole === 'owner') renderAlertsCard(el);
   } catch (err) { fail(el, err); }
 }
 
@@ -208,7 +221,7 @@ async function loadAdmins() {
   el.innerHTML = `<div class="aCard"><div class="l" style="margin-bottom:8px;">Add an admin by email</div>
       <div class="aField"><input type="email" id="adminAddEmail" placeholder="name@example.com" autocomplete="off" autocapitalize="off"></div>
       <button class="aBtn" id="adminAddBtn">Approve as admin</button>
-      <div class="aHint" id="adminAddHint">Admins can use everything in this panel, including revenue. They cannot approve other admins. They sign in on this page with that email, or tap Request access and you approve them here.</div></div>
+      <div class="aHint" id="adminAddHint">Approved admins get a read-only investor view: Overview (revenue), Usage and Costs. They cannot change anything, and AI behavior, Call Emysa, Users, Credits, Content and push stay hidden from them. They sign in on this page with that email, or tap Request access and you approve them here.</div></div>
     <div class="l" style="margin:16px 4px 8px;color:var(--muted);font-size:13px;">Requests and admins</div>
     <div id="adminRows">${data.admins.map((r) => `<div class="aRow" data-email="${esc(r.email)}">
       <div class="aFlex"><div style="min-width:0"><div class="t">${esc(r.email)}</div>
@@ -364,10 +377,11 @@ async function loadCosts() {
   const el = $('sec-costs');
   try {
     const { rates, currency, pricePerMin } = await api('rates');
-    const field = (k, label) => `<div class="aField"><label>${label} (${currency} per call minute)</label><input type="number" min="0" step="0.001" id="rate_${k}" value="${rates[k] || ''}" placeholder="0"></div>`;
-    el.innerHTML = `<div class="aCard"><div class="aHint" style="margin:0 0 12px;">Enter what each provider costs you per minute of call time, from your own bills. The panel multiplies this by minutes used to estimate cost and profit.</div>
+    const ro = myRole !== 'owner';
+    const field = (k, label) => `<div class="aField"><label>${label} (${currency} per call minute)</label><input type="number" min="0" step="0.001" id="rate_${k}" value="${rates[k] || ''}" placeholder="0"${ro ? ' disabled' : ''}></div>`;
+    el.innerHTML = `<div class="aCard"><div class="aHint" style="margin:0 0 12px;">${ro ? 'Provider cost per minute of call time, used to estimate cost and profit. View only.' : 'Enter what each provider costs you per minute of call time, from your own bills. The panel multiplies this by minutes used to estimate cost and profit.'}</div>
       ${field('twilio', 'Twilio')}${field('fish', 'Fish Audio')}${field('openai', 'OpenAI')}
-      <button class="aBtn" id="rateSave">Save rates</button><div class="aHint" id="rateHint"></div></div>
+      ${ro ? '' : '<button class="aBtn" id="rateSave">Save rates</button>'}<div class="aHint" id="rateHint"></div></div>
       <div class="aGrid" id="rateSummary" style="margin-top:12px;"></div>`;
     const summary = () => {
       const cost = ['twilio', 'fish', 'openai'].reduce((a, k) => a + (Number($(`rate_${k}`).value) || 0), 0);
@@ -376,7 +390,7 @@ async function loadCosts() {
     };
     summary();
     ['twilio', 'fish', 'openai'].forEach((k) => { $(`rate_${k}`).oninput = summary; });
-    $('rateSave').onclick = async () => {
+    if (!ro) $('rateSave').onclick = async () => {
       $('rateHint').textContent = 'Saving…';
       try { await api('rates', { method: 'POST', body: { twilio: $('rate_twilio').value || 0, fish: $('rate_fish').value || 0, openai: $('rate_openai').value || 0 } }); $('rateHint').textContent = 'Saved.'; }
       catch (err) { $('rateHint').textContent = err.message; }
