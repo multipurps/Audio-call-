@@ -202,6 +202,29 @@ def build_stt(settings: Settings, language: str | None = None, keyterms: list[st
         logger.info("using mock STT")
         return MockSTT()
 
+    if settings.stt_provider == "openai" and settings.stt_streaming:
+        # Streaming transcription: caller audio is sent to OpenAI as it arrives
+        # and the transcript is ready when the caller stops, instead of one HTTP
+        # round trip after the turn ends. This is the step that dominated the
+        # classic pipeline's time-to-first-word on carrier calls with a cloned
+        # voice (GPT-Live is not used for those). Turn ending still belongs to
+        # the local VAD / Smart Turn, so server-side turn detection stays off.
+        from pipecat.services.openai.stt import OpenAIRealtimeSTTService, OpenAIRealtimeSTTSettings
+
+        # OpenAI takes base language codes ("en"), not regional ones ("en-US"):
+        # the batch service always normalised to the base code, so do the same here.
+        base_language = _stt_language(language)
+        base_code = str(getattr(base_language, "value", base_language)).split("-")[0].split("_")[0].lower()
+        return OpenAIRealtimeSTTService(
+            api_key=settings.openai_api_key or settings.luna_api_key,
+            turn_detection=False,
+            settings=OpenAIRealtimeSTTSettings(
+                model=settings.resolved_stt_model(),
+                language=_stt_language(base_code),
+                prompt=stt_prompt_with_names(settings.stt_prompt or DEFAULT_STT_PROMPT, keyterms),
+            ),
+        )
+
     if settings.stt_provider == "openai":
         from pipecat.services.openai.stt import OpenAISTTService
 

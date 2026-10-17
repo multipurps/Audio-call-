@@ -84,10 +84,12 @@ def test_a_leftover_deepgram_setting_boots_on_openai_instead_of_crashing():
 
 
 def test_build_stt_openai():
-    from pipecat.services.openai.stt import OpenAISTTService
+    # Streaming transcription is the default; the batch service is the kill switch
+    # (covered in tests/test_stt_streaming.py).
+    from pipecat.services.openai.stt import OpenAIRealtimeSTTService
     from app.providers import build_stt
     stt = build_stt(load_settings(BASE), "en")
-    assert isinstance(stt, OpenAISTTService)
+    assert isinstance(stt, OpenAIRealtimeSTTService)
     assert stt._settings.model == "gpt-4o-mini-transcribe"
 
 

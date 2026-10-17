@@ -234,6 +234,9 @@ class Settings:
     llm_reasoning_effort: str = "none"
     #: auto | live | classic -- see CALL_ENGINES.
     call_engine: str = DEFAULT_CALL_ENGINE
+    #: Stream caller audio to OpenAI while they speak (True) instead of one
+    #: transcription request per utterance (False, the previous behaviour).
+    stt_streaming: bool = True
     live_model: str = DEFAULT_LIVE_MODEL
     #: Track the caller's interaction state during GPT-Live calls and steer the
     #: model with private behaviour notes (CALLER_STATE_ENABLED, default on).
@@ -552,6 +555,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         llm_max_tokens=_env_int(env, "ASSISTANT_LLM_MAX_TOKENS", 200, minimum=1),
         llm_reasoning_effort=(_env(env, "ASSISTANT_LLM_REASONING_EFFORT") or "none").strip().lower(),
         call_engine=(_env(env, "ASSISTANT_CALL_ENGINE") or DEFAULT_CALL_ENGINE).strip().lower(),
+        stt_streaming=(_env(env, "ASSISTANT_STT_STREAMING") or "1").strip().lower() not in ("0", "false", "off", "no"),
         live_model=allowed_model(_env(env, "ASSISTANT_LIVE_MODEL", DEFAULT_LIVE_MODEL), DEFAULT_LIVE_MODEL),
         caller_state_enabled=_env_bool(env, "CALLER_STATE_ENABLED", True),
         live_voice=(_env(env, "ASSISTANT_LIVE_VOICE", DEFAULT_LIVE_VOICE) or DEFAULT_LIVE_VOICE).strip().lower(),
