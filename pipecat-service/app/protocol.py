@@ -260,6 +260,9 @@ CONTROL_METRICS = "metrics"
 #: frame) the assistant holds its greeting, because the relay discards
 #: assistant audio produced while the call is still ringing.
 CONTROL_CALL_ACTIVE = "call_active"
+#: The callee's own microphone state, from the carrier relay: {"muted": bool}.
+#: While muted, their audio is dropped before it reaches STT, VAD or the model.
+CONTROL_PEER_MUTE = "peer_mute"
 
 #: Control messages that carry no secrets and are safe to log verbatim.
 #: `hello` and `error` are excluded from automatic logging because `hello`

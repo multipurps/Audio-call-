@@ -33,6 +33,7 @@ from app.config import Settings, sanitize_voice_id
 from app.conversation import clog, create_conversation
 from app.protocol import (
     CONTROL_CALL_ACTIVE,
+    CONTROL_PEER_MUTE,
     CONTROL_ERROR,
     CONTROL_HANGUP,
     CONTROL_HELLO,
@@ -109,6 +110,9 @@ class AcafBridge:
         self._peer_ended = False
         #: Set once the app has asked for this call to end (request_hangup). Idempotent.
         self._hangup_requested = False
+        #: The callee's microphone is off (relay `peer_mute`). Their audio is dropped at the bridge.
+        self._peer_muted = False
+        self._muted_frames = 0
         #: Long-running work started from the read loop (e.g. the greeting). Held
         #: so it is not garbage-collected and is cancelled with the bridge.
         self._background: set[asyncio.Task[Any]] = set()
@@ -500,6 +504,13 @@ class AcafBridge:
             )
             return True
 
+        if message.type == CONTROL_PEER_MUTE:
+            muted = bool(message.extra.get("muted"))
+            if muted != self._peer_muted:
+                self._peer_muted = muted
+                _latency.mark(self.session.session_id, "peer_mute_changed", muted=muted)
+            return True
+
         if message.type == CONTROL_CALL_ACTIVE:
             # The relay says the callee picked up: greet now. Idempotent.
             # Fire-and-forget: note_call_active can take a while to start the
@@ -552,6 +563,10 @@ class AcafBridge:
         self.session.note_inbound(
             sequence=decoded.sequence, byte_count=len(data)
         )
+        if self._peer_muted:
+            # Sequence numbers are counted above, so muted frames are not reported as loss.
+            self._muted_frames += 1
+            return
         _latency.mark_once(self.session.session_id, "inbound_first_frame_at_bridge", bytes=len(data))
 
         if self.serializer is None:
