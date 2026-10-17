@@ -926,7 +926,7 @@ async function sendMessage(req, res, supabase, userId) {
           const table = callChannel === 'whatsapp' ? 'whatsapp_accounts' : 'telegram_accounts';
           await supabase.from(table).update({ status: 'disconnected', last_error: 'The link needs reconnecting' }).eq('user_id', userId);
         }
-        console.warn('[call-placement] failed', { callId: callRow?.id, scope: classification.scope, attemptState: classification.attemptState, status: err?.statusCode || null });
+        console.warn('[call-placement] failed', { callId: callRow?.id, scope: classification.scope, attemptState: classification.attemptState, status: err?.statusCode || null, fromRelay: !!err?.fromRelay, error: String(err?.message || '').slice(0, 200) });
         newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', ownerMessageFor(classification, { label, channelName, reason: userError(err.message, null) }), callRow?.id || null, msgSource));
         return respond({ channelUsed: callChannel });
       }

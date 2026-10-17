@@ -147,3 +147,39 @@ test('stripLanguagePrefix removes stacked directives only', () => {
   assert.equal(stripLanguagePrefix(p + p + 'Ask about rent'), 'Ask about rent');
   assert.equal(stripLanguagePrefix('Ask about rent'), 'Ask about rent');
 });
+
+test('a relay that answers 500 with its own error is a refusal with a reason, not "didn\'t respond"', () => {
+  const refused = Object.assign(new Error('failed to get prekeys'), { statusCode: 500, fromRelay: true });
+  const c = classifyPlacementError(refused);
+  assert.equal(c.attemptState, 'failed');
+  assert.equal(c.relayRefused, true);
+  const msg = ownerMessageFor(c, { label: 'Samuel', channelName: 'WhatsApp', reason: 'failed to get prekeys' });
+  assert.doesNotMatch(msg, /didn't respond|can't tell/);
+  assert.match(msg, /wouldn't start the call to Samuel \(failed to get prekeys\)/);
+});
+
+test('a 500 without a relay error body, a gateway error, or a timeout message stay "unknown"', () => {
+  for (const err of [
+    Object.assign(new Error('Internal Server Error'), { statusCode: 500 }),                       // not from the relay
+    Object.assign(new Error('bad gateway'), { statusCode: 502, fromRelay: false }),
+    Object.assign(new Error('request timed out'), { statusCode: 500, fromRelay: true }),           // says it timed out
+    Object.assign(new Error('aborted'), { name: 'AbortError' }),
+  ]) {
+    const c = classifyPlacementError(err);
+    assert.equal(c.scope, 'provider_temporary', err.message);
+    assert.equal(c.attemptState, 'unknown');
+    assert.notEqual(c.relayRefused, true);
+  }
+});
+
+test('the relay client marks an answered error as fromRelay and a gateway page as not', async () => {
+  process.env.WACALLS_RELAY_URL = 'https://relay.test'; process.env.WACALLS_INTERNAL_SECRET = 'x';
+  const { wacallsDetail } = await import('../lib/wacallsClient.js');
+  const realFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: 'offer rejected' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    await assert.rejects(wacallsDetail('u', 's'), (e) => e.fromRelay === true && e.statusCode === 500);
+    globalThis.fetch = async () => new Response('<html>Bad Gateway</html>', { status: 502 });
+    await assert.rejects(wacallsDetail('u', 's'), (e) => e.fromRelay === false && e.statusCode === 502);
+  } finally { globalThis.fetch = realFetch; }
+});
