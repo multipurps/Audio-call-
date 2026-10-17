@@ -6,6 +6,7 @@ import { describeSocialCallEnd } from '../lib/socialCallEnd.js';
 import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsPlaceAICall, wacallsHangup } from '../lib/wacallsClient.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
 import { signalStartLink, signalLinkStatus, signalRemoveAccount, signalPlaceCall, signalHangup } from '../lib/signalClient.js';
+import { hangupPipecatSession } from '../lib/pipecatHangup.js';
 import { resolvePersonSession } from '../lib/personSession.js';
 import { normalizeMood } from '../lib/callMood.js';
 import {
@@ -886,12 +887,24 @@ async function hangupSocialCall(req, res, supabase, userId) {
       .eq('user_id', userId)
       .maybeSingle();
     if (waRow?.wacalls_session_id) {
-      await wacallsHangup(userId, waRow.wacalls_session_id, effectivePlatformCallId).catch(() => {});
+      await wacallsHangup(userId, waRow.wacalls_session_id, effectivePlatformCallId).catch((err) => {
+        console.error('[social-hangup] whatsapp relay hangup failed', { callId, error: err?.message });
+      });
     }
   } else if (effectivePlatform === 'telegram' && effectivePlatformCallId) {
-    await mpRelayRequest(`/calls/${effectivePlatformCallId}`, { method: 'DELETE' }).catch(() => {});
+    await mpRelayRequest(`/calls/${effectivePlatformCallId}`, { method: 'DELETE' }).catch((err) => {
+      console.error('[social-hangup] telegram relay hangup failed', { callId, error: err?.message });
+    });
   } else if (effectivePlatform === 'signal' && effectivePlatformCallId) {
-    await signalHangup(effectivePlatformCallId).catch(() => {});
+    await signalHangup(effectivePlatformCallId).catch((err) => {
+      console.error('[social-hangup] signal hangup failed', { callId, error: err?.message });
+    });
+  }
+
+  // Stop the assistant's own session too (see lib/pipecatHangup.js). Logged, not swallowed.
+  const assistantStop = await hangupPipecatSession(effectivePlatformCallId);
+  if (!assistantStop.ok && !assistantStop.skipped) {
+    console.error('[social-hangup] assistant session stop failed', { callId, error: assistantStop.error, httpStatus: assistantStop.httpStatus });
   }
 
   if (call?.id) {

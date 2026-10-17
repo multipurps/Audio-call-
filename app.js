@@ -1257,6 +1257,7 @@ function endAssistantCall() {
 }
 
 function openAssistantCallScreen(opts) {
+  window.callWakeLock?.start();
   if (assistantCallOpen) {
     $('callScreen').classList.remove('hidden');
     return;
@@ -1375,6 +1376,7 @@ let appCall = null;
 function stopAppCallSession({ hangUp = false } = {}) {
   const call = appCall;
   appCall = null;
+  window.callWakeLock?.stop();
   if (!call) return;
   clearInterval(call.transcriptTimer);
   if (trainerCall) { const t = trainerCall; trainerCall = null; clearInterval(t.timer); if (call.callId) trainerFinish(t, call.callId); }
@@ -2230,6 +2232,7 @@ function applyCallStatusUpdate(callRow) {
 let callEndShownFor = null;
 
 function openCallScreen(callId, toNumber, contactName) {
+  window.callWakeLock?.start();
   const isSameCall = activeCallScreenId === callId && !$('callScreen').classList.contains('hidden');
   activeCallScreenId = callId;
   $('callScreen').classList.remove('hidden', 'captionsHidden');
@@ -2611,6 +2614,7 @@ function startCallMonitor(url, callId, unlockedCtx) {
 }
 
 function closeCallScreen() {
+  window.callWakeLock?.stop();
   stopRingback();
   activeCallScreenId = null;
   stopCallMonitor();

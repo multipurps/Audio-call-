@@ -483,8 +483,11 @@ class TranscriptLog:
         *,
         debounce_secs: float = 0.75,
         on_entry: Callable[[dict[str, Any]], None] | None = None,
+        session_id: str | None = None,
     ) -> None:
         self._context = context
+        #: Bridge session id, for latency marks only.
+        self._session_id = session_id
         #: Called synchronously with each new turn the moment it is recorded,
         #: so the app can show it live without waiting for the debounced DB
         #: write. Must be cheap and must never raise into the call.
@@ -516,6 +519,10 @@ class TranscriptLog:
         if not clean:
             return
         speaker = "ai" if speaker == "ai" else "contact"
+        if speaker == "contact":
+            from app import latency as _latency
+
+            _latency.mark_once(self._session_id, "first_caller_transcript_recorded", chars=len(text))
         if self._entries:
             last = self._entries[-1]
             if (

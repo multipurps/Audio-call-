@@ -105,6 +105,9 @@ def clog(level: str, session_id: str, event: str, **fields: Any) -> None:
     logger.log(level, message)
 
 
+from app import latency as _latency
+
+
 class PacedAudioSender:
     """Releases outbound PCM to the bridge at real-time speed.
 
@@ -173,6 +176,7 @@ class PacedAudioSender:
             if chunk:
                 self._queue.put_nowait((chunk, sample_rate, channels))
                 self.frames_enqueued += 1
+        _latency.mark_once(self._session_id, "tts_audio_enqueued", bytes=len(pcm), sampleRate=sample_rate)
         if not self.first_audio_logged:
             self.first_audio_logged = True
             clog(
@@ -264,6 +268,7 @@ class PacedAudioSender:
                             pass
                     wire = await self._serialize(chunk, sample_rate, channels)
                     if wire:
+                        _latency.mark_once(self._session_id, "paced_first_frame_released")
                         await self._send_audio(wire)
                         self.frames_sent += 1
                         if self.frames_sent == 1:
@@ -784,6 +789,7 @@ class CallConversation(_BaseConversation):
         if self.call_context is not None:
             self.transcript = TranscriptLog(
                 self.call_context,
+                session_id=self._session_id,
                 on_entry=lambda entry: get_hub().publish_transcript(self._session_id, entry),
             )
             extra_context = self.call_context.extra_context or None

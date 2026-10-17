@@ -57,6 +57,8 @@ HELLO_TIMEOUT_SECS = 10.0
 
 #: Largest control message accepted. Control messages are small JSON objects;
 #: a large one is either a bug or an attempt to exhaust memory.
+from app import latency as _latency
+
 MAX_CONTROL_BYTES = 8 * 1024
 
 #: A socket write slower than this is counted as a stall in the call-end audio summary. Frames
@@ -105,6 +107,11 @@ class AcafBridge:
         #: different: one should release the session now, the other must hold
         #: it open so the carrier can reconnect into the same conversation.
         self._peer_ended = False
+        #: Set once the app has asked for this call to end (request_hangup). Idempotent.
+        self._hangup_requested = False
+        #: Long-running work started from the read loop (e.g. the greeting). Held
+        #: so it is not garbage-collected and is cancelled with the bridge.
+        self._background: set[asyncio.Task[Any]] = set()
 
     @property
     def _outbound(self) -> BoundedFrameQueue:
@@ -203,6 +210,33 @@ class AcafBridge:
             await self._closed.wait()
         finally:
             await self._cancel_tasks()
+
+    async def request_hangup(self, reason: str = "app-hangup") -> bool:
+        """Stop this call because the app ended it.
+
+        The app has already asked the carrier relay to drop the callee's leg.
+        This stops the assistant side as well, so no queued speech or model turn
+        keeps running for a call the user ended. It sends the peer a hangup
+        while the socket is still open, then closes. Marked as a deliberate end,
+        so the session is released now rather than held for a reconnect.
+        Idempotent. Returns False when there is nothing live to stop.
+        """
+        if self.session is None and self._closed.is_set():
+            return False
+        if self._hangup_requested:
+            return True
+        self._hangup_requested = True
+        self._peer_ended = True
+        session_id = self.session.session_id if self.session is not None else None
+        _latency.mark(session_id, "app_hangup_received", reason=reason)
+        if self.session is not None:
+            self._frames_dropped += self.session.cancel_outbound()
+        if self.serializer is not None:
+            self.serializer.note_assistant_stopped_speaking()
+        with contextlib.suppress(Exception):
+            await self._send_control(CONTROL_HANGUP, reason=reason)
+        self._closed.set()
+        return True
 
     async def close(self, reason: str = "closed") -> None:
         """Close the socket. Moves the session on to its next state.
@@ -468,8 +502,16 @@ class AcafBridge:
 
         if message.type == CONTROL_CALL_ACTIVE:
             # The relay says the callee picked up: greet now. Idempotent.
+            # Fire-and-forget: note_call_active can take a while to start the
+            # greeting, and awaiting it here would hold up hangup and interrupt
+            # messages queued behind it on the same socket. It is idempotent.
             if self.conversation is not None:
-                await self.conversation.note_call_active("relay-signal")
+                task = asyncio.create_task(
+                    self.conversation.note_call_active("relay-signal"),
+                    name="acaf-call-active",
+                )
+                self._background.add(task)
+                task.add_done_callback(self._background.discard)
             return True
 
         if message.type in (CONTROL_HANGUP, CONTROL_STOPPED):
@@ -510,6 +552,7 @@ class AcafBridge:
         self.session.note_inbound(
             sequence=decoded.sequence, byte_count=len(data)
         )
+        _latency.mark_once(self.session.session_id, "inbound_first_frame_at_bridge", bytes=len(data))
 
         if self.serializer is None:
             return
@@ -600,6 +643,7 @@ class AcafBridge:
                 payload, byte_count = item  # type: ignore[misc]
                 sent_at = time.monotonic()
                 await self._ws.send_bytes(payload)
+                _latency.mark_once(self.session.session_id, "bridge_first_frame_on_wire", bytes=byte_count)
                 send_ms = (time.monotonic() - sent_at) * 1000.0
                 if send_ms > self._max_send_ms:
                     self._max_send_ms = send_ms
@@ -666,6 +710,8 @@ class AcafBridge:
                 await conversation.stop(reason)
 
     async def _cancel_tasks(self) -> None:
+        for task in list(self._background):
+            task.cancel()
         await self._stop_conversation("bridge-closing")
         for task in self._tasks:
             task.cancel()

@@ -200,7 +200,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def call_note(session_id: str, request: Request) -> JSONResponse:
         return await _handle_note(session_id, request, state)
 
+    @app.post("/calls/{session_id}/hangup")
+    async def call_hangup(session_id: str, request: Request) -> JSONResponse:
+        return await _handle_hangup(session_id, request, state)
+
     return app
+
+
+async def _handle_hangup(session_id: str, request: Request, state: ServiceState) -> JSONResponse:
+    """Server-to-server: the app ended this call, so stop the assistant side too.
+
+    Bearer-authenticated with the bridge secret, like the note endpoint. 404 means
+    no live bridge holds this session (already ended, or never connected); the
+    app treats that as nothing left to stop.
+    """
+    import hmac
+
+    secret = state.settings.bridge_secret or ""
+    supplied = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+    if not secret or not hmac.compare_digest(secret.encode(), supplied.encode()):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    matches = [
+        bridge
+        for bridge in list(state.active_bridges)
+        if bridge.session is not None and bridge.session.session_id == session_id
+    ]
+    if not matches:
+        return JSONResponse({"ok": False, "found": False}, status_code=404)
+    stopped = 0
+    for bridge in matches:
+        if await bridge.request_hangup("app-hangup"):
+            stopped += 1
+    return JSONResponse({"ok": True, "found": True, "stopped": stopped})
 
 
 async def _handle_note(session_id: str, request: Request, state: ServiceState) -> JSONResponse:
