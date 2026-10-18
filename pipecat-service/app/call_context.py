@@ -1018,11 +1018,6 @@ class VoicePrefs:
     #: None = no preference row; the user's clone (if any) keeps being used.
     use_custom_voice: bool | None = None
     custom_voice_id: str | None = None
-    #: A voice the user is testing from the app ("elevenlabs" | "cartesia"), with
-    #: their own key. None when none is saved or it is switched off.
-    test_tts_provider: str | None = None
-    test_tts_voice_id: str | None = None
-    test_tts_api_key: str | None = None
 
 
 async def fetch_voice_prefs(settings: Settings, user_id: str, session_id: str) -> VoicePrefs | None:
@@ -1034,24 +1029,10 @@ async def fetch_voice_prefs(settings: Settings, user_id: str, session_id: str) -
         return None
     rest = _Rest(settings.supabase_url, settings.supabase_service_role_key, timeout_secs=4.0)
 
-    async def _test_rows() -> list[dict]:
-        # The voice the user is testing (own key, saved in the app). Read on its own
-        # so a missing table or a hiccup here never loses the normal prefs.
-        try:
-            return await rest.select(
-                "voice_test_settings",
-                select="*",
-                filters={"user_id": f"eq.{user_id}"},
-                limit=1,
-            )
-        except Exception as exc:  # noqa: BLE001
-            _log("INFO", session_id, "[CALL ENGINE] no test-voice settings", error=type(exc).__name__)
-            return []
-
     try:
         # The three reads are independent, so they run together: one round trip of wall
         # time instead of three (the serial reads were measured at 0.9-1.2 s of call start).
-        prefs_rows, clone_rows, test_rows = await asyncio.gather(
+        prefs_rows, clone_rows = await asyncio.gather(
             rest.select(
                 "voice_preferences",
                 select="live_voice_id,use_custom_voice",
@@ -1064,7 +1045,6 @@ async def fetch_voice_prefs(settings: Settings, user_id: str, session_id: str) -
                 filters={"user_id": f"eq.{user_id}"},
                 limit=1,
             ),
-            _test_rows(),
         )
     except Exception as exc:  # noqa: BLE001 - a missing table must not take the call down
         _log("WARNING", session_id, "[CALL ENGINE] could not read voice preferences", error=type(exc).__name__, detail=str(exc)[:160])
@@ -1075,17 +1055,10 @@ async def fetch_voice_prefs(settings: Settings, user_id: str, session_id: str) -
     clone = clone_rows[0] if clone_rows else {}
     custom_id = clone.get("provider_voice_id") if clone.get("status") == "ready" else None
     use_custom = prefs.get("use_custom_voice")
-    test = test_rows[0] if test_rows else {}
-    test_provider = test.get("provider") if test.get("provider") in ("elevenlabs", "cartesia") else None
-    # A missing `active` column (older table) counts as on; an explicit false is off.
-    ok_test = bool(test_provider and test.get("voice_id") and test.get("api_key") and test.get("active") is not False)
     return VoicePrefs(
         live_voice_id=prefs.get("live_voice_id") or None,
         use_custom_voice=use_custom if isinstance(use_custom, bool) else None,
         custom_voice_id=custom_id or None,
-        test_tts_provider=test_provider if ok_test else None,
-        test_tts_voice_id=test.get("voice_id") if ok_test else None,
-        test_tts_api_key=test.get("api_key") if ok_test else None,
     )
 
 

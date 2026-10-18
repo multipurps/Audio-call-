@@ -200,7 +200,7 @@ async function appCallStart(req, res, supabase, userId) {
   const sig = createHmac('sha256', secret).update(`appcall:${sessionId}:${userId}:${exp}`).digest('hex');
   const token = `${exp}.${userId}.${sig}`;
   const base = wsBase.replace(/\/stream\/?$/, '').replace(/\/+$/, '');
-  console.log(`[voice] app call start call=${row.id} engine=${choice.mode === 'live' ? 'gpt-live' : 'classic'} provider=${choice.provider} voice=${choice.mode === 'custom' ? 'clone' : choice.mode === 'test' ? 'test-voice' : choice.voiceId} source=${choice.source}`);
+  console.log(`[voice] app call start call=${row.id} engine=${choice.mode === 'live' ? 'gpt-live' : 'classic'} provider=${choice.provider} voice=${choice.mode === 'custom' ? 'clone' : choice.voiceId} source=${choice.source}`);
   return res.status(200).json({
     callId: row.id,
     sessionId,

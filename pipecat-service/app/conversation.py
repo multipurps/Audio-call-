@@ -874,15 +874,7 @@ class CallConversation(_BaseConversation):
         want_custom = bool(custom_id) and use_custom
 
         updates: dict[str, Any] = {}
-        # A voice the user is testing from the app (ElevenLabs / Cartesia, their own
-        # key) replaces the TTS for this call and always runs the classic pipeline.
-        test_voice = bool(prefs and prefs.test_tts_provider and prefs.test_tts_voice_id and prefs.test_tts_api_key)
-        if test_voice:
-            updates.update(
-                tts_provider=prefs.test_tts_provider,
-                tts_test_voice_id=prefs.test_tts_voice_id,
-                tts_test_api_key=prefs.test_tts_api_key,
-            )
+        updates: dict[str, Any] = {}
         if want_custom:
             updates.update(tts_voice_id=custom_id, tts_voice_is_per_call=True)
         elif hello_clone:
@@ -900,9 +892,7 @@ class CallConversation(_BaseConversation):
         self.engine = self._settings.engine_for_call()
         self._first_engine = self.engine
         cfg = self._settings.call_engine
-        if test_voice:
-            self._engine_reason = f"user is testing a {self._settings.tts_provider} voice (classic only; GPT-Live is never used)"
-        elif cfg == "classic":
+        if cfg == "classic":
             self._engine_reason = "ASSISTANT_CALL_ENGINE=classic (kill switch)"
         elif want_custom:
             self._engine_reason = "user has a custom (cloned) voice selected"
@@ -918,7 +908,6 @@ class CallConversation(_BaseConversation):
             userKnown=bool(uid),
             prefsRead=prefs is not None,
             customVoice=bool(want_custom),
-            testVoice=self._settings.tts_provider if test_voice else "-",
             liveVoice=self._settings.live_voice if self.engine == "live" else "-",
             liveVoiceSource=self._settings.live_voice_source if self.engine == "live" else "-",
             via=self.platform,

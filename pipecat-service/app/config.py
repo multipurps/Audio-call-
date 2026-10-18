@@ -33,8 +33,6 @@ LLM_PROVIDERS = ("luna", "openai", "mock")
 TTS_PROVIDERS = ("fish", "mock")
 #: Voices a user can try from the app (Profile > Voice > Test a voice). They are
 #: chosen per user and per call, never by environment variable, and their API key
-#: is saved by the user in the app (table voice_test_settings), not in Render.
-TEST_TTS_PROVIDERS = ("elevenlabs", "cartesia")
 
 DEFAULT_STT_PROVIDER = "openai"
 DEFAULT_LLM_PROVIDER = "openai"
@@ -267,17 +265,6 @@ class Settings:
     tts_temperature: float | None = None
     tts_top_p: float | None = None
     tts_model: str | None = None
-    # A/B-test voices (ASSISTANT_TTS_PROVIDER=elevenlabs|cartesia). Each has its
-    # own voice id and model: a Fish voice id, or a per-call cloned voice from
-    # the relay's hello, never means anything to another vendor, so these
-    # providers ignore tts_voice_id entirely.
-    #: Per-call test voice (see TEST_TTS_PROVIDERS). Filled from the user's saved
-    #: test settings at call start; never from the environment.
-    tts_test_voice_id: str | None = None
-    tts_test_api_key: str | None = None
-    #: Model for the test voice (ASSISTANT_TEST_TTS_MODEL). Empty = the provider service's own
-    #: default, which for ElevenLabs is eleven_flash_v2_5 (the speed-first, lowest-fidelity model).
-    tts_test_model: str | None = None
     #: Log a per-turn latency breakdown (endpointing, STT, LLM, TTS) from
     #: Pipecat's own metrics. Costs nothing on the audio path.
     latency_log: bool = True
@@ -345,7 +332,6 @@ class Settings:
             self.openai_api_key,
             self.luna_api_key,
             self.fish_api_key,
-            self.tts_test_api_key,
             self.supabase_service_role_key,
         )
         return tuple(v for v in values if v and len(v) >= 8)
@@ -484,7 +470,7 @@ class Settings:
         # A cloned or test voice can only be spoken by the classic pipeline
         # (STT -> Luna -> TTS). GPT-Live is a separate engine and is never used
         # for these calls, even when ASSISTANT_CALL_ENGINE=live.
-        if self.tts_voice_is_per_call or self.tts_test_active:
+        if self.tts_voice_is_per_call:
             return "classic"
         if self.call_engine == "live":
             return "live"
@@ -500,11 +486,6 @@ class Settings:
         model = (self.stt_model or "").strip()
         # A leftover Deepgram model name (nova-3...) in ASSISTANT_STT_MODEL must never reach OpenAI.
         return model if model and not model.lower().startswith("nova") else DEFAULT_STT_MODEL
-
-    @property
-    def tts_test_active(self) -> bool:
-        """This call speaks a voice the user is testing (ElevenLabs / Cartesia)."""
-        return self.tts_provider in TEST_TTS_PROVIDERS and bool(self.tts_test_api_key and self.tts_test_voice_id)
 
     def resolved_llm_model(self) -> str:
         if self.llm_model:
@@ -574,7 +555,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         tts_temperature=_clamp_float(_env(env, "ASSISTANT_TTS_TEMPERATURE"), -1, 0.0, 1.0) if _env(env, "ASSISTANT_TTS_TEMPERATURE") else None,
         tts_top_p=_clamp_float(_env(env, "ASSISTANT_TTS_TOP_P"), -1, 0.0, 1.0) if _env(env, "ASSISTANT_TTS_TOP_P") else None,
         tts_model=_env(env, "ASSISTANT_TTS_MODEL"),
-        tts_test_model=_env(env, "ASSISTANT_TEST_TTS_MODEL"),
         openai_api_key=_env(env, "OPENAI_API_KEY"),
         luna_api_key=luna_key,
         fish_api_key=_env(env, "FISH_API_KEY"),

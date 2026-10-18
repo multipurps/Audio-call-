@@ -8,7 +8,6 @@ const STT_LANGUAGES = new Set(['en', 'es', 'fr', 'pt', 'de', 'ha', 'yo', 'sw', '
 import { minutesLeft, NO_MINUTES_MESSAGE } from '../lib/billing.js';
 import { prepareCall, saveCallPlan, confirmCallPlan, attachCallPlans } from '../lib/callPlans.js';
 import { resolveVoiceChoice, stripSpeechMarkers } from '../lib/voiceChoice.js';
-import { testVoiceSpeak } from '../lib/testVoiceSpeak.js';
 import { resolveCallPlatform } from '../lib/callPlatform.js';
 import { signPendingCall, verifyPendingCall } from '../lib/pendingCall.js';
 import { liveVoiceSpeak } from '../lib/liveVoicePreview.js';
@@ -111,19 +110,8 @@ async function speakText(req, res, supabase, userId) {
   // GPT-Live voice. It never silently falls back to a default Fish voice; a
   // failure is reported to the call screen instead.
   const choice = await resolveVoiceChoice(supabase, userId);
-  console.log(`[voice] in-app speak provider=${choice.provider} voice=${choice.mode === 'custom' ? `clone...${String(choice.voiceId).slice(-4)}` : choice.mode === 'test' ? 'test-voice' : choice.voiceId} source=${choice.source}${choice.lookupError ? ' lookupError=1' : ''}`);
+  console.log(`[voice] in-app speak provider=${choice.provider} voice=${choice.mode === 'custom' ? `clone...${String(choice.voiceId).slice(-4)}` : choice.voiceId} source=${choice.source}${choice.lookupError ? ' lookupError=1' : ''}`);
 
-  if (choice.mode === 'test') {
-    const line = stripSpeechMarkers(text).slice(0, 600);
-    if (!line) return res.status(400).json({ error: 'Text required' });
-    try {
-      const { audio, mimeType } = await testVoiceSpeak({ provider: choice.provider, voiceId: choice.voiceId, apiKey: choice.apiKey }, line);
-      return res.status(200).json({ audioBase64: audio.toString('base64'), mimeType, voice: 'test-voice', provider: choice.provider });
-    } catch (err) {
-      console.error('speakText: test voice failed:', String(err?.message || err).slice(0, 300));
-      return res.status(err?.statusCode || 502).json({ error: 'Speech generation failed', detail: String(err?.message || err).slice(0, 300) });
-    }
-  }
 
   if (choice.mode === 'live') {
     const apiKey = process.env.OPENAI_API_KEY || process.env.LUNA_API_KEY;

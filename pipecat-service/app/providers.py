@@ -346,30 +346,6 @@ def build_tts(settings: Settings) -> Any:
         kwargs["settings"] = FishAudioTTSService.Settings(**tts_kwargs)
         return FishAudioTTSService(**kwargs)
 
-    # Voices a user tries from the app. They plug into the SAME pipeline (same STT,
-    # LLM, VAD and turn-taking), so a difference in sound or delay is the voice.
-    # The voice id and API key are THIS user's, saved in the app and loaded for
-    # this call only. A Fish id or cloned voice means nothing to another vendor.
-    if settings.tts_provider in ("elevenlabs", "cartesia"):
-        if not (settings.tts_test_api_key and settings.tts_test_voice_id):
-            raise ValueError(f"{settings.tts_provider} test voice needs a saved key and voice id")
-        # HTTP streaming, one request per sentence, NOT the websocket services. The
-        # websocket ones hold one context per turn and close it at the end of the
-        # turn; in production that closed the context before ElevenLabs had spoken
-        # the buffered sentence ("completed with no audio") and swallowed any error
-        # message the vendor sent. Over HTTP every sentence is its own request, a
-        # failure carries the vendor's status and message into the call log, and
-        # both test voices are measured the same way.
-        if settings.tts_provider == "elevenlabs":
-            return _build_elevenlabs_http(settings)
-        from pipecat.services.cartesia.tts import CartesiaHttpTTSService
-
-        return CartesiaHttpTTSService(
-            api_key=settings.tts_test_api_key,
-            sample_rate=settings.bridge_sample_rate,
-            settings=CartesiaHttpTTSService.Settings(**_test_voice_kwargs(settings)),
-        )
-
     raise ValueError(f"unsupported TTS provider {settings.tts_provider!r}")
 
 
@@ -418,36 +394,3 @@ def provider_summary(settings: Settings) -> dict[str, Any]:
     }
 
 
-def _test_voice_kwargs(settings: Settings) -> dict[str, Any]:
-    """Voice (and, only when ASSISTANT_TEST_TTS_MODEL is set, model) for a test voice."""
-    kwargs: dict[str, Any] = {"voice": settings.tts_test_voice_id}
-    model = (settings.tts_test_model or "").strip()
-    if model:
-        kwargs["model"] = model
-    return kwargs
-
-
-def _build_elevenlabs_http(settings: Settings) -> Any:
-    """ElevenLabs over HTTP streaming. Owns its aiohttp session and closes it when
-    the call's pipeline is cleaned up (no leaked session per call)."""
-    import aiohttp
-    from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
-
-    class _ElevenLabsHttp(ElevenLabsHttpTTSService):
-        async def cleanup(self) -> None:
-            try:
-                await super().cleanup()
-            finally:
-                session = getattr(self, "_owned_session", None)
-                if session is not None and not session.closed:
-                    await session.close()
-
-    session = aiohttp.ClientSession()
-    tts = _ElevenLabsHttp(
-        api_key=settings.tts_test_api_key,
-        aiohttp_session=session,
-        sample_rate=settings.bridge_sample_rate,
-        settings=ElevenLabsHttpTTSService.Settings(**_test_voice_kwargs(settings)),
-    )
-    tts._owned_session = session
-    return tts
