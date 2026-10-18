@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from app.call_context import STT_KEYTERM_LIMIT, CallContext, stt_keyterms
 from app.config import Settings
-from app.providers import build_stt
+from app.providers import DOMAIN_STT_TERMS, build_stt
 
 
 def ctx(**kw) -> CallContext:
@@ -41,14 +41,29 @@ def _openai(model: str | None = None, language: str | None = "en", names=None):
     return build_stt(settings, language, names)
 
 
-def test_names_go_into_the_transcription_prompt():
+def _spoken_words(prompt: str) -> list[str]:
+    return prompt.split("Words that may be spoken: ", 1)[1].rstrip(".").split(", ")
+
+
+def test_names_go_into_the_transcription_prompt_before_the_domain_words():
     prompt = _openai(names=["Ayodele", "Lekki"])._settings.prompt
-    assert "Names that may be spoken: Ayodele, Lekki." in prompt
     assert prompt.startswith("Transcribe the caller's speech only.")
+    assert _spoken_words(prompt) == ["Ayodele", "Lekki", *DOMAIN_STT_TERMS]
 
 
-def test_no_names_leaves_the_prompt_unchanged():
-    assert "Names that may be spoken" not in _openai(names=[])._settings.prompt
+def test_domain_words_are_sent_on_every_call_even_without_names():
+    # Lowercase words like "scores" are never proper nouns, so name extraction skips them.
+    for names in ([], None):
+        prompt = _openai(names=names)._settings.prompt
+        assert prompt.startswith("Transcribe the caller's speech only.")
+        assert _spoken_words(prompt) == list(DOMAIN_STT_TERMS)
+        assert "scores" in DOMAIN_STT_TERMS
+
+
+def test_a_name_that_matches_a_domain_word_is_not_sent_twice():
+    words = _spoken_words(_openai(names=["Scores", "scores"])._settings.prompt)
+    assert words[0] == "Scores"
+    assert [w.lower() for w in words].count("scores") == 1
 
 
 def test_the_model_is_gpt_4o_mini_transcribe_and_a_leftover_nova_name_never_reaches_openai():
