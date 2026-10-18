@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { agentRoute } from '../lib/agentRoute.js';
 
 function fakeRes() {
-  return { code: 0, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } };
+  return { code: 0, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; }, setHeader() {} };
 }
 function fakeSupabase({ row = null, failRead = false, failWrite = false } = {}) {
   const writes = [];
@@ -48,4 +48,27 @@ test('choose refuses a voice that is not on the account, and malformed ids', asy
   assert.equal(res.code, 400);
   await agentRoute({ method: 'PUT', query: { action: 'choose' }, body: { voiceId: '../x' } }, fakeRes(), sb, 'u1', 'k');
   assert.equal(sb.writes.length, 0);
+});
+
+test('preview: rejects a malformed voice id without calling ElevenLabs', async () => {
+  let called = false;
+  globalThis.fetch = async () => { called = true; return { ok: true }; };
+  const res = fakeRes();
+  await agentRoute({ method: 'GET', query: { action: 'preview', voice: '../../x' } }, res, fakeSupabase(), 'u1', 'k');
+  assert.equal(res.code, 400);
+  assert.equal(called, false);
+});
+
+test('preview: returns the clip as base64 with the shared sentence', async () => {
+  let sent = null;
+  globalThis.fetch = async (url, init) => {
+    sent = { url, body: JSON.parse(init.body) };
+    return { ok: true, status: 200, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+  };
+  const res = fakeRes();
+  await agentRoute({ method: 'GET', query: { action: 'preview', voice: 'Abcd1234EFGH' } }, res, fakeSupabase(), 'u1', 'k');
+  assert.equal(res.code, 200);
+  assert.equal(res.body.mimeType, 'audio/mpeg');
+  assert.equal(sent.body.text, 'This is how I will sound when I call for you.');
+  assert.match(sent.url, /text-to-speech\/Abcd1234EFGH/);
 });
