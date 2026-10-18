@@ -100,8 +100,12 @@ class ElevenLabsAgentConversation:
         key = self._settings.elevenlabs_api_key
         if not key:
             raise RuntimeError("ELEVENLABS_API_KEY is not set on the assistant service")
-        agent_id = await resolve_agent_id(key, configured=self._settings.elevenlabs_agent_id)
-        url = await fetch_signed_url(agent_id, key)
+        try:
+            agent_id = await resolve_agent_id(key, configured=self._settings.elevenlabs_agent_id)
+            url = await fetch_signed_url(agent_id, key)
+        except Exception as exc:  # noqa: BLE001 - never let the key or its traceback reach the logs
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            raise RuntimeError(f"Emysa agent unavailable (ElevenLabs {status or type(exc).__name__})") from None
         self._client = ElevenLabsAgentClient(signed_url=url, conversation_config_override=self._overrides)
         await self._client.start()
         self.sender.start()

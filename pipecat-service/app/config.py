@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Mapping
 
 # --------------------------------------------------------------------------
@@ -199,7 +199,7 @@ class Settings:
     #: Shared secret the PHP bridge must present in the `hello` control
     #: message. Required unless mock mode is on. Without it, anyone who can
     #: reach the Render URL can open a session and burn provider credit.
-    bridge_secret: str | None = None
+    bridge_secret: str | None = field(default=None, repr=False)
 
     #: Frames the pipeline should aim to emit/consume. The bridge's declared
     #: rate, independent of each carrier's native rate.
@@ -270,11 +270,11 @@ class Settings:
     latency_log: bool = True
 
     # -- credentials -----------------------------------------------------
-    openai_api_key: str | None = None
-    luna_api_key: str | None = None
-    fish_api_key: str | None = None
+    openai_api_key: str | None = field(default=None, repr=False)
+    luna_api_key: str | None = field(default=None, repr=False)
+    fish_api_key: str | None = field(default=None, repr=False)
     #: ElevenLabs API key for the Emysa agent. Server-side only; never sent to the app.
-    elevenlabs_api_key: str | None = None
+    elevenlabs_api_key: str | None = field(default=None, repr=False)
     #: The agent every call uses. Empty = the account's agent named Emysa.
     elevenlabs_agent_id: str | None = None
 
@@ -303,7 +303,7 @@ class Settings:
     #: behind an explicit flag, because it stores user data across calls.
     enable_persistent_memory: bool = False
     supabase_url: str | None = None
-    supabase_service_role_key: str | None = None
+    supabase_service_role_key: str | None = field(default=None, repr=False)
 
     # -- app-database integration (call context + live transcript) --------
     #: How long to wait for the app's `calls` row to appear at call start
