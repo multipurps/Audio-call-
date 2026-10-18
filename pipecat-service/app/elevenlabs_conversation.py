@@ -141,10 +141,20 @@ class ElevenLabsAgentConversation:
                     self._transcript.note("contact", event.text)
                 elif event.kind == "agent_response" and event.text and self._transcript is not None:
                     self._transcript.note("ai", event.text)
+                elif event.kind == "other":
+                    logger.info("agent event type=%s session=%s", event.raw_type or "-", self._session_id)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - reported; the call is then hung up
-            logger.warning("agent event loop ended session=%s error=%s", self._session_id, type(exc).__name__)
+            # The close code and reason are ElevenLabs' own words, with no call content in them.
+            rcvd = getattr(exc, "rcvd", None)
+            logger.warning(
+                "agent event loop ended session=%s error=%s close_code=%s close_reason=%s",
+                self._session_id,
+                type(exc).__name__,
+                getattr(rcvd, "code", None),
+                (getattr(rcvd, "reason", "") or "")[:200],
+            )
         finally:
             if not self._stopped and self._on_ended is not None:
                 await self._on_ended("agent-ended")

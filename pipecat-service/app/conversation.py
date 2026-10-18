@@ -891,7 +891,13 @@ class CallConversation(_BaseConversation):
             voice_id=link.voice_id,
             transcript=self.transcript,
         )
-        await self._agent.start()
+        try:
+            await self._agent.start()
+        except Exception as exc:  # noqa: BLE001 - the caller still gets a voice; the reason is logged
+            clog("WARNING", self._session_id, "[CALL ENGINE] agent could not start; using the standard voice",
+                 error=str(exc)[:200])
+            self._agent = None
+            return False
         clog("INFO", self._session_id, "[CALL ENGINE] selected=agent", via=self.platform, voice=link.voice_id or "default")
         return True
 
