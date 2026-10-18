@@ -57,6 +57,13 @@ class FakeSender:
         return {"frames": len(self.enqueued)}
 
 
+@pytest.fixture(autouse=True)
+def _reset_key_cache():
+    ec._KEY_CACHE.update(value=None, at=0.0)
+    yield
+    ec._KEY_CACHE.update(value=None, at=0.0)
+
+
 @pytest.fixture
 def patched(monkeypatch):
     clients: list[FakeClient] = []
@@ -207,3 +214,43 @@ async def test_caller_and_agent_lines_go_to_the_call_transcript(patched):
     ]
     await conv._task
     assert transcript.lines == [("contact", "I need a ride"), ("ai", "Where to?")]
+
+
+class _FakeRest:
+    rows: list = []
+
+    def __init__(self, *a, **k):
+        pass
+
+    async def select(self, *a, **k):
+        return _FakeRest.rows
+
+    async def aclose(self):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_key_saved_in_admin_wins_over_the_server_setting(monkeypatch):
+    monkeypatch.setattr(ec, "_Rest", _FakeRest)
+    settings = types.SimpleNamespace(
+        elevenlabs_api_key="sk_env_key_0000", mock_mode=False,
+        supabase_url="https://x.supabase.co", supabase_service_role_key="service-role-test-key",
+    )
+    _FakeRest.rows = [{"value": "sk_admin_key_1111"}]
+    ec._KEY_CACHE.update(value=None, at=0.0)
+    assert await ec.resolve_elevenlabs_key(settings) == "sk_admin_key_1111"
+    # Cached: a second read within a minute does not hit the database again.
+    _FakeRest.rows = []
+    assert await ec.resolve_elevenlabs_key(settings) == "sk_admin_key_1111"
+
+
+@pytest.mark.asyncio
+async def test_without_a_saved_key_the_server_setting_is_used(monkeypatch):
+    monkeypatch.setattr(ec, "_Rest", _FakeRest)
+    settings = types.SimpleNamespace(
+        elevenlabs_api_key="sk_env_key_0000", mock_mode=False,
+        supabase_url="https://x.supabase.co", supabase_service_role_key="service-role-test-key",
+    )
+    _FakeRest.rows = []
+    ec._KEY_CACHE.update(value=None, at=0.0)
+    assert await ec.resolve_elevenlabs_key(settings) == "sk_env_key_0000"

@@ -98,6 +98,7 @@ async function enterAdmin() {
     myRole = access.role;
     // Approving other admins is the one thing only the owner can do.
     $('navAdmins').style.display = myRole === 'owner' ? '' : 'none';
+    $('navKeys').style.display = myRole === 'owner' ? '' : 'none';
     // Anyone else the owner approves is an investor with read-only access: the server only answers
     // INVESTOR_ACTIONS for them, and the menu only offers those sections.
     document.querySelectorAll('#aDrawer .nav[data-s]').forEach((el) => {
@@ -148,7 +149,7 @@ let range = 30, usersCache = [], current = 'overview';
 const INVESTOR_SECTIONS = ['overview', 'usage', 'costs'];
 const canOpen = (name) => Boolean(loaders[name]) && (myRole === 'owner' || INVESTOR_SECTIONS.includes(name));
 const TITLES = { overview: 'Overview', users: 'Users', usage: 'Usage', credits: 'Credits', costs: 'Costs & providers', ai: 'AI behavior', train: 'Call Emysa', content: 'Content & push', admins: 'Admins' };
-const loaders = { overview: loadOverview, users: loadUsers, usage: loadUsage, credits: loadCredits, costs: loadCosts, ai: () => loadAiBehavior($('sec-ai'), { api, esc }), train: () => loadTrainerCall($('sec-train'), { api, esc, supabase }), content: loadBackgrounds, admins: loadAdmins };
+const loaders = { overview: loadOverview, users: loadUsers, usage: loadUsage, credits: loadCredits, costs: loadCosts, keys: loadKeys, ai: () => loadAiBehavior($('sec-ai'), { api, esc }), train: () => loadTrainerCall($('sec-train'), { api, esc, supabase }), content: loadBackgrounds, admins: loadAdmins };
 
 const SECTION_KEY = 'adminSection';
 function openSection(name) {
@@ -369,6 +370,33 @@ async function loadLedger() {
     const { entries } = await api('credit-ledger');
     el.innerHTML = entries.map((e) => `<div class="aRow"><div class="aFlex"><div class="t" style="min-width:0">${esc(emailOf(e.user_id))}</div><b class="${e.minutes < 0 ? 'aNeg' : 'aPos'}">${e.minutes > 0 ? '+' : ''}${num(e.minutes)}m</b></div>
       <div class="m">${e.source === 'purchase' ? 'Purchase' : 'Admin'}${e.note ? ' · ' + esc(e.note) : ''} · ${new Date(e.at).toLocaleString()}</div></div>`).join('') || '<div class="aHint">No credits yet.</div>';
+  } catch (err) { fail(el, err); }
+}
+
+// ---------- keys: platform API keys, owner only ----------
+async function loadKeys() {
+  const el = $('sec-keys');
+  try {
+    const { keys } = await api('keys-status');
+    const k = keys.ELEVENLABS_API_KEY;
+    const state = k.set
+      ? `Set · ends in ${esc(k.last4)} · from ${k.source === 'admin' ? 'this panel' : 'the server settings'}${k.updatedAt ? ' · ' + new Date(k.updatedAt).toLocaleString() : ''}`
+      : 'Not set. Calls to the Emysa agent will not work until a key is saved.';
+    el.innerHTML = `<div class="aCard">
+      <div class="aHint" style="margin:0 0 12px;">${esc(k.label)}. Used for the Emysa agent (ElevenLabs) on calls and for listing voices. Saved here, it takes effect within a minute. Keep it private: it is never shown in full.</div>
+      <div class="aHint" style="margin:0 0 12px;">${state}</div>
+      <div class="aField"><label>New ${esc(k.label)}</label><input type="password" id="keyValue" autocomplete="off" placeholder="Paste the key"></div>
+      <button class="aBtn" id="keySave">Save key</button><div class="aHint" id="keyHint"></div></div>`;
+    $('keySave').onclick = async () => {
+      const value = $('keyValue').value;
+      $('keyHint').textContent = 'Saving…';
+      try {
+        await api('keys-save', { method: 'POST', body: { name: 'ELEVENLABS_API_KEY', value } });
+        $('keyValue').value = '';
+        $('keyHint').textContent = 'Saved.';
+        await loadKeys();
+      } catch (err) { $('keyHint').textContent = err.message; }
+    };
   } catch (err) { fail(el, err); }
 }
 

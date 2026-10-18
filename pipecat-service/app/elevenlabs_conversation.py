@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
@@ -47,6 +48,36 @@ async def fetch_agent_link(settings: Settings, user_id: str | None, session_id: 
     if not rows:
         return None
     return AgentLink(voice_id=str(rows[0]["voice_id"]) if rows[0].get("voice_id") else None)
+
+
+_KEY_CACHE: dict[str, Any] = {"value": None, "at": 0.0}
+_KEY_TTL_SECS = 60.0
+
+
+async def resolve_elevenlabs_key(settings: Settings) -> str | None:
+    """The ElevenLabs key: the one saved in admin (app_secrets) first, then the server setting.
+
+    Read at most once a minute, so a key changed in admin is used within a minute.
+    """
+    now = time.monotonic()
+    if _KEY_CACHE["value"] and now - _KEY_CACHE["at"] < _KEY_TTL_SECS:
+        return _KEY_CACHE["value"]
+    saved = None
+    url = getattr(settings, "supabase_url", None)
+    service_key = getattr(settings, "supabase_service_role_key", None)
+    if not getattr(settings, "mock_mode", False) and url and service_key:
+        rest = _Rest(url, service_key, timeout_secs=4.0)
+        try:
+            rows = await rest.select("app_secrets", select="value", filters={"name": "eq.ELEVENLABS_API_KEY"}, limit=1)
+            if rows and rows[0].get("value"):
+                saved = str(rows[0]["value"]).strip()
+        except Exception:  # noqa: BLE001 - fall back to the server setting
+            saved = None
+        finally:
+            await rest.aclose()
+    value = saved or getattr(settings, "elevenlabs_api_key", None) or None
+    _KEY_CACHE.update(value=value, at=now)
+    return value
 
 
 def build_overrides(*, prompt: str, first_message: str | None, voice_id: str | None) -> dict[str, Any]:
@@ -97,7 +128,7 @@ class ElevenLabsAgentConversation:
         )
 
     async def start(self) -> None:
-        key = self._settings.elevenlabs_api_key
+        key = await resolve_elevenlabs_key(self._settings)
         if not key:
             raise RuntimeError("ELEVENLABS_API_KEY is not set on the assistant service")
         try:

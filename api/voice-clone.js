@@ -2,6 +2,7 @@ import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { LIVE_VOICES, liveVoiceById } from '../lib/liveVoices.js';
 import { liveVoicePreview } from '../lib/liveVoicePreview.js';
 import { agentRoute } from '../lib/agentRoute.js';
+import { getSecret } from '../lib/secrets.js';
 
 // Client sends { audioBase64, mimeType } — a 10-30s sample recorded/uploaded
 // in the browser. The Fish Audio key lives only in this server-side env var;
@@ -14,7 +15,7 @@ export default async function handler(req, res) {
 
   // The Emysa agent (ElevenLabs). Checked before the Fish key so it works without one.
   if (req.query?.target === 'agent') {
-    const elevenKey = process.env.ELEVENLABS_API_KEY;
+    const elevenKey = await getSecret(supabase, 'ELEVENLABS_API_KEY');
     if (!elevenKey) return res.status(500).json({ error: 'The agent is not configured on the server' });
     return agentRoute(req, res, supabase, userId, elevenKey);
   }

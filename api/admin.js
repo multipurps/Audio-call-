@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import webpush from 'web-push';
 import { getServiceClient, getAdminAccess, normEmail, maskEmail } from '../lib/supabaseAdmin.js';
 import { AI_ACTIONS, handleAiAction } from '../lib/aiBehaviorAdmin.js';
+import { keysStatus, keysSave } from '../lib/secrets.js';
 
 // Every admin-only action lives here behind ?action=..., instead of one
 // file per action — Vercel's Hobby plan caps a deployment at 12 serverless
@@ -15,7 +16,7 @@ import { AI_ACTIONS, handleAiAction } from '../lib/aiBehaviorAdmin.js';
 //          they may call only INVESTOR_ACTIONS below (revenue overview, usage and cost figures).
 //          Everything else (users, credits, AI behavior, Call Emysa, content, push, admin management)
 //          is refused here, whatever the admin page shows.
-const OWNER_ONLY = new Set(['admin-list', 'admin-decide']);
+const OWNER_ONLY = new Set(['admin-list', 'admin-decide', 'keys-status', 'keys-save']);
 const INVESTOR_ACTIONS = new Set(['overview', 'analytics', 'rates']);
 
 export default async function handler(req, res) {
@@ -60,6 +61,8 @@ export default async function handler(req, res) {
     case 'rates': return rates(req, res, supabase);
     case 'admin-list': return listAdmins(req, res, supabase, access);
     case 'admin-decide': return decideAdmin(req, res, supabase, access);
+    case 'keys-status': return keysStatus(req, res, supabase);
+    case 'keys-save': return keysSave(req, res, supabase, access.user?.id);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
   }
 }
