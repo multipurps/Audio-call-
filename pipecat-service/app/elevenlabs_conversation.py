@@ -75,8 +75,11 @@ class ElevenLabsAgentConversation:
         prompt: str,
         first_message: str | None,
         voice_id: str | None,
+        transcript: Any = None,
     ) -> None:
         self._settings = settings
+        #: The call's transcript (TranscriptLog): caller and agent lines go here, as on GPT-Live.
+        self._transcript = transcript
         self._session_id = session_id
         self._on_ended = on_ended
         self._overrides = build_overrides(prompt=prompt, first_message=first_message, voice_id=voice_id)
@@ -130,6 +133,10 @@ class ElevenLabsAgentConversation:
                     await self.sender.enqueue(event.audio, self._settings.bridge_sample_rate)
                 elif event.kind == "interruption":
                     await self.sender.interrupt()
+                elif event.kind == "user_transcript" and event.text and self._transcript is not None:
+                    self._transcript.note("contact", event.text)
+                elif event.kind == "agent_response" and event.text and self._transcript is not None:
+                    self._transcript.note("ai", event.text)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - reported; the call is then hung up

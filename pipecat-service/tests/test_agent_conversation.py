@@ -183,3 +183,27 @@ async def test_missing_key_fails_before_any_connection(patched):
     with pytest.raises(RuntimeError):
         await conv.start()
     assert clients == []
+
+
+class FakeTranscript:
+    def __init__(self):
+        self.lines = []
+
+    def note(self, speaker, text, *, interrupted=False):
+        self.lines.append((speaker, text))
+
+
+@pytest.mark.asyncio
+async def test_caller_and_agent_lines_go_to_the_call_transcript(patched):
+    clients, _ = patched
+    transcript = FakeTranscript()
+    conv = make_conv()
+    conv._transcript = transcript
+    await conv.start()
+    clients[0].events_to_yield = [
+        AgentEvent("user_transcript", text="I need a ride"),
+        AgentEvent("agent_response", text="Where to?"),
+        AgentEvent("user_transcript", text=""),
+    ]
+    await conv._task
+    assert transcript.lines == [("contact", "I need a ride"), ("ai", "Where to?")]

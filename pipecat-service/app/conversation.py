@@ -889,6 +889,7 @@ class CallConversation(_BaseConversation):
             prompt=prompt,
             first_message=self.greeting_text,
             voice_id=link.voice_id,
+            transcript=self.transcript,
         )
         await self._agent.start()
         clog("INFO", self._session_id, "[CALL ENGINE] selected=agent", via=self.platform, voice=link.voice_id or "default")
@@ -896,6 +897,10 @@ class CallConversation(_BaseConversation):
 
     async def note_call_active(self, source: str) -> bool:
         if self._agent is not None:
+            # The call is answered for talk-time and the end report, as on the other engines.
+            self.call_active = True
+            if self._answered_at is None:
+                self._answered_at = time.monotonic()
             return await self._agent.note_call_active(source)
         return await super().note_call_active(source)
 
@@ -1409,12 +1414,14 @@ class CallConversation(_BaseConversation):
         await self._task.queue_frame(TTSSpeakFrame(text, append_to_context=False))
 
     async def stop(self, reason: str = "stopped") -> None:
-        if self._agent is not None:
-            await self._agent.stop(reason)
-            return
         if self._stopped:
             return
         self._stopped = True
+        if self._agent is not None:
+            # Agent calls share the end-of-call steps below (transcript save, call report);
+            # the pipeline pieces are simply absent for them.
+            with contextlib.suppress(Exception):
+                await self._agent.stop(reason)
         if _LIVE_CONVERSATIONS.get(self._session_id) is self:
             _LIVE_CONVERSATIONS.pop(self._session_id, None)
         watchdog, self._watchdog = self._watchdog, None
