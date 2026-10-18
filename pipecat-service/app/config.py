@@ -275,6 +275,8 @@ class Settings:
     fish_api_key: str | None = None
     #: ElevenLabs API key for the Emysa agent. Server-side only; never sent to the app.
     elevenlabs_api_key: str | None = None
+    #: The agent every call uses. Empty = the account's agent named Emysa.
+    elevenlabs_agent_id: str | None = None
 
     # -- conversational behaviour ---------------------------------------
     system_prompt: str | None = None
@@ -562,6 +564,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         luna_api_key=luna_key,
         fish_api_key=_env(env, "FISH_API_KEY"),
         elevenlabs_api_key=_env(env, "ELEVENLABS_API_KEY"),
+        elevenlabs_agent_id=_env(env, "ELEVENLABS_AGENT_ID"),
         latency_log=_env_bool(env, "ASSISTANT_LATENCY_LOG", True),
         system_prompt=_env(env, "ASSISTANT_SYSTEM_PROMPT"),
         greeting=_env(env, "ASSISTANT_GREETING"),

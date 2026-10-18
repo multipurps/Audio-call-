@@ -1143,25 +1143,7 @@
     </div>
 
     <div id="voicePaneTest" class="hidden">
-      <div class="sectionLabel">Your voice</div>
-      <p class="hint" style="margin:0 0 12px;">Add 1 to 25 clear clips of your voice. About 30 seconds in total is a good start. Only use a voice you own or have permission to use.</p>
-      <div class="field"><label>Name</label>
-        <div class="inputWrap"><input type="text" id="agentVoiceName" placeholder="My voice" maxlength="60" autocomplete="off"></div>
-      </div>
-      <div class="field"><label>Samples</label>
-        <input type="file" id="agentVoiceFiles" accept="audio/*" multiple>
-      </div>
-      <label style="display:flex; gap:8px; align-items:flex-start; margin:8px 0;">
-        <input type="checkbox" id="agentVoiceConsent" style="margin-top:3px;">
-        <span class="hint" style="margin:0;">I have the right to use this voice.</span>
-      </label>
-      <button class="primaryBtn" id="agentVoiceCreateBtn">Create my voice</button>
-      <p class="hint" id="agentVoiceStatus" style="margin:10px 4px 0; min-height:18px;"></p>
-
-      <div class="sectionLabel" style="margin-top:22px;">Emysa agent</div>
-      <p class="hint" id="agentState" style="margin:0 0 12px;">Checking…</p>
-      <button class="primaryBtn" id="agentToggleBtn" disabled>Turn on the agent</button>
-      <p class="hint" id="agentToggleStatus" style="margin:10px 4px 0; min-height:18px;"></p>
+      <div id="agentVoiceList"></div>
     </div>
 
     <audio id="liveVoiceAudio" style="display:none;"></audio>

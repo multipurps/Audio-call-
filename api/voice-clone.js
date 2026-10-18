@@ -173,7 +173,8 @@ async function savePrefs(req, res, supabase, userId) {
   if (Object.keys(row).length <= 2) return res.status(400).json({ error: 'Nothing to save' });
   const { error } = await supabase.from('voice_preferences').upsert(row, { onConflict: 'user_id' });
   if (error) return res.status(500).json({ error: 'Could not save voice settings', detail: error.message });
-  // Choosing a Standard or Custom voice switches the test voice off, so exactly one voice is in charge.
+  // Standard or Custom chosen: the Agent voice is switched off, so exactly one voice is in charge.
+  await supabase.from('user_agents').update({ active: false, updated_at: new Date().toISOString() }).eq('user_id', userId).then(() => {}, () => {});
   return getPrefs(req, res, supabase, userId);
 }
 

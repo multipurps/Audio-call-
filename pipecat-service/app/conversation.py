@@ -857,15 +857,28 @@ class CallConversation(_BaseConversation):
         )
 
     async def _start_agent_if_enabled(self) -> bool:
-        """The user switched the Emysa agent on: this call runs on it, and nothing else."""
+        """The user chose the Agent voice: this call runs on the Emysa agent, with the app's instructions."""
         uid = self.user_id or (getattr(self.call_context, "user_id", None) if self.call_context else None)
         if not uid or trainer_engine(self._session_id) is not None:
             return False
+        from app.call_context import build_extra_context
         from app.elevenlabs_conversation import ElevenLabsAgentConversation, fetch_agent_link
+        from app.live import build_live_system_prompt
 
         link = await fetch_agent_link(self._settings, uid, self._session_id)
         if link is None:
             return False
+        # The same instructions GPT-Live gets: admin guidance, then the per-call block.
+        global_block = await fetch_global_block(
+            self._settings,
+            model="live",
+            mode=call_mode(self.platform, self.is_app_call),
+            call_context=self.call_context,
+            session_id=self._session_id,
+            draft=False,
+        )
+        extra = build_extra_context(self.call_context) if self.call_context is not None else None
+        prompt = build_live_system_prompt(self._settings, extra, self.call_context, global_block)
         self._agent = ElevenLabsAgentConversation(
             settings=self._settings,
             session_id=self._session_id,
@@ -873,10 +886,12 @@ class CallConversation(_BaseConversation):
             send_audio=self._send_audio,
             send_control=self._send_control,
             on_ended=self._on_ended,
-            agent_id=link.agent_id,
+            prompt=prompt,
+            first_message=self.greeting_text,
+            voice_id=link.voice_id,
         )
         await self._agent.start()
-        clog("INFO", self._session_id, "[CALL ENGINE] selected=agent", via=self.platform)
+        clog("INFO", self._session_id, "[CALL ENGINE] selected=agent", via=self.platform, voice=link.voice_id or "default")
         return True
 
     async def note_call_active(self, source: str) -> bool:

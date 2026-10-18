@@ -120,3 +120,40 @@ class ElevenLabsAgentClient:
         if self._ws is None:
             raise RuntimeError("ElevenLabs agent socket is not open")
         await self._ws.send(json.dumps(payload))
+
+
+_AGENT_IDS: dict[str, str] = {}
+
+
+async def resolve_agent_id(
+    api_key: str,
+    *,
+    name: str = "Emysa",
+    configured: str | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> str:
+    """The agent every call uses: the configured id, or the account's agent with this name.
+
+    The agent holds the voice, models and turn-taking settings in the ElevenLabs dashboard.
+    Each call then sends the app's own instructions and the user's chosen voice on top of it.
+    """
+    if configured:
+        return configured
+    if name in _AGENT_IDS:
+        return _AGENT_IDS[name]
+    if not api_key:
+        raise ValueError("ELEVENLABS_API_KEY is not set")
+    owned = client is None
+    http = client or httpx.AsyncClient(timeout=10.0)
+    try:
+        resp = await http.get("https://api.elevenlabs.io/v1/convai/agents", headers={"xi-api-key": api_key})
+        resp.raise_for_status()
+        agents = resp.json().get("agents", [])
+    finally:
+        if owned:
+            await http.aclose()
+    for agent in agents:
+        if str(agent.get("name", "")).strip().lower() == name.lower() and agent.get("agent_id"):
+            _AGENT_IDS[name] = str(agent["agent_id"])
+            return _AGENT_IDS[name]
+    raise RuntimeError(f"No ElevenLabs agent named {name!r} in this account")
