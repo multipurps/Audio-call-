@@ -1451,7 +1451,7 @@ async function startAppCallSession() {
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+      audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
     });
   } catch (err) {
     output.dispose();
@@ -1558,7 +1558,7 @@ async function startAppCallSession() {
   const reacquireMic = async () => {
     try {
       const fresh = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+        audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
       });
       if (appCall !== call) { fresh.getTracks().forEach((t) => t.stop()); return; }
       try { call.source?.disconnect(); } catch {}

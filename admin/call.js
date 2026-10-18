@@ -174,7 +174,7 @@ async function startCall() {
 
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false, channelCount: 1 } });
   } catch (err) {
     output.dispose();
     finishUi(describeMicError(err));
@@ -265,7 +265,7 @@ async function startCall() {
   // Screen lock / app switch: bring the output back (and the mic, if the OS ended it) on return.
   const reacquireMic = async () => {
     try {
-      const fresh = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+      const fresh = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false, channelCount: 1 } });
       if (appCall !== call) { fresh.getTracks().forEach((t) => t.stop()); return; }
       try { call.source?.disconnect(); } catch { /* ignore */ }
       call.stream = fresh;
