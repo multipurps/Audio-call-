@@ -175,11 +175,34 @@ DEFAULT_STT_PROMPT = (
 )
 
 
+#: Words every call can hear regardless of the call's contact or objective.
+#: Lowercase common words are not proper nouns, so the name-only keyterm
+#: extraction never sends them; without them "scores" was heard as "cause".
+#: Extend here (or pass per-app terms through keyterms) when a domain word is missed.
+DOMAIN_STT_TERMS: tuple[str, ...] = (
+    "live scores",
+    "scores",
+    "fixtures",
+    "standings",
+    "results",
+    "league table",
+)
+
+
 def stt_prompt_with_names(base: str, names: list[str] | None) -> str:
-    """The transcription prompt plus the names and proper nouns of THIS call, so \"Ayodele\" is spelled
-    right instead of guessed. gpt-4o-mini-transcribe takes this as free-text guidance in `prompt`."""
-    names = [n for n in (names or []) if n]
-    return f"{base} Names that may be spoken: {', '.join(names)}." if names else base
+    """The transcription prompt plus the names, proper nouns and domain words of THIS call, so
+    "Ayodele" is spelled right and "scores" is not heard as "cause". gpt-4o-mini-transcribe takes
+    this as free-text guidance in `prompt`."""
+    terms: list[str] = []
+    seen: set[str] = set()
+    for term in [*(names or []), *DOMAIN_STT_TERMS]:
+        if not term:
+            continue
+        key = term.lower()
+        if key not in seen:
+            seen.add(key)
+            terms.append(term)
+    return f"{base} Words that may be spoken: {', '.join(terms)}." if terms else base
 
 
 def _stt_language(language: str | None) -> Any:
