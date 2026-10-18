@@ -14,31 +14,38 @@ function fakeSupabase({ row = null, failRead = false, failWrite = false } = {}) 
   };
   return { from: () => q, writes };
 }
+const VOICES = { voices: [{ voice_id: 'Abcd1234EFGH', name: 'Bossa', preview_url: 'https://p.example/a.mp3', labels: { gender: 'female', accent: 'british' } }] };
+function stubFetch(body = VOICES, ok = true) {
+  globalThis.fetch = async () => ({ ok, status: ok ? 200 : 500, json: async () => body });
+}
 
-test('status says whether the Agent is on', async () => {
+test('status returns the account voices with preview clips, and the chosen voice', async () => {
+  stubFetch();
   const res = fakeRes();
-  await agentRoute({ method: 'GET', query: { action: 'status' } }, res, fakeSupabase({ row: { active: true } }), 'u1');
+  await agentRoute({ method: 'GET', query: { action: 'status' } }, res, fakeSupabase({ row: { active: true, voice_id: 'Abcd1234EFGH' } }), 'u1', 'sk-secret');
   assert.equal(res.code, 200);
-  assert.deepEqual(res.body, { active: true });
+  assert.equal(res.body.active, true);
+  assert.equal(res.body.voiceName, 'Bossa');
+  assert.equal(res.body.voices[0].previewUrl, 'https://p.example/a.mp3');
+  assert.equal(JSON.stringify(res.body).includes('sk-secret'), false);
 });
 
-test('status is off when the user has no row', async () => {
-  const res = fakeRes();
-  await agentRoute({ method: 'GET', query: { action: 'status' } }, res, fakeSupabase(), 'u1');
-  assert.deepEqual(res.body, { active: false });
-});
-
-test('choose turns the Agent on, with no voice of its own (the agent keeps its ElevenLabs voice)', async () => {
+test('choose saves a voice from the account and turns the Agent on', async () => {
+  stubFetch();
   const sb = fakeSupabase();
   const res = fakeRes();
-  await agentRoute({ method: 'PUT', query: { action: 'choose' }, body: {} }, res, sb, 'u1');
+  await agentRoute({ method: 'PUT', query: { action: 'choose' }, body: { voiceId: 'Abcd1234EFGH' } }, res, sb, 'u1', 'k');
   assert.equal(res.code, 200);
+  assert.equal(sb.writes[0].voice_id, 'Abcd1234EFGH');
   assert.equal(sb.writes[0].active, true);
-  assert.equal(sb.writes[0].voice_id, undefined);
 });
 
-test('a failed save is reported, not hidden', async () => {
+test('choose refuses a voice that is not on the account, and malformed ids', async () => {
+  stubFetch();
+  const sb = fakeSupabase();
   const res = fakeRes();
-  await agentRoute({ method: 'PUT', query: { action: 'choose' }, body: {} }, res, fakeSupabase({ failWrite: true }), 'u1');
-  assert.equal(res.code, 500);
+  await agentRoute({ method: 'PUT', query: { action: 'choose' }, body: { voiceId: 'Zzzz9999Zzzz' } }, res, sb, 'u1', 'k');
+  assert.equal(res.code, 400);
+  await agentRoute({ method: 'PUT', query: { action: 'choose' }, body: { voiceId: '../x' } }, fakeRes(), sb, 'u1', 'k');
+  assert.equal(sb.writes.length, 0);
 });
