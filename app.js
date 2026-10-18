@@ -4792,11 +4792,74 @@ async function loadVoicePrefs() {
 // Standard (GPT-Live voices) or Custom (the user's cloned voice). The Agent option is a placeholder.
 function savedVoiceType() { return voicePrefs?.useCustomVoice ? 'custom' : 'standard'; }
 
+// ---- Emysa agent (ElevenLabs): the user's own voice and the agent that answers calls ----
+async function agentRequest(method, action, body) {
+  const resp = await authedFetch(`/api/voice-clone?target=agent&action=${action}`, {
+    method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await resp.json().catch(() => ({}));
+  return { ok: resp.ok, data };
+}
+let agentState = null;
+function renderAgentState(s) {
+  agentState = s;
+  $('agentState').textContent = s.enabled
+    ? 'On: calls are answered by your Emysa agent.'
+    : (s.hasVoice ? 'Off. Your voice is ready. Turn the agent on to answer calls.' : 'Off. Create your voice, then turn the agent on.');
+  $('agentToggleBtn').textContent = s.enabled ? 'Turn off the agent' : 'Turn on the agent';
+  $('agentToggleBtn').disabled = false;
+}
+async function loadAgentState() {
+  try {
+    const { ok, data } = await agentRequest('GET', 'status');
+    if (ok) renderAgentState(data); else $('agentState').textContent = data.error || 'Could not load the agent.';
+  } catch { $('agentState').textContent = 'Could not load the agent. Check your connection.'; }
+}
+function readAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1] || '');
+    r.onerror = () => reject(new Error('Could not read a sample'));
+    r.readAsDataURL(file);
+  });
+}
+$('agentVoiceCreateBtn').addEventListener('click', async () => {
+  const btn = $('agentVoiceCreateBtn'); const status = $('agentVoiceStatus');
+  const name = $('agentVoiceName').value.trim();
+  const files = Array.from($('agentVoiceFiles').files || []);
+  if (!$('agentVoiceConsent').checked) { status.textContent = 'Tick the box to confirm you have the right to use this voice.'; return; }
+  if (!name) { status.textContent = 'Give the voice a name.'; return; }
+  if (!files.length) { status.textContent = 'Choose at least one audio sample.'; return; }
+  btn.disabled = true; status.textContent = 'Creating your voice…';
+  try {
+    const payload = { name, consent: true, files: [] };
+    for (const f of files) payload.files.push({ name: f.name, type: f.type || 'audio/mpeg', data: await readAsBase64(f) });
+    const { ok, data } = await agentRequest('POST', 'clone', payload);
+    if (!ok) { status.textContent = data.error || 'Could not create your voice.'; return; }
+    status.textContent = 'Your voice is ready.';
+    renderAgentState({ ...(agentState || {}), hasVoice: true, voiceId: data.voiceId });
+  } catch (err) { status.textContent = err.message || 'Could not create your voice.'; }
+  finally { btn.disabled = false; }
+});
+$('agentToggleBtn').addEventListener('click', async () => {
+  const btn = $('agentToggleBtn'); const status = $('agentToggleStatus');
+  const turnOn = !agentState?.enabled;
+  btn.disabled = true; status.textContent = turnOn ? 'Turning the agent on…' : 'Turning the agent off…';
+  try {
+    const { ok, data } = await agentRequest('PUT', turnOn ? 'enable' : 'disable');
+    if (!ok) { status.textContent = data.error || 'Could not change the agent.'; return; }
+    renderAgentState({ ...(agentState || {}), ...data });
+    status.textContent = '';
+  } catch { status.textContent = 'Could not change the agent. Check your connection.'; }
+  finally { btn.disabled = false; }
+});
+
 function showVoiceTab(which) {
   document.querySelectorAll('#voiceTypeGroup .segmentedBtn').forEach((b) => b.classList.toggle('active', b.dataset.vtype === which));
   $('voicePaneStandard').classList.toggle('hidden', which !== 'standard');
   $('voicePaneCustom').classList.toggle('hidden', which !== 'custom');
   $('voicePaneTest').classList.toggle('hidden', which !== 'test');
+  if (which === 'test') loadAgentState();
 }
 document.querySelectorAll('#voiceTypeGroup .segmentedBtn').forEach((b) => b.addEventListener('click', () => { haptic(); showVoiceTab(b.dataset.vtype); }));
 $('voicePreviewRow').addEventListener('click', () => {

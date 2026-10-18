@@ -738,6 +738,8 @@ class CallConversation(_BaseConversation):
         self._send_audio = send_audio
         self._send_control = send_control
         self._on_ended = on_ended
+        #: Set when the call runs on the Emysa agent (see _start_agent_if_enabled).
+        self._agent: Any = None
         self._services = services
         #: "live" (GPT-Live) or "classic" (STT -> LLM -> Fish); decided per call.
         self.engine = settings.engine_for_call() if services is None else "classic"
@@ -795,6 +797,9 @@ class CallConversation(_BaseConversation):
             extra_context = self.call_context.extra_context or None
             self._arm_wrapup(self.call_context)
 
+        if await self._start_agent_if_enabled():
+            return
+
         await self._resolve_call_voice_and_engine()
 
         rate = self._settings.bridge_sample_rate
@@ -850,6 +855,34 @@ class CallConversation(_BaseConversation):
             engine=self.engine,
             contextResolved=bool(self.call_context),
         )
+
+    async def _start_agent_if_enabled(self) -> bool:
+        """The user switched the Emysa agent on: this call runs on it, and nothing else."""
+        uid = self.user_id or (getattr(self.call_context, "user_id", None) if self.call_context else None)
+        if not uid or trainer_engine(self._session_id) is not None:
+            return False
+        from app.elevenlabs_conversation import ElevenLabsAgentConversation, fetch_agent_link
+
+        link = await fetch_agent_link(self._settings, uid, self._session_id)
+        if link is None:
+            return False
+        self._agent = ElevenLabsAgentConversation(
+            settings=self._settings,
+            session_id=self._session_id,
+            serializer=self._serializer,
+            send_audio=self._send_audio,
+            send_control=self._send_control,
+            on_ended=self._on_ended,
+            agent_id=link.agent_id,
+        )
+        await self._agent.start()
+        clog("INFO", self._session_id, "[CALL ENGINE] selected=agent", via=self.platform)
+        return True
+
+    async def note_call_active(self, source: str) -> bool:
+        if self._agent is not None:
+            return await self._agent.note_call_active(source)
+        return await super().note_call_active(source)
 
     async def _resolve_call_voice_and_engine(self) -> None:
         """Pick this call's engine and voice from the user's saved choices.
@@ -1287,6 +1320,9 @@ class CallConversation(_BaseConversation):
         return True
 
     async def push_audio(self, frame: Any) -> None:
+        if self._agent is not None:
+            await self._agent.push_audio(frame)
+            return
         if self._stopped or self._task is None:
             return
         if isinstance(frame, InputAudioRawFrame):
@@ -1358,6 +1394,9 @@ class CallConversation(_BaseConversation):
         await self._task.queue_frame(TTSSpeakFrame(text, append_to_context=False))
 
     async def stop(self, reason: str = "stopped") -> None:
+        if self._agent is not None:
+            await self._agent.stop(reason)
+            return
         if self._stopped:
             return
         self._stopped = True
@@ -1465,6 +1504,8 @@ class CallConversation(_BaseConversation):
                 await context.aclose()
 
     def stats(self) -> dict[str, Any]:
+        if self._agent is not None:
+            return self._agent.stats()
         out: dict[str, Any] = {
             "inboundFrames": self._meter.frames,
             "callActiveSource": self.call_active_source or "none",

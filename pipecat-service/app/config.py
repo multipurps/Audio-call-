@@ -273,6 +273,8 @@ class Settings:
     openai_api_key: str | None = None
     luna_api_key: str | None = None
     fish_api_key: str | None = None
+    #: ElevenLabs API key for the Emysa agent. Server-side only; never sent to the app.
+    elevenlabs_api_key: str | None = None
 
     # -- conversational behaviour ---------------------------------------
     system_prompt: str | None = None
@@ -332,6 +334,7 @@ class Settings:
             self.openai_api_key,
             self.luna_api_key,
             self.fish_api_key,
+            self.elevenlabs_api_key,
             self.supabase_service_role_key,
         )
         return tuple(v for v in values if v and len(v) >= 8)
@@ -558,6 +561,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         openai_api_key=_env(env, "OPENAI_API_KEY"),
         luna_api_key=luna_key,
         fish_api_key=_env(env, "FISH_API_KEY"),
+        elevenlabs_api_key=_env(env, "ELEVENLABS_API_KEY"),
         latency_log=_env_bool(env, "ASSISTANT_LATENCY_LOG", True),
         system_prompt=_env(env, "ASSISTANT_SYSTEM_PROMPT"),
         greeting=_env(env, "ASSISTANT_GREETING"),
