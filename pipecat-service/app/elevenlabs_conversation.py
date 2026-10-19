@@ -139,6 +139,7 @@ class ElevenLabsAgentConversation:
             raise RuntimeError(f"Emysa agent unavailable (ElevenLabs {status or type(exc).__name__})") from None
         self._client = ElevenLabsAgentClient(signed_url=url, conversation_config_override=self._overrides)
         await self._client.start()
+        await self._client.wait_ready()
         self.sender.start()
         self._task = asyncio.create_task(self._pump(), name=f"agent-events-{self._session_id}")
 

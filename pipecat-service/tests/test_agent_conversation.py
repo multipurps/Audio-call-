@@ -22,6 +22,9 @@ class FakeClient:
     async def start(self):
         self.started = True
 
+    async def wait_ready(self, timeout=8.0):
+        return None
+
     async def send_caller_audio(self, pcm):
         self.sent_audio.append(pcm)
 

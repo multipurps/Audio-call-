@@ -17,7 +17,9 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+import asyncio
 import websockets
+from websockets.exceptions import ConnectionClosed
 
 AGENT_WS_URL = "wss://api.elevenlabs.io/v1/convai/conversation"
 SIGNED_URL_ENDPOINT = "https://api.elevenlabs.io/v1/convai/conversation/get-signed-url"
@@ -69,6 +71,7 @@ class ElevenLabsAgentClient:
         self._connect = connect
         self._override = conversation_config_override
         self._ws: Any = None
+        self._first: str | None = None
 
     async def start(self) -> None:
         self._ws = await self._connect(self._signed_url)
@@ -83,10 +86,32 @@ class ElevenLabsAgentClient:
             return
         await self._send({"user_audio_chunk": base64.b64encode(pcm).decode("ascii")})
 
+    async def wait_ready(self, timeout: float = 8.0) -> None:
+        """Wait for ElevenLabs to accept the conversation. Raises with its reason if it refuses."""
+        assert self._ws is not None, "start() first"
+        try:
+            first = await asyncio.wait_for(self._ws.recv(), timeout)
+        except ConnectionClosed as exc:
+            rcvd = getattr(exc, "rcvd", None)
+            reason = (getattr(rcvd, "reason", "") or "")[:200]
+            raise RuntimeError(f"agent refused the call (close {getattr(rcvd, 'code', None)}: {reason})") from None
+        except asyncio.TimeoutError:
+            raise RuntimeError("agent did not answer in time") from None
+        if json.loads(first).get("type") != "conversation_initiation_metadata":
+            raise RuntimeError("agent did not start the conversation")
+        self._first = first
+
+    async def _messages(self) -> AsyncIterator[str]:
+        if self._first is not None:
+            first, self._first = self._first, None
+            yield first
+        async for message in self._ws:
+            yield message
+
     async def events(self) -> AsyncIterator[AgentEvent]:
         """Yield agent events until the socket closes. Answers keep-alive pings itself."""
         assert self._ws is not None, "start() first"
-        async for message in self._ws:
+        async for message in self._messages():
             data = json.loads(message)
             kind = data.get("type", "")
             if kind == "ping":

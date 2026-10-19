@@ -17,6 +17,9 @@ class FakeSocket:
     async def send(self, text: str) -> None:
         self.sent.append(json.loads(text))
 
+    async def recv(self):
+        return self._incoming.pop(0)
+
     async def close(self) -> None:
         self.closed = True
 

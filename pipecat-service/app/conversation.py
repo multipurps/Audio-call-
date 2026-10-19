@@ -891,20 +891,19 @@ class CallConversation(_BaseConversation):
             voice_id=link.voice_id,
             transcript=self.transcript,
         )
+        # No fallback: if the agent cannot start, the call fails and the reason is logged.
         try:
             await self._agent.start()
-        except Exception as exc:  # noqa: BLE001 - the caller still gets a voice; the reason is logged
-            clog("WARNING", self._session_id, "[CALL ENGINE] agent could not start; using the standard voice",
+        except Exception as exc:  # noqa: BLE001 - reported, then the call ends
+            clog("ERROR", self._session_id, "[CALL ENGINE] agent could not start; call not connected",
                  error=str(exc)[:200])
-            self._agent = None
-            return False
+            raise
         clog("INFO", self._session_id, "[CALL ENGINE] selected=agent", via=self.platform, voice=link.voice_id or "default")
         return True
 
     async def note_call_active(self, source: str) -> bool:
         if self._agent is not None:
             # The call is answered for talk-time and the end report, as on the other engines.
-            self.call_active = True
             if self._answered_at is None:
                 self._answered_at = time.monotonic()
             return await self._agent.note_call_active(source)
