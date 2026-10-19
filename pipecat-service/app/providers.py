@@ -315,36 +315,6 @@ def build_tts(settings: Settings) -> Any:
         logger.info("using mock TTS")
         return MockTTS(sample_rate=settings.bridge_sample_rate)
 
-    if settings.tts_provider == "fish":
-        from pipecat.services.fish.tts import FishAudioTTSService
-
-        kwargs: dict[str, Any] = {
-            "api_key": settings.fish_api_key,
-            "output_format": "pcm",
-            "sample_rate": settings.bridge_sample_rate,
-        }
-        # Voice and model go through Pipecat's `Settings` (the constructor's
-        # `reference_id=` / `model_id=` are deprecated). The voice id is the
-        # per-call voice (the caller's own cloned voice from the relay's
-        # hello, else ASSISTANT_TTS_VOICE_ID); each call builds its own
-        # service, so nothing here is shared between calls.
-        tts_kwargs: dict[str, Any] = {
-            "prosody_speed": settings.tts_speed,
-            "prosody_volume": settings.tts_volume,
-        }
-        if settings.tts_voice_id:
-            tts_kwargs["voice"] = settings.tts_voice_id
-        if settings.tts_model:
-            tts_kwargs["model"] = settings.tts_model
-        # Only passed when explicitly configured; otherwise Fish's defaults apply.
-        if settings.tts_latency:
-            tts_kwargs["latency"] = settings.tts_latency
-        if settings.tts_temperature is not None:
-            tts_kwargs["temperature"] = settings.tts_temperature
-        if settings.tts_top_p is not None:
-            tts_kwargs["top_p"] = settings.tts_top_p
-        kwargs["settings"] = FishAudioTTSService.Settings(**tts_kwargs)
-        return FishAudioTTSService(**kwargs)
 
     raise ValueError(f"unsupported TTS provider {settings.tts_provider!r}")
 

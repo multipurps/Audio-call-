@@ -209,7 +209,7 @@ class TestSettingsDefaults:
         # OpenAI-compatible chat provider for the LLM.
         assert settings.stt_provider == "openai"
         assert settings.llm_provider == "openai"
-        assert settings.tts_provider == "fish"
+        assert settings.tts_provider == "mock"
 
     def test_port_falls_back_to_8080(self):
         assert load_settings({"ASSISTANT_MOCK_MODE": "true"}).port == 8080
@@ -265,16 +265,6 @@ class TestSettingsValidation:
             }
         )
         assert settings.resolved_llm_base_url() == "https://api.openai.com/v1"
-
-    def test_fish_tts_requires_fish_key(self):
-        with pytest.raises(ConfigError, match="FISH_API_KEY is required"):
-            load_settings(
-                {
-                    "ASSISTANT_BRIDGE_SECRET": "a" * 32,
-                    "OPENAI_API_KEY": "x" * 20,
-                    "ASSISTANT_TTS_PROVIDER": "fish",
-                }
-            )
 
     def test_unknown_provider_rejected_with_the_valid_list(self):
         with pytest.raises(ConfigError, match="ASSISTANT_STT_PROVIDER must be one of"):
@@ -337,13 +327,13 @@ class TestSecretHandling:
             {
                 "ASSISTANT_BRIDGE_SECRET": "a" * 32,
                 "OPENAI_API_KEY": "ok_abcdefghijklmnop",
-                "FISH_API_KEY": "fk_abcdefghijklmnop",
+                "XAI_API_KEY": "xai_abcdefghijklmnop",
             }
         )
         secrets = settings.secret_values()
         assert "a" * 32 in secrets
         assert "ok_abcdefghijklmnop" in secrets
-        assert "fk_abcdefghijklmnop" in secrets
+        assert "xai_abcdefghijklmnop" in secrets
 
     def test_no_secrets_in_mock_mode(self):
         assert load_settings({"ASSISTANT_MOCK_MODE": "true"}).secret_values() == ()
@@ -365,7 +355,6 @@ class TestSecretHandling:
     def test_unset_credentials_show_as_unset(self):
         summary = Settings(mock_mode=True).redacted_summary()
         assert summary["bridgeSecret"] == "<unset>"
-        assert summary["fishKey"] == "<unset>"
 
     def test_config_is_immutable(self):
         settings = load_settings({"ASSISTANT_MOCK_MODE": "true"})

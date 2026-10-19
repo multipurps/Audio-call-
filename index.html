@@ -370,13 +370,6 @@
       <div class="field"><label>Full Name</label><div class="inputWrap"><svg class="inputIconSvg" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="1.6"/><path d="M5 20c0-3.87 3.13-7 7-7s7 3.13 7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><input type="text" id="psName" placeholder="Enter Full Name" autocomplete="name"></div></div>
       <div class="field"><label>Language</label><select id="psLanguage"></select></div>
       <div class="field"><label>Country</label><select id="psCountry"></select></div>
-      <div class="field">
-        <label>Your Voice (optional)</label>
-        <div class="socialRow">
-          <button class="secondaryBtn" id="psRecordBtn" type="button">Record</button>
-          <button class="secondaryBtn" id="psUploadBtn" type="button">Upload</button>
-        </div>
-      </div>
       <button class="primaryBtn" id="psSubmit" style="margin-top:6px;">Finish</button>
       <div class="authHint" id="psHint"></div>
     </div>
@@ -1110,7 +1103,6 @@
     <div class="segmented" id="voiceTypeGroup" style="margin-bottom:6px;">
       <button class="segmentedBtn active" data-vtype="standard">Standard</button>
       <button class="segmentedBtn" data-vtype="custom">Custom</button>
-      <button class="segmentedBtn" data-vtype="test">Agent</button>
     </div>
 
     <div id="voicePaneStandard">
@@ -1120,29 +1112,7 @@
     </div>
 
     <div id="voicePaneCustom" class="hidden">
-      <div class="sectionLabel">Voice</div>
-      <p class="hint" id="voiceRecordStatus" style="margin:0 0 12px;">A voice you create from a recording. Emysa speaks as you.</p>
-      <div class="previewRow voiceCard hidden" id="voicePreviewRow" data-select-custom>
-        <button class="playCircleBtn" id="voicePreviewBtn" aria-label="Play preview">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-        </button>
-        <div class="cBody">
-          <div class="cValue">Your cloned voice</div>
-          <div class="voiceMeta">Custom &middot; ready</div>
-        </div>
-        <svg class="voiceCheck" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <button type="button" id="deleteVoiceBtn" aria-label="Delete cloned voice"><svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-      </div>
-      <div class="voiceAddHead" id="voiceAddHead"><span>+</span> Add New Voice</div>
-      <div id="voiceCloneSection" style="display:flex; gap:10px;">
-        <button class="secondaryBtn" id="recordVoiceBtn">Record</button>
-        <button class="secondaryBtn" id="uploadVoiceBtn">Upload</button>
-      </div>
-      <input type="file" id="voiceFileInput" accept="audio/*,.m4a,.mp3,.wav,.aac,.caf,.mp4" style="display:none;">
-      <audio id="voicePreviewAudio" style="display:none;"></audio>
-    </div>
-
-    <div id="voicePaneTest" class="hidden">
+      <p class="hint" style="margin:0 0 12px;">Your own voice, cloned on xAI. Emysa speaks as you on calls.</p>
       <div id="agentVoiceList"></div>
     </div>
 

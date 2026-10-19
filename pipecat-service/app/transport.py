@@ -174,10 +174,7 @@ class AcafBridge:
         raw_voice = hello.extra.get("voiceId")
         voice_id = sanitize_voice_id(raw_voice)
         if voice_id:
-            call_settings = dataclasses.replace(
-                self._settings, tts_voice_id=voice_id, tts_voice_is_per_call=True
-            )
-            clog("INFO", self.session.session_id, "using per-user voice", voiceIdTail=voice_id[-4:])
+            clog("INFO", self.session.session_id, "relay voice ignored; the Custom voice runs on the agent", voiceIdTail=voice_id[-4:])
         elif raw_voice:
             clog("WARNING", self.session.session_id, "ignoring invalid voiceId; using default voice")
         self.conversation = create_conversation(

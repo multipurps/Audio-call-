@@ -194,22 +194,6 @@ def caller_pcm():
 
 # ---------------------------------------------------------------- routing / config
 
-def test_engine_routing():
-    base = {"ASSISTANT_BRIDGE_SECRET": "x" * 32, "OPENAI_API_KEY": "sk-test-key-value-123456", "FISH_API_KEY": "fk_test_key_value_123456"}
-    import dataclasses
-
-    s = load_settings(base)
-    assert s.engine_for_call() == "live"
-    assert dataclasses.replace(s, tts_voice_id="d" * 10, tts_voice_is_per_call=False).engine_for_call() == "live", "a default env voice must not force classic"
-    assert dataclasses.replace(s, tts_voice_id="c" * 10, tts_voice_is_per_call=True).engine_for_call() == "classic", "a user's clone stays on Fish"
-    assert load_settings({**base, "ASSISTANT_CALL_ENGINE": "classic"}).engine_for_call() == "classic"
-    forced = dataclasses.replace(load_settings({**base, "ASSISTANT_CALL_ENGINE": "live"}), tts_voice_is_per_call=True)
-    assert forced.engine_for_call() == "classic", "a cloned voice never runs on GPT-Live, even when live is forced"
-    assert load_settings({**base, "ASSISTANT_MOCK_MODE": "true"}).engine_for_call() == "classic"
-    with pytest.raises(Exception):
-        load_settings({**base, "ASSISTANT_CALL_ENGINE": "banana"}).validate({})
-
-
 def test_deepgram_env_falls_back_to_openai_and_the_model_name_does_not_leak():
     env = {"ASSISTANT_BRIDGE_SECRET": "x" * 32, "OPENAI_API_KEY": "sk-test-key-value-123456", "FISH_API_KEY": "fk_test_key_value_123456",
            "ASSISTANT_STT_PROVIDER": "deepgram", "ASSISTANT_STT_MODEL": "nova-3-general"}
@@ -327,45 +311,6 @@ async def test_operator_note_is_silent_context(fake, monkeypatch):
         await conv.stop("test")
 
 
-async def test_clone_voice_call_stays_on_classic(fake, monkeypatch):
-    conv, *_ = make_live_conversation(fake, monkeypatch, voice_clone=True)
-    assert conv.engine == "classic"
-    assert fake.connections == 0
-
-
-async def test_kill_switch_forces_classic(fake, monkeypatch):
-    conv, *_ = make_live_conversation(fake, monkeypatch, env_extra={"ASSISTANT_CALL_ENGINE": "classic"})
-    assert conv.engine == "classic"
-
-
-async def test_falls_back_to_classic_when_the_live_session_cannot_start(fake, monkeypatch):
-    """No access to gpt-live-1 (or the API is down) must cost seconds, not the call."""
-    fake.refuse_sessions = True
-    ended: list[str] = []
-
-    async def on_ended(reason):
-        ended.append(reason)
-
-    conv, out, ctl, transcript, ctx = make_live_conversation(
-        fake, monkeypatch, env_extra={"ASSISTANT_LIVE_START_TIMEOUT_SECS": "2"}, on_ended=on_ended
-    )
-    await conv.start()
-    try:
-        assert conv.engine == "live"
-        await conv.note_call_active("relay-signal")
-        for _ in range(80):
-            if conv.engine == "classic":
-                break
-            await asyncio.sleep(0.1)
-        assert conv.engine == "classic", "the call must switch engines"
-        assert conv.stats()["engine"] == "classic"
-        await asyncio.sleep(0.5)
-        assert ended == [], f"switching engines must not end the call: {ended}"
-        assert conv._task is not None and conv._run_task is not None and not conv._run_task.done(), "classic pipeline is running"
-    finally:
-        await conv.stop("test")
-
-
 # ---------------------------------------------------------------- per-user voice + automatic engine
 
 def _prefs(**kw):
@@ -400,32 +345,6 @@ async def test_unknown_live_voice_is_never_forwarded(fake, monkeypatch):
     await conv.start()
     try:
         assert conv._settings.live_voice == "gleam" and conv._settings.live_voice_source == "env-default"
-    finally:
-        await conv.stop("test")
-
-
-async def test_selected_custom_voice_runs_classic_even_if_a_live_voice_is_saved(fake, monkeypatch):
-    import app.conversation as conv_mod
-
-    monkeypatch.setattr(conv_mod, "fetch_voice_prefs", _prefs(live_voice_id="gleam", use_custom_voice=True, custom_voice_id="cloneVoice12345"))
-    conv, *_ = make_live_conversation(fake, monkeypatch)
-    conv._launch_pipeline = lambda: asyncio.sleep(0)  # routing only; no real pipeline needed
-    await conv.start()
-    try:
-        assert conv.engine == "classic"
-        assert conv._settings.tts_voice_id == "cloneVoice12345"
-    finally:
-        await conv.stop("test")
-
-
-async def test_choosing_a_standard_voice_beats_the_relays_clone(fake, monkeypatch):
-    import app.conversation as conv_mod
-
-    monkeypatch.setattr(conv_mod, "fetch_voice_prefs", _prefs(live_voice_id="gleam", use_custom_voice=False, custom_voice_id="cloneVoice12345"))
-    conv, *_ = make_live_conversation(fake, monkeypatch, voice_clone=True)
-    await conv.start()
-    try:
-        assert conv.engine == "live" and conv._settings.tts_voice_is_per_call is False
     finally:
         await conv.stop("test")
 

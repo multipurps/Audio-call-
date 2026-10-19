@@ -35,7 +35,6 @@ def _prewarm_blocking(mock_mode: bool) -> None:
 
     if not mock_mode:
         import pipecat.services.openai.live.llm  # noqa: F401
-        import pipecat.services.fish.tts  # noqa: F401
         import pipecat.services.openai.llm  # noqa: F401
         import pipecat.services.openai.stt  # noqa: F401
 

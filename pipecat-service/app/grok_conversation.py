@@ -31,7 +31,7 @@ class AgentLink:
 
 
 async def fetch_agent_link(settings: Settings, user_id: str | None, session_id: str) -> AgentLink | None:
-    """The user's Agent choice, or None when they use another voice (or the read fails)."""
+    """The user's Custom (Grok) choice, or None when they use a Standard voice. A failed read raises."""
     url = getattr(settings, "supabase_url", None)
     service_key = getattr(settings, "supabase_service_role_key", None)
     if getattr(settings, "mock_mode", False) or not user_id or not url or not service_key:
@@ -42,9 +42,9 @@ async def fetch_agent_link(settings: Settings, user_id: str | None, session_id: 
             "user_agents", select="voice_id,active",
             filters={"user_id": f"eq.{user_id}", "active": "eq.true"}, limit=1,
         )
-    except Exception as exc:  # noqa: BLE001 - a read problem means the call does not use the agent
-        logger.warning("agent lookup failed session=%s error=%s", session_id, type(exc).__name__)
-        return None
+    except Exception as exc:  # noqa: BLE001 - the Custom voice must not silently become GPT-Live
+        logger.error("agent lookup failed session=%s error=%s; call not connected", session_id, type(exc).__name__)
+        raise RuntimeError("the Custom voice could not be checked; call not connected") from None
     finally:
         await rest.aclose()
     if not rows:

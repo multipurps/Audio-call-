@@ -1709,14 +1709,6 @@ document.querySelectorAll('.callChannelItem').forEach((btn) => {
     setCallChannel(channel);
   });
 });
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
 
 // ---------- Contacts (so the assistant can call people by name) ----------
 let savedContacts = [];
@@ -4727,18 +4719,6 @@ document.querySelectorAll('.themeSwatch').forEach((sw) => {
 applyTheme(localStorage.getItem('theme'));
 
 // ---------- voice cloning ----------
-async function refreshVoiceStatus() {
-  const resp = await authedFetch('/api/voice-clone');
-  if (!resp.ok) return;
-  const { status } = await resp.json();
-  const ready = status === 'ready';
-  $('voiceCloneSection').style.display = ready ? 'none' : 'flex';
-  $('voiceAddHead').classList.toggle('hidden', ready);
-  $('voicePreviewRow').classList.toggle('hidden', !ready);
-  $('voiceRecordStatus').textContent = status === 'pending' ? 'Cloning your voice…' : status === 'failed' ? 'Cloning failed.' : 'A voice you create from a recording. Emysa speaks as you.';
-  loadVoicePrefs();
-}
-
 // ---------- voice settings: Standard (GPT-Live voices) + Custom (cloned voice) ----------
 // Two separate choices. Standard saves live_voice_id; Custom is the cloned (Fish) voice. The call
 // engine is picked automatically from which one is selected - it is never shown or chosen here.
@@ -4761,7 +4741,7 @@ function renderVoiceSettings() {
   if (!voicePrefs) return;
   const savedName = agentState?.active
     ? (agentState.voiceName ? `Emysa · ${agentState.voiceName}` : 'Emysa agent')
-    : (voicePrefs.useCustomVoice ? 'Your cloned voice' : (voicePrefs.liveVoiceName || 'Not chosen yet'));
+    : (voicePrefs.liveVoiceName || 'Not chosen yet');
   $('currentVoiceName').textContent = savedName;
   const list = $('liveVoiceList');
   list.textContent = '';
@@ -4778,7 +4758,6 @@ function renderVoiceSettings() {
     card.addEventListener('click', () => { haptic(); voicePending = { type: 'standard', liveVoiceId: v.id }; renderVoiceSettings(); });
     list.appendChild(card);
   }
-  $('voicePreviewRow').classList.toggle('selected', voicePending.type === 'custom');
   $('voiceApplyBtn').disabled = !voiceIsDirty()
     || (voicePending.type === 'standard' && !voicePending.liveVoiceId)
     || (voicePending.type === 'agent' && !voicePending.agentVoiceId);
@@ -4790,18 +4769,16 @@ async function loadVoicePrefs() {
   if (!resp.ok) return;
   voicePrefs = await resp.json();
   await loadAgentState();
-  const custom = voicePrefs.customVoice?.ready && voicePrefs.useCustomVoice;
   voicePending = agentState?.active
     ? { type: 'agent', agentVoiceId: agentState.voiceId }
-    : { type: custom ? 'custom' : 'standard', liveVoiceId: voicePrefs.liveVoiceId };
+    : { type: 'standard', liveVoiceId: voicePrefs.liveVoiceId };
   renderVoiceSettings();
   prefetchLivePreviews(voicePrefs.voices || []);
 }
 
-// Standard (GPT-Live voices) or Custom (the user's cloned voice). The Agent option is a placeholder.
+// The voice in charge: Custom (Grok agent) when it is on, otherwise Standard (GPT-Live).
 function savedVoiceType() {
-  if (agentState?.active) return 'agent';
-  return voicePrefs?.useCustomVoice ? 'custom' : 'standard';
+  return agentState?.active ? 'agent' : 'standard';
 }
 
 // ---- Agent voice: the Emysa agent. The voice is picked here, like Standard, with Apply Changes. ----
@@ -4893,20 +4870,17 @@ function renderAgentVoices() {
   if (voices.length) prefetchAgentPreviews(voices);
 }
 function showVoiceTab(which) {
-  if (which === 'test' && agentState?.active) { voicePending = { type: 'agent', agentVoiceId: agentState.voiceId }; }
-  else if (which === 'test') { voicePending = { type: 'agent', agentVoiceId: null }; }
-  else if (voicePending.type === 'agent') { voicePending = { type: voicePrefs?.useCustomVoice ? 'custom' : 'standard', liveVoiceId: voicePrefs?.liveVoiceId ?? null }; }
+  // Two choices, Standard (GPT-Live voices) and Custom (your own voice on the Grok agent).
+  // Whichever is selected is the default for calls.
+  voicePending = which === 'custom'
+    ? { type: 'agent', agentVoiceId: agentState?.active ? agentState.voiceId : null }
+    : { type: 'standard', liveVoiceId: voicePrefs?.liveVoiceId ?? null };
   document.querySelectorAll('#voiceTypeGroup .segmentedBtn').forEach((b) => b.classList.toggle('active', b.dataset.vtype === which));
   $('voicePaneStandard').classList.toggle('hidden', which !== 'standard');
   $('voicePaneCustom').classList.toggle('hidden', which !== 'custom');
-  $('voicePaneTest').classList.toggle('hidden', which !== 'test');
   loadAgentState();
 }
 document.querySelectorAll('#voiceTypeGroup .segmentedBtn').forEach((b) => b.addEventListener('click', () => { haptic(); showVoiceTab(b.dataset.vtype); }));
-$('voicePreviewRow').addEventListener('click', () => {
-  if (!voicePrefs?.customVoice?.ready) return;
-  haptic(); voicePending = { ...voicePending, type: 'custom' }; renderVoiceSettings();
-});
 
 // Preset voice previews are downloaded once, kept on this device (IndexedDB, falling back to
 // localStorage) and replayed from there. Bump the version to force a fresh download.
@@ -5016,9 +4990,7 @@ $('voiceApplyBtn').addEventListener('click', async () => {
     renderVoiceSettings();
     return;
   }
-  const body = voicePending.type === 'custom'
-    ? { useCustomVoice: true }
-    : { liveVoiceId: voicePending.liveVoiceId, useCustomVoice: false };
+  const body = { liveVoiceId: voicePending.liveVoiceId };
   const resp = await authedFetch('/api/voice-clone?action=prefs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) { status.textContent = data.error || 'Could not save.'; renderVoiceSettings(); return; }
@@ -5028,100 +5000,7 @@ $('voiceApplyBtn').addEventListener('click', async () => {
   renderVoiceSettings();
 });
 
-async function uploadVoiceClip(blob, mimeType, statusEl = $('voiceRecordStatus')) {
-  statusEl.textContent = 'Uploading…';
-  const audioBase64 = await blobToBase64(blob);
-  const resp = await authedFetch('/api/voice-clone', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ audioBase64, mimeType }),
-  });
-  const data = await resp.json().catch(() => ({}));
-  statusEl.textContent = resp.ok ? 'Voice cloned.' : (data.error || 'Could not clone voice — try a longer, quieter sample.');
-  if (resp.ok) {
-    await authedFetch('/api/voice-clone?action=prefs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ useCustomVoice: true }) }).catch(() => {});
-    refreshVoiceStatus();
-  }
-}
-
-let mediaRecorder, recordedChunks = [];
-async function toggleVoiceRecording(btn, statusEl) {
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop();
-    return;
-  }
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch {
-    statusEl.textContent = 'Microphone access is needed to record.';
-    return;
-  }
-  recordedChunks = [];
-  const recorderMime = ['audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg']
-    .find((t) => window.MediaRecorder?.isTypeSupported?.(t)) || '';
-  mediaRecorder = recorderMime ? new MediaRecorder(stream, { mimeType: recorderMime }) : new MediaRecorder(stream);
-  mediaRecorder.ondataavailable = (e) => recordedChunks.push(e.data);
-  mediaRecorder.onstop = async () => {
-    btn.classList.remove('recording');
-    btn.textContent = 'Record';
-    const actualMime = mediaRecorder.mimeType || recorderMime || 'audio/webm';
-    const blob = new Blob(recordedChunks, { type: actualMime });
-    stream.getTracks().forEach((t) => t.stop());
-    await uploadVoiceClip(blob, actualMime, statusEl);
-  };
-  mediaRecorder.start();
-  btn.classList.add('recording');
-  btn.textContent = 'Stop';
-}
-$('recordVoiceBtn').addEventListener('click', () => toggleVoiceRecording($('recordVoiceBtn'), $('voiceRecordStatus')));
-
-$('uploadVoiceBtn').addEventListener('click', () => $('voiceFileInput').click());
-let voiceUploadStatusEl = null; // where the next file upload reports (onboarding vs profile sheet)
-$('voiceFileInput').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  e.target.value = '';
-  if (!file) return;
-  const statusEl = voiceUploadStatusEl || $('voiceRecordStatus');
-  voiceUploadStatusEl = null;
-  await uploadVoiceClip(file, file.type || 'audio/mpeg', statusEl);
-});
-
-$('voicePreviewBtn').addEventListener('click', async (e) => {
-  e.stopPropagation();
-  const audio = $('voicePreviewAudio');
-  if (audio.src && !audio.paused) { audio.pause(); return; }
-  if (audio.src) { audio.play().catch(() => {}); return; }
-  $('voicePreviewBtn').disabled = true;
-  const resp = await authedFetch('/api/voice-clone?action=preview', { method: 'POST' });
-  const data = await resp.json();
-  $('voicePreviewBtn').disabled = false;
-  if (!resp.ok) { $('voiceRecordStatus').textContent = data.detail ? `${data.error}: ${data.detail}`.slice(0, 300) : (data.error || 'Could not generate a preview.'); return; }
-  audio.src = `data:${data.mimeType};base64,${data.audioBase64}`;
-  audio.play().catch(() => {});
-});
-$('voicePreviewAudio').addEventListener('play', () => { $('voicePreviewBtn').innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>'; });
-$('voicePreviewAudio').addEventListener('pause', () => { $('voicePreviewBtn').innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'; });
-$('voicePreviewAudio').addEventListener('ended', () => { $('voicePreviewBtn').innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'; });
-
-$('deleteVoiceBtn').addEventListener('click', async (e) => {
-  e.stopPropagation();
-  if (!confirm('Delete your cloned voice? You can record a new one after.')) return;
-  const btn = e.currentTarget;
-  btn.disabled = true;
-  try {
-    const r = await authedFetch('/api/voice-clone', { method: 'DELETE' });
-    if (!r.ok) throw new Error('delete failed');
-    $('voicePreviewAudio').removeAttribute('src');
-    setTimeout(refreshVoiceStatus, 250);
-  } catch {
-    $('voiceRecordStatus').textContent = 'Could not delete your voice. Please try again.';
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-$('voiceBtn').addEventListener('click', () => { openSheet('sheet-voice'); refreshVoiceStatus(); });
+$('voiceBtn').addEventListener('click', () => { openSheet('sheet-voice'); loadVoicePrefs(); });
 $('socialCallingBtn').addEventListener('click', () => { openSheet('sheet-social-calling'); loadSocialAccounts(); });
 
 // ---------- Connected accounts (Telegram / WhatsApp) ----------
@@ -5791,8 +5670,6 @@ function showProfileSetup() {
   hint('psHint', '');
   showSetupPanel('panelProfileSetup');
 }
-$('psRecordBtn').addEventListener('click', () => toggleVoiceRecording($('psRecordBtn'), $('psHint')));
-$('psUploadBtn').addEventListener('click', () => { voiceUploadStatusEl = $('psHint'); $('voiceFileInput').click(); });
 $('psSubmit').addEventListener('click', async () => {
   const name = $('psName').value.trim();
   const country = $('psCountry').value;

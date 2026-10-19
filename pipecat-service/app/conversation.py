@@ -926,18 +926,7 @@ class CallConversation(_BaseConversation):
         trainer = trainer_engine(sid)
         # Training call: raw Emysa. The admin's own saved voices and settings never apply.
         prefs = await fetch_voice_prefs(self._settings, uid, sid) if uid and trainer is None else None
-        hello_clone = self._settings.tts_voice_id if self._settings.tts_voice_is_per_call else None
-        custom_id = (prefs.custom_voice_id if prefs and prefs.custom_voice_id else None) or hello_clone
-        use_custom = prefs.use_custom_voice if prefs and prefs.use_custom_voice is not None else True
-        want_custom = bool(custom_id) and use_custom
-
         updates: dict[str, Any] = {}
-        updates: dict[str, Any] = {}
-        if want_custom:
-            updates.update(tts_voice_id=custom_id, tts_voice_is_per_call=True)
-        elif hello_clone:
-            # The user picked a Standard (GPT-Live) voice; the relay's clone must not force classic.
-            updates.update(tts_voice_id=None, tts_voice_is_per_call=False)
         chosen = normalise_live_voice(prefs.live_voice_id) if prefs else None
         if chosen:
             updates.update(live_voice=chosen, live_voice_source="user")
@@ -949,15 +938,7 @@ class CallConversation(_BaseConversation):
 
         self.engine = self._settings.engine_for_call()
         self._first_engine = self.engine
-        cfg = self._settings.call_engine
-        if cfg == "classic":
-            self._engine_reason = "ASSISTANT_CALL_ENGINE=classic (kill switch)"
-        elif want_custom:
-            self._engine_reason = "user has a custom (cloned) voice selected"
-        elif self.engine == "classic":
-            self._engine_reason = "no OPENAI_API_KEY/LUNA_API_KEY for GPT-Live"
-        else:
-            self._engine_reason = "no custom voice selected"
+        self._engine_reason = "user's Standard (GPT-Live) voice" if self.engine == "live" else "mock mode"
         clog(
             "INFO",
             sid,
@@ -965,7 +946,6 @@ class CallConversation(_BaseConversation):
             reason=self._engine_reason,
             userKnown=bool(uid),
             prefsRead=prefs is not None,
-            customVoice=bool(want_custom),
             liveVoice=self._settings.live_voice if self.engine == "live" else "-",
             liveVoiceSource=self._settings.live_voice_source if self.engine == "live" else "-",
             via=self.platform,

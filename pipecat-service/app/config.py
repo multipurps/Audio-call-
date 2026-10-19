@@ -30,13 +30,13 @@ from typing import Mapping
 
 STT_PROVIDERS = ("openai", "mock")
 LLM_PROVIDERS = ("luna", "openai", "mock")
-TTS_PROVIDERS = ("fish", "mock")
+TTS_PROVIDERS = ("mock",)
 #: Voices a user can try from the app (Profile > Voice > Test a voice). They are
 #: chosen per user and per call, never by environment variable, and their API key
 
 DEFAULT_STT_PROVIDER = "openai"
 DEFAULT_LLM_PROVIDER = "openai"
-DEFAULT_TTS_PROVIDER = "fish"
+DEFAULT_TTS_PROVIDER = "mock"
 
 #: "luna" and "openai" both resolve to OpenAI's Chat Completions API -- only
 #: the model and which key the operator prefers differ. (Groq used to be a
@@ -272,7 +272,6 @@ class Settings:
     # -- credentials -----------------------------------------------------
     openai_api_key: str | None = field(default=None, repr=False)
     luna_api_key: str | None = field(default=None, repr=False)
-    fish_api_key: str | None = field(default=None, repr=False)
     #: xAI API key for the Grok speech-to-speech agent. Server-side only; never sent to the app.
     xai_api_key: str | None = field(default=None, repr=False)
 
@@ -333,7 +332,6 @@ class Settings:
             self.bridge_secret,
             self.openai_api_key,
             self.luna_api_key,
-            self.fish_api_key,
             self.xai_api_key,
             self.supabase_service_role_key,
         )
@@ -416,10 +414,6 @@ class Settings:
                 f"LUNA_API_KEY or OPENAI_API_KEY is required when "
                 f"ASSISTANT_LLM_PROVIDER={self.llm_provider}"
             )
-        if self.tts_provider == "fish" and not self.fish_api_key:
-            raise ConfigError(
-                "FISH_API_KEY is required when ASSISTANT_TTS_PROVIDER=fish"
-            )
 
     # -- presentation ----------------------------------------------------
 
@@ -445,7 +439,6 @@ class Settings:
             "llmBaseUrl": self.resolved_llm_base_url(),
             "ttsProvider": self.tts_provider,
             "ttsVoiceId": self.tts_voice_id or "<default>",
-            "fishKey": "<set>" if self.fish_api_key else "<unset>",
             "openaiKey": "<set>" if self.openai_api_key else "<unset>",
             "lunaKey": "<set>" if self.luna_api_key else "<unset>",
             "persistentMemory": self.enable_persistent_memory,
@@ -461,23 +454,12 @@ class Settings:
         return self.openai_api_key or self.luna_api_key
 
     def engine_for_call(self) -> str:
-        """Which engine runs a call: "live" or "classic".
+        """Which engine runs a call: "live" (GPT-Live) or "classic" (mock mode only).
 
-        A cloned voice (Fish) can only be spoken by the classic path, so an
-        "auto" call that carries one stays classic. "live" forces GPT-Live
-        even then (the clone is ignored); "classic" is the kill switch back
-        to the old pipeline. Mock mode is always classic.
+        The Custom voice runs on the Grok agent, which is chosen before this is
+        consulted. Every other call is GPT-Live. There is no fallback between them.
         """
-        if self.mock_mode or self.call_engine == "classic":
-            return "classic"
-        # A cloned or test voice can only be spoken by the classic pipeline
-        # (STT -> Luna -> TTS). GPT-Live is a separate engine and is never used
-        # for these calls, even when ASSISTANT_CALL_ENGINE=live.
-        if self.tts_voice_is_per_call:
-            return "classic"
-        if self.call_engine == "live":
-            return "live"
-        return "live" if self.live_api_key() else "classic"
+        return "classic" if self.mock_mode else "live"
 
     def resolved_llm_base_url(self) -> str:
         return (
@@ -560,7 +542,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         tts_model=_env(env, "ASSISTANT_TTS_MODEL"),
         openai_api_key=_env(env, "OPENAI_API_KEY"),
         luna_api_key=luna_key,
-        fish_api_key=_env(env, "FISH_API_KEY"),
         xai_api_key=_env(env, "XAI_API_KEY"),
         latency_log=_env_bool(env, "ASSISTANT_LATENCY_LOG", True),
         system_prompt=_env(env, "ASSISTANT_SYSTEM_PROMPT"),

@@ -10,19 +10,6 @@ from app.vocal import strip_tts_markers
 BASE = {"ASSISTANT_BRIDGE_SECRET": "x" * 24, "OPENAI_API_KEY": "sk-test-openai-key", "FISH_API_KEY": "fish-test-key-1234"}
 
 
-def test_default_is_still_fish():
-    assert load_settings(dict(BASE)).tts_provider == "fish"
-
-
-def test_cloned_voice_never_uses_gpt_live_even_when_live_is_forced():
-    for engine in ("auto", "live"):
-        env = {**BASE, "ASSISTANT_CALL_ENGINE": engine}
-        s = load_settings(env)
-        assert s.engine_for_call() == "live"  # a normal call can use GPT-Live
-        clone = dataclasses.replace(s, tts_voice_id="fish-clone-id-99999", tts_voice_is_per_call=True)
-        assert clone.engine_for_call() == "classic"
-
-
 def test_fish_tags_are_dropped_for_other_voices():
     assert strip_tts_markers("Oh [laughing] that's great (soft) really").split() == ["Oh", "that's", "great", "really"]
     assert strip_tts_markers("Hi [[END_CALL]] bye").split() == ["Hi", "bye"]

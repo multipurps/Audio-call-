@@ -115,7 +115,7 @@ class TestHealthEndpoints:
         assert response.json()["providers"] == {
             "stt": "openai",
             "llm": "openai",
-            "tts": "fish",
+            "tts": "mock",
         }
 
     def test_health_endpoints_leak_no_secrets(self, real_settings):
