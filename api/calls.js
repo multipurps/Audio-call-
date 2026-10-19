@@ -3,7 +3,7 @@ import { minutesLeft, NO_MINUTES_MESSAGE } from '../lib/billing.js';
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { endCallRow } from '../lib/callHangup.js';
 import { createHmac, randomUUID } from 'node:crypto';
-import { resolveVoiceChoice } from '../lib/voiceChoice.js';
+import { resolveVoiceChoice, agentIsOn } from '../lib/voiceChoice.js';
 import { createChatCompletion, hasConfiguredLlm } from '../lib/llmClient.js';
 import { resolvePersonSession } from '../lib/personSession.js';
 import { normalizePhone } from '../lib/phoneNumbers.js';
@@ -196,16 +196,17 @@ async function appCallStart(req, res, supabase, userId) {
     return res.status(500).json({ error: 'Could not start the call' });
   }
 
+  const engine = (await agentIsOn(supabase, userId)) ? 'agent' : 'gpt-live';
   const exp = Math.floor(Date.now() / 1000) + 600;
   const sig = createHmac('sha256', secret).update(`appcall:${sessionId}:${userId}:${exp}`).digest('hex');
   const token = `${exp}.${userId}.${sig}`;
   const base = wsBase.replace(/\/stream\/?$/, '').replace(/\/+$/, '');
-  console.log(`[voice] app call start call=${row.id} engine=${choice.mode === 'live' ? 'gpt-live' : 'classic'} provider=${choice.provider} voice=${choice.mode === 'custom' ? 'clone' : choice.voiceId} source=${choice.source}`);
+  console.log(`[voice] app call start call=${row.id} engine=${engine} voice=${choice.voiceId} source=${choice.source}`);
   return res.status(200).json({
     callId: row.id,
     sessionId,
-    // Only a Standard (GPT-Live) voice runs GPT-Live; a clone or a test voice is classic.
-    engine: choice.mode === 'live' ? 'gpt-live' : 'classic',
+    // The Custom voice runs on the Grok agent; a Standard voice runs on GPT-Live.
+    engine,
     sampleRate: 16000,
     url: `${base}/app-call/${encodeURIComponent(sessionId)}?token=${encodeURIComponent(token)}`,
   });

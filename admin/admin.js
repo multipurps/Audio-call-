@@ -408,19 +408,19 @@ async function loadCosts() {
     const ro = myRole !== 'owner';
     const field = (k, label) => `<div class="aField"><label>${label} (${currency} per call minute)</label><input type="number" min="0" step="0.001" id="rate_${k}" value="${rates[k] || ''}" placeholder="0"${ro ? ' disabled' : ''}></div>`;
     el.innerHTML = `<div class="aCard"><div class="aHint" style="margin:0 0 12px;">${ro ? 'Provider cost per minute of call time, used to estimate cost and profit. View only.' : 'Enter what each provider costs you per minute of call time, from your own bills. The panel multiplies this by minutes used to estimate cost and profit.'}</div>
-      ${field('twilio', 'Twilio')}${field('fish', 'Fish Audio')}${field('openai', 'OpenAI')}
+      ${field('twilio', 'Twilio')}${field('xai', 'xAI (Grok)')}${field('openai', 'OpenAI')}
       ${ro ? '' : '<button class="aBtn" id="rateSave">Save rates</button>'}<div class="aHint" id="rateHint"></div></div>
       <div class="aGrid" id="rateSummary" style="margin-top:12px;"></div>`;
     const summary = () => {
-      const cost = ['twilio', 'fish', 'openai'].reduce((a, k) => a + (Number($(`rate_${k}`).value) || 0), 0);
+      const cost = ['twilio', 'xai', 'openai'].reduce((a, k) => a + (Number($(`rate_${k}`).value) || 0), 0);
       $('rateSummary').innerHTML = card('Your cost / min', money(cost, currency)) + card('You charge / min', pricePerMin ? money(pricePerMin, currency) : '—', 'avg of paid purchases')
         + (pricePerMin ? card('Margin / min', `<span class="${pricePerMin - cost < 0 ? 'aNeg' : 'aPos'}">${money(pricePerMin - cost, currency)}</span>`, `${((1 - cost / pricePerMin) * 100).toFixed(0)}% of price`, true) : '');
     };
     summary();
-    ['twilio', 'fish', 'openai'].forEach((k) => { $(`rate_${k}`).oninput = summary; });
+    ['twilio', 'xai', 'openai'].forEach((k) => { $(`rate_${k}`).oninput = summary; });
     if (!ro) $('rateSave').onclick = async () => {
       $('rateHint').textContent = 'Saving…';
-      try { await api('rates', { method: 'POST', body: { twilio: $('rate_twilio').value || 0, fish: $('rate_fish').value || 0, openai: $('rate_openai').value || 0 } }); $('rateHint').textContent = 'Saved.'; }
+      try { await api('rates', { method: 'POST', body: { twilio: $('rate_twilio').value || 0, xai: $('rate_xai').value || 0, openai: $('rate_openai').value || 0 } }); $('rateHint').textContent = 'Saved.'; }
       catch (err) { $('rateHint').textContent = err.message; }
     };
   } catch (err) { fail(el, err); }

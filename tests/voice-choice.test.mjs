@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveVoiceChoice, stripSpeechMarkers } from '../lib/voiceChoice.js';
+import { resolveVoiceChoice, stripSpeechMarkers, agentIsOn } from '../lib/voiceChoice.js';
 
 function db({ prefs = null, clone = null, fail = false } = {}) {
   return {
@@ -16,29 +16,21 @@ function db({ prefs = null, clone = null, fail = false } = {}) {
     },
   };
 }
-const ready = { status: 'ready', provider_voice_id: 'fish-abc1234' };
-
-test('ready clone and no explicit Standard choice uses the clone', async () => {
-  const c = await resolveVoiceChoice(db({ clone: ready }), 'u');
-  assert.equal(c.mode, 'custom');
-  assert.equal(c.voiceId, 'fish-abc1234');
-});
-
-test('Standard GPT-Live choice wins over a ready clone', async () => {
-  const c = await resolveVoiceChoice(db({ clone: ready, prefs: { live_voice_id: 'tempo', use_custom_voice: false } }), 'u');
+test('a saved Standard (GPT-Live) voice is used', async () => {
+  const c = await resolveVoiceChoice(db({ prefs: { live_voice_id: 'tempo' } }), 'u');
   assert.deepEqual([c.mode, c.provider, c.voiceId, c.source], ['live', 'gpt-live', 'tempo', 'user']);
 });
 
-test('no clone uses the saved Live voice, never Fish', async () => {
-  const c = await resolveVoiceChoice(db({ prefs: { live_voice_id: 'tempo', use_custom_voice: true } }), 'u');
-  assert.equal(c.provider, 'gpt-live');
-  assert.equal(c.voiceId, 'tempo');
-});
-
-test('nothing saved falls back to a GPT-Live default, not Fish', async () => {
+test('nothing saved falls back to a GPT-Live default', async () => {
   const c = await resolveVoiceChoice(db(), 'u', {});
   assert.equal(c.provider, 'gpt-live');
   assert.equal(c.source, 'env-default');
+});
+
+test('the Custom voice is never returned here; it is the Grok agent', async () => {
+  const c = await resolveVoiceChoice(db({ prefs: { live_voice_id: 'tempo', use_custom_voice: true } }), 'u');
+  assert.equal(c.mode, 'live');
+  assert.equal(c.provider, 'gpt-live');
 });
 
 test('lookup failure still yields a GPT-Live voice and reports it', async () => {
@@ -49,4 +41,11 @@ test('lookup failure still yields a GPT-Live voice and reports it', async () => 
 
 test('speech markers are stripped for GPT-Live', () => {
   assert.equal(stripSpeechMarkers('Hi [laughing] there [[pause]] friend'), 'Hi there friend');
+});
+
+test('agentIsOn reads the Custom switch and counts a read problem as off', async () => {
+  const on = { from: () => ({ select() { return this; }, eq() { return this; }, maybeSingle: async () => ({ data: { active: true } }) }) };
+  const broken = { from: () => ({ select() { return this; }, eq() { return this; }, maybeSingle: async () => { throw new Error('db down'); } }) };
+  assert.equal(await agentIsOn(on, 'u'), true);
+  assert.equal(await agentIsOn(broken, 'u'), false);
 });

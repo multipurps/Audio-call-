@@ -39,16 +39,15 @@ test('app-call-start creates the call row and mints a token matching the pipecat
   assert.equal(row.user_id, 'user-1');
 });
 
-test('GPT-Live always, except when the user chose their ready cloned voice', async () => {
-  const clone = { user_id: 'user-1', status: 'ready', provider_voice_id: 'fish-abc1234' };
-  const chosenClone = await setup(ENV, { voice_profiles: [clone], voice_preferences: [{ user_id: 'user-1', use_custom_voice: true }] });
-  assert.equal((await request(chosenClone.handler, 'app-call-start', {})).data.engine, 'classic');
+test('the call reports the Grok agent when Custom is on, and GPT-Live otherwise', async () => {
+  const customOn = await setup(ENV, { user_agents: [{ user_id: 'user-1', active: true, voice_id: 'nlbqfwie' }] });
+  assert.equal((await request(customOn.handler, 'app-call-start', {})).data.engine, 'agent');
 
-  const chosenStandard = await setup(ENV, { voice_profiles: [clone], voice_preferences: [{ user_id: 'user-1', use_custom_voice: false, live_voice_id: 'tempo' }] });
-  assert.equal((await request(chosenStandard.handler, 'app-call-start', {})).data.engine, 'gpt-live');
+  const standard = await setup(ENV, { voice_preferences: [{ user_id: 'user-1', live_voice_id: 'tempo' }] });
+  assert.equal((await request(standard.handler, 'app-call-start', {})).data.engine, 'gpt-live');
 
-  const noClone = await setup();
-  assert.equal((await request(noClone.handler, 'app-call-start', {})).data.engine, 'gpt-live');
+  const noChoice = await setup();
+  assert.equal((await request(noChoice.handler, 'app-call-start', {})).data.engine, 'gpt-live');
 });
 
 test('app-call-start needs auth, POST, and names missing configuration', async () => {

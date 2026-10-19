@@ -345,7 +345,7 @@ async function fetchAll(build) {
 async function getRates(supabase) {
   const { data } = await supabase.from('admin_settings').select('value').eq('key', 'provider_rates').maybeSingle();
   const v = data?.value || {};
-  return { twilio: Number(v.twilio) || 0, fish: Number(v.fish) || 0, openai: Number(v.openai) || 0 };
+  return { twilio: Number(v.twilio) || 0, xai: Number(v.xai) || 0, openai: Number(v.openai) || 0 };
 }
 
 async function overview(req, res, supabase) {
@@ -370,7 +370,7 @@ async function overview(req, res, supabase) {
       minutesUsed += m;
       const d = series.get(String(c.created_at).slice(0, 10)); if (d) d.minutes += m;
     }
-    const ratePerMin = rates.twilio + rates.fish + rates.openai;
+    const ratePerMin = rates.twilio + rates.xai + rates.openai;
     const revenue = sold.reduce((a, p) => a + Number(p.amount), 0);
     return res.status(200).json({
       days, currency, revenue, allTimeRevenue: paid.reduce((a, p) => a + Number(p.amount), 0),
@@ -409,7 +409,7 @@ async function grantCredit(req, res, supabase) {
 async function rates(req, res, supabase) {
   if (req.method === 'POST') {
     const clean = {};
-    for (const k of ['twilio', 'fish', 'openai']) {
+    for (const k of ['twilio', 'xai', 'openai']) {
       const n = Number(req.body?.[k] ?? 0);
       if (!Number.isFinite(n) || n < 0 || n > 1000) return res.status(400).json({ error: `Invalid ${k} rate` });
       clean[k] = n;

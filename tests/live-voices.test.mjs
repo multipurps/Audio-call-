@@ -46,19 +46,12 @@ test('unknown Live voices are rejected, including the old marin default', async 
   }
 });
 
-test('custom voice can only be selected when a clone is ready; selecting Standard turns it off', async () => {
-  const none = await prefsApi();
-  assert.equal((await request(none.handler, 'prefs', { useCustomVoice: true }, { method: 'PUT' })).code, 400);
-
-  const { db, handler } = await prefsApi({ voice_profiles: structuredClone(ready) });
-  let r = await request(handler, 'prefs', {}, { method: 'GET' });
-  assert.equal(r.data.useCustomVoice, true, 'existing cloners keep their clone until they pick a Standard voice');
-  r = await request(handler, 'prefs', { liveVoiceId: 'gleam', useCustomVoice: false }, { method: 'PUT' });
+test('the Custom voice is chosen on the Custom tab, not in the Standard preferences', async () => {
+  const { handler } = await prefsApi();
+  assert.equal((await request(handler, 'prefs', { useCustomVoice: true }, { method: 'PUT' })).code, 400);
+  const r = await request(handler, 'prefs', { liveVoiceId: 'gleam' }, { method: 'PUT' });
+  assert.equal(r.code, 200);
   assert.equal(r.data.useCustomVoice, false);
-  assert.equal(db.tables.voice_preferences[0].use_custom_voice, false);
-  r = await request(handler, 'prefs', { useCustomVoice: true }, { method: 'PUT' });
-  assert.equal(r.data.useCustomVoice, true);
-  assert.equal(r.data.liveVoiceId, 'gleam', 'switching back keeps the saved Live voice');
 });
 
 test('prefs require sign-in', async () => {

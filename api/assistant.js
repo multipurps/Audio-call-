@@ -11,7 +11,7 @@ import { resolveVoiceChoice, stripSpeechMarkers } from '../lib/voiceChoice.js';
 import { resolveCallPlatform } from '../lib/callPlatform.js';
 import { signPendingCall, verifyPendingCall } from '../lib/pendingCall.js';
 import { liveVoiceSpeak } from '../lib/liveVoicePreview.js';
-import { formatEmotionStateBlock, extractAndStripControlTags, shouldEndCall, toFishTtsText } from '../lib/emotionEngine.js';
+import { formatEmotionStateBlock, extractAndStripControlTags, shouldEndCall } from '../lib/emotionEngine.js';
 import { createChatCompletion, hasConfiguredLlm } from '../lib/llmClient.js';
 import { prepareTurnContext, consolidateAndStoreMemories, inferMemoryType } from '../lib/memoryManager.js';
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
@@ -95,7 +95,7 @@ async function savePushSubscription(req, res, supabase, userId) {
 }
 
 
-// Synthesizes a short line of text through Fish Audio so the in-app "call"
+// Synthesizes a short line of text through GPT-Live so the in-app "call"
 // with Emysa is an actual voice back-and-forth, not text you have to read —
 // used for the assistant's own replies on the call screen, independent of
 // whether voice *input* (transcription) is working, so a Groq outage
@@ -105,12 +105,10 @@ async function speakText(req, res, supabase, userId) {
   const { text } = req.body || {};
   if (typeof text !== 'string' || !text.trim() || text.length > 4000) return res.status(400).json({ error: 'Text required (maximum 4000 characters)' });
 
-  // The in-app call speaks in the voice the user CHOSE in Profile -> Voice: their
-  // cloned voice (Fish) when it is selected and ready, otherwise their Standard
-  // GPT-Live voice. It never silently falls back to a default Fish voice; a
-  // failure is reported to the call screen instead.
+  // The in-app call speaks in the Standard voice the user chose (GPT-Live). A failure is
+  // reported to the call screen instead of being hidden.
   const choice = await resolveVoiceChoice(supabase, userId);
-  console.log(`[voice] in-app speak provider=${choice.provider} voice=${choice.mode === 'custom' ? `clone...${String(choice.voiceId).slice(-4)}` : choice.voiceId} source=${choice.source}${choice.lookupError ? ' lookupError=1' : ''}`);
+  console.log(`[voice] in-app speak provider=${choice.provider} voice=${choice.voiceId} source=${choice.source}${choice.lookupError ? ' lookupError=1' : ''}`);
 
 
   if (choice.mode === 'live') {
@@ -126,39 +124,6 @@ async function speakText(req, res, supabase, userId) {
     }
   }
 
-  const fishKey = process.env.FISH_API_KEY;
-  if (!fishKey) return res.status(500).json({ error: 'Your cloned voice is selected but voice output is not configured (missing FISH_API_KEY)' });
-
-  // This HTTP path speaks Fish model s1, whose vocalisation tags are the
-  // (paren) set. Emysa's canonical markers ([laughing] etc.) are translated
-  // to the model's REAL audio tags so laughs/sighs/throat-clears are heard,
-  // internal [[...]] control tags are stripped, and unknown tags are dropped
-  // rather than read out loud. Verified against Fish's emotion-control docs.
-  const spokenText = toFishTtsText(text, { model: 's1' }).trim().slice(0, 600);
-  if (!spokenText) return res.status(400).json({ error: 'Text required' });
-  const referenceId = choice.voiceId;
-
-  try {
-    const resp = await fetch('https://api.fish.audio/v1/tts', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${fishKey}`, 'Content-Type': 'application/json', model: 's1' },
-      body: JSON.stringify({
-        text: spokenText, reference_id: referenceId, format: 'mp3',
-        // Fish defaults (speed 1, 0 dB) came out rushed and loud on the call.
-        prosody: { speed: Number(process.env.FISH_TTS_SPEED) || 0.92, volume: Number.isFinite(Number(process.env.FISH_TTS_VOLUME)) && process.env.FISH_TTS_VOLUME ? Number(process.env.FISH_TTS_VOLUME) : -3 },
-      }),
-    });
-    if (!resp.ok) {
-      const detail = await resp.text().catch(() => '');
-      console.error(`speakText: Fish Audio TTS rejected the request (status ${resp.status}):`, detail.slice(0, 500));
-      return res.status(502).json({ error: 'Speech generation failed', detail: detail.slice(0, 300) });
-    }
-    const audioBuf = Buffer.from(await resp.arrayBuffer());
-    return res.status(200).json({ audioBase64: audioBuf.toString('base64'), mimeType: 'audio/mpeg', voice: 'clone', provider: 'fish' });
-  } catch (err) {
-    console.error('speakText: request to Fish Audio threw:', err);
-    return res.status(500).json({ error: 'Speech generation failed', detail: String(err?.message || err).slice(0, 300) });
-  }
 }
 
 async function listSessions(req, res, supabase, userId) {
