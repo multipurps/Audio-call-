@@ -862,7 +862,7 @@ class CallConversation(_BaseConversation):
         if not uid or trainer_engine(self._session_id) is not None:
             return False
         from app.call_context import build_extra_context
-        from app.elevenlabs_conversation import ElevenLabsAgentConversation, fetch_agent_link
+        from app.grok_conversation import GrokAgentConversation, fetch_agent_link
         from app.live import build_live_system_prompt
 
         link = await fetch_agent_link(self._settings, uid, self._session_id)
@@ -879,7 +879,7 @@ class CallConversation(_BaseConversation):
         )
         extra = build_extra_context(self.call_context) if self.call_context is not None else None
         prompt = build_live_system_prompt(self._settings, extra, self.call_context, global_block)
-        self._agent = ElevenLabsAgentConversation(
+        self._agent = GrokAgentConversation(
             settings=self._settings,
             session_id=self._session_id,
             serializer=self._serializer,
@@ -887,7 +887,7 @@ class CallConversation(_BaseConversation):
             send_control=self._send_control,
             on_ended=self._on_ended,
             prompt=prompt,
-            first_message=self.greeting_text,
+            greeting=self.greeting_text,
             voice_id=link.voice_id,
             transcript=self.transcript,
         )

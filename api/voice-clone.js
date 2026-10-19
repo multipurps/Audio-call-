@@ -13,9 +13,9 @@ export default async function handler(req, res) {
   const userId = await getAuthedUserId(req, supabase);
   if (!userId) return res.status(401).json({ error: 'Not signed in' });
 
-  // The Emysa agent (ElevenLabs). Checked before the Fish key so it works without one.
+  // The Emysa agent (Grok speech-to-speech). Checked before the other voice settings.
   if (req.query?.target === 'agent') {
-    const elevenKey = await getSecret(supabase, 'ELEVENLABS_API_KEY');
+    const elevenKey = await getSecret(supabase, 'XAI_API_KEY');
     if (!elevenKey) return res.status(500).json({ error: 'The agent is not configured on the server' });
     return agentRoute(req, res, supabase, userId, elevenKey);
   }
