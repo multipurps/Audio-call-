@@ -1104,6 +1104,7 @@
       <button class="segmentedBtn active" data-vtype="standard">Standard</button>
       <button class="segmentedBtn" data-vtype="custom">Custom</button><button class="segmentedBtn" data-vtype="live">Live</button>
     </div>
+    <p class="hint voiceStatus" id="voiceApplyStatus"></p>
 
     <div id="voicePaneStandard">
       <div class="sectionLabel">Voice</div>
@@ -1135,10 +1136,7 @@
     <audio id="liveVoiceAudio" style="display:none;"></audio>
 
   </div>
-  <div class="voiceApplyBar" id="voiceApplyBar">
-    <button class="primaryBtn" id="voiceApplyBtn" disabled>Apply Changes</button>
-    <p class="hint" id="voiceApplyStatus"></p>
-  </div>
+  <button class="primaryBtn voiceApplyFloat" id="voiceApplyBtn" disabled>Apply Changes</button>
 </div>
 
 <!-- ---------- Connected accounts (Telegram / WhatsApp) ---------- -->

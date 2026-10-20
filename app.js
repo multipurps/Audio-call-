@@ -4910,18 +4910,16 @@ $('cloneBtn').addEventListener('click', async () => {
     btn.disabled = false;
   }
 });
-// The Apply bar steps out of the way while a preset list is being scrolled, and returns when it stops.
-(function attachVoiceListScroll() {
+// The floating Apply button steps out of the way while the screen or a voice list scrolls, and returns when it stops.
+(function attachVoiceScroll() {
   let timer = null;
-  for (const id of ['liveVoiceList', 'agentVoiceListCustom', 'agentVoiceListLive']) {
-    const el = $(id);
-    if (!el) continue;
-    el.addEventListener('scroll', () => {
-      $('voiceApplyBar').classList.add('isHidden');
-      clearTimeout(timer);
-      timer = setTimeout(() => $('voiceApplyBar').classList.remove('isHidden'), 350);
-    }, { passive: true });
-  }
+  const hide = () => {
+    $('voiceApplyBtn').classList.add('isHidden');
+    clearTimeout(timer);
+    timer = setTimeout(() => $('voiceApplyBtn').classList.remove('isHidden'), 350);
+  };
+  const targets = [document.querySelector('#sheet-voice .sheetBody'), ...['liveVoiceList', 'agentVoiceListCustom', 'agentVoiceListLive'].map($)];
+  for (const el of targets) if (el) el.addEventListener('scroll', hide, { passive: true });
 })();
 function showVoiceTab(which) {
   // Standard = GPT-Live presets. Custom = your cloned voice. Live = built-in presets.

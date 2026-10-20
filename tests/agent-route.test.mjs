@@ -39,7 +39,7 @@ test('status: the Live presets are always listed; custom voices come from the wo
 test('status: with no Inworld key, custom says why and live still works', async () => {
   const res = fakeRes();
   await agentRoute({ method: 'GET', query: { action: 'status' } }, res, fakeSupabase(), 'u1', { inworld: '' });
-  assert.match(res.body.custom.error, /not set up/);
+  assert.match(res.body.custom.error, /not available/);
   assert.equal(res.body.live.voices.length, LIVE_VOICES.length);
 });
 
@@ -129,4 +129,35 @@ test('clone: a good clip creates the voice in the user’s workspace and returns
   assert.equal(sent.body.displayName, 'My voice');
   assert.deepEqual(sent.body.voiceSamples, ['AAAA']);
   assert.equal(sent.auth, 'Basic key123');
+});
+
+test('preview: JSON audio from the speech service is accepted as well as raw audio', async () => {
+  globalThis.fetch = async () => ({
+    ok: true, status: 200,
+    headers: { get: () => 'application/json' },
+    json: async () => ({ audio: 'AQID', content_type: 'audio/mpeg', duration: 2 }),
+  });
+  const res = fakeRes();
+  await agentRoute({ method: 'GET', query: { action: 'preview', provider: 'live', voice: 'eve' } }, res, fakeSupabase(), 'u1', { xai: 'k' });
+  assert.equal(res.code, 200);
+  assert.equal(res.body.audioBase64, 'AQID');
+  assert.equal(res.body.mimeType, 'audio/mpeg');
+});
+
+test('preview: a refusal is logged with its reason, and the user only sees a neutral message', async () => {
+  const logged = [];
+  const orig = console.error;
+  console.error = (...a) => logged.push(a.join(' '));
+  try {
+    globalThis.fetch = async () => ({ ok: false, status: 403, text: async () => '{"error":"no credits"}', headers: { get: () => 'application/json' } });
+    const res = fakeRes();
+    await agentRoute({ method: 'GET', query: { action: 'preview', provider: 'live', voice: 'eve' } }, res, fakeSupabase(), 'u1', { xai: 'secret-key-value' });
+    assert.equal(res.code, 502);
+    assert.equal(res.body.error, 'Preview is not available right now');
+    assert.match(logged.join('\n'), /status=403.*no credits/);
+    assert.equal(logged.join('\n').includes('secret-key-value'), false);
+    assert.equal(JSON.stringify(res.body).toLowerCase().match(/xai|grok|inworld/), null);
+  } finally {
+    console.error = orig;
+  }
 });
