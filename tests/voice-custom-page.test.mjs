@@ -43,3 +43,23 @@ test('leaving the Custom tab mid-recording releases the microphone', () => {
 test('an empty Custom page shows no "no voices yet" sentence', () => {
   assert.ok(!app.includes('You have no custom voices yet'));
 });
+
+test('every code shown on a page has a Copy button', () => {
+  // value element -> its copy button
+  const pairs = {
+    lineCodeValue: 'lineCodeCopy',            // Verify Your Number
+    whatsappPairingCodeValue: 'whatsappPairingCopy', // Connected accounts > WhatsApp
+    waCodeValue: 'waCodeCopy',                // Link WhatsApp (first-time setup)
+  };
+  for (const [value, copy] of Object.entries(pairs)) {
+    assert.ok(html.includes(`id="${value}"`), value);
+    assert.ok(html.includes(`id="${copy}"`), copy);
+  }
+  assert.match(html, /id="whatsappPairingCopy"[^>]*data-copy-from="whatsappPairingCodeValue"/);
+  assert.match(html, /id="lineCodeCopy"[^>]*data-copy-from="lineCodeValue"/);
+  assert.match(html, /id="referralCopyBtn"/); // Referrals
+  // the shared handler copies the raw code, and the pages that show a code store it
+  assert.match(app, /document\.querySelectorAll\('\[data-copy-from\]'\)/);
+  assert.match(app, /\$\('whatsappPairingCodeValue'\)\.dataset\.code = code;\n  \$\('whatsappPairingCopy'\)\.disabled = !code;/);
+  assert.match(app, /\$\('lineCodeValue'\)\.dataset\.code = line\.validationCode \|\| '';/);
+});

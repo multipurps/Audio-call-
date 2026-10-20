@@ -5297,6 +5297,8 @@ function watchWhatsappStatus() {
 function showWhatsappPairingCode(code) {
   $('whatsappPairingCodeWrap').classList.remove('hidden');
   $('whatsappPairingCodeValue').textContent = code.split('').join(' ');
+  $('whatsappPairingCodeValue').dataset.code = code;
+  $('whatsappPairingCopy').disabled = !code;
 }
 
 async function startWhatsappLink() {
@@ -5556,6 +5558,8 @@ $('lineRemoveLink').addEventListener('click', async () => {
 function showLineCode(line) {
   $('lineCodeSub').textContent = `You will get a call on ${line.phoneNumber}. Answer it and enter this code on your keypad.`;
   $('lineCodeValue').textContent = (line.validationCode || '').split('').join(' ') || '------';
+  $('lineCodeValue').dataset.code = line.validationCode || '';
+  $('lineCodeCopy').disabled = !line.validationCode;
   hint('lineCodeHint', 'Waiting for you to enter the code…');
   showSetupPanel('panelLineCode');
   clearInterval(lineVerifyTimer);
@@ -5670,6 +5674,16 @@ document.querySelectorAll('.checkoutCopy').forEach((btn) => btn.addEventListener
   const label = btn.textContent;
   btn.textContent = ok ? 'Link copied!' : 'Could not copy';
   setTimeout(() => { btn.textContent = label; }, 1800);
+}));
+
+// Every code shown on a page has a Copy button: <button data-copy-from="idOfTheCodeElement">.
+document.querySelectorAll('[data-copy-from]').forEach((btn) => btn.addEventListener('click', async () => {
+  const code = document.getElementById(btn.dataset.copyFrom)?.dataset.code;
+  if (!code) return;
+  const label = btn.querySelector('span');
+  const ok = await copyText(code);
+  label.textContent = ok ? 'Copied' : 'Press and hold the code to copy';
+  setTimeout(() => { label.textContent = 'Copy code'; }, 2000);
 }));
 
 $('waCodeCopy').addEventListener('click', async () => {
