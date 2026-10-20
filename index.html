@@ -1117,11 +1117,17 @@
       <div class="sectionLabel">Voice</div>
       <p class="hint" style="margin:0 0 12px;">A voice you create from a recording. Emysa speaks as you.</p>
       <div id="agentVoiceListCustom"></div>
-      <div class="voiceAddHead"><span>+</span> Add New Voice</div>
-      <p class="hint voiceNeeds" id="voiceNeeds">Needs <b>5 to 15 seconds</b> of you speaking clearly. 3 seconds is the minimum.</p>
-      <div id="voiceCloneSection" style="display:flex; gap:10px;">
-        <button type="button" class="secondaryBtn" id="recordVoiceBtn">Record</button>
-        <button type="button" class="secondaryBtn" id="uploadVoiceBtn">Upload</button>
+      <div id="voiceAddSection">
+        <div class="voiceAddHead"><span>+</span> Add New Voice</div>
+        <p class="hint voiceNeeds" id="voiceNeeds">Needs <b>5 to 15 seconds</b> of you speaking clearly. 3 seconds is the minimum.</p>
+        <div id="voiceCloneSection" style="display:flex; gap:10px;">
+          <button type="button" class="secondaryBtn" id="recordVoiceBtn">Record</button>
+          <button type="button" class="secondaryBtn" id="uploadVoiceBtn">Upload</button>
+        </div>
+      </div>
+      <div id="voiceDeleteSection" class="hidden">
+        <p class="hint" style="margin:14px 4px 10px;">You can have one custom voice. Delete it to create a new one.</p>
+        <button type="button" class="secondaryBtn dangerBtn" id="deleteVoiceBtn">Delete voice</button>
       </div>
       <input type="file" id="cloneFile" accept="audio/*,video/mp4,video/quicktime,video/webm,.mp3,.m4a,.aac,.wav,.wave,.caf,.aif,.aiff,.flac,.ogg,.oga,.opus,.webm,.mp4,.mov,.3gp,.amr" style="display:none;">
       <p class="hint voiceCloneStatus" id="cloneStatus"></p>

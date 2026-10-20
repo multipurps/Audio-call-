@@ -4878,6 +4878,10 @@ function renderAgentVoices() {
   const custom = agentState.custom || {};
   const customNote = custom.error || '';
   renderVoiceList('agentVoiceListCustom', custom.voices, 'custom', customNote);
+  // One custom voice per person: with one in place, adding is replaced by deleting.
+  const hasClone = !!custom.voices?.length;
+  $('voiceAddSection').classList.toggle('hidden', hasClone);
+  $('voiceDeleteSection').classList.toggle('hidden', !hasClone);
   renderVoiceList('agentVoiceListLive', agentState.live?.voices, 'live', '');
 }
 function readFileBase64(file) {
@@ -4900,15 +4904,13 @@ function confirmOwnVoice() {
   try { sessionStorage.setItem('voiceConsent', '1'); } catch { /* ignore */ }
   return true;
 }
-function nextVoiceName() {
-  const n = (agentState?.custom?.voices?.length || 0) + 1;
-  return n === 1 ? 'My voice' : `My voice ${n}`;
-}
+function nextVoiceName() { return 'My voice'; } // one custom voice per person
 const fmtClock = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
 
 // Clone from a recorded Blob or a picked File. `btn` is the button the person pressed.
 async function cloneVoiceFrom(blob, btn) {
   const status = $('cloneStatus');
+  if (agentState?.custom?.voices?.length) { status.textContent = 'You already have a custom voice. Delete it to add a new one.'; return; }
   const other = btn === $('recordVoiceBtn') ? $('uploadVoiceBtn') : $('recordVoiceBtn');
   setBtnLoading(btn, true, 'Cloning…');
   other.disabled = true;
@@ -4922,7 +4924,11 @@ async function cloneVoiceFrom(blob, btn) {
       body: JSON.stringify({ name: nextVoiceName(), consent: true, sample: { type: 'audio/wav', data: clip.base64 } }),
     });
     const out = await resp.json().catch(() => ({}));
-    if (!resp.ok) { status.textContent = out.error || 'Could not clone your voice.'; return; }
+    if (!resp.ok) {
+      status.textContent = out.error || 'Could not clone your voice.';
+      if (resp.status === 409) await loadAgentState(); // they already have one: show it, with Delete
+      return;
+    }
     await loadAgentState();
     if (out.voiceId) { voicePending = { type: 'agent', provider: 'custom', agentVoiceId: out.voiceId }; renderVoiceSettings(); }
     status.textContent = 'Your voice is ready. Tap Apply Changes to use it.';
@@ -5000,6 +5006,34 @@ $('cloneFile').addEventListener('change', async () => {
   await cloneVoiceFrom(file, $('uploadVoiceBtn'));
 });
 
+// Delete the custom voice. The server removes it at the provider first; nothing changes here
+// until it says it is gone, so a failed delete leaves the voice in place and can be retried.
+$('deleteVoiceBtn').addEventListener('click', async () => {
+  const btn = $('deleteVoiceBtn');
+  const status = $('cloneStatus');
+  const clone = agentState?.custom?.voices?.[0];
+  if (!clone || btn.disabled) return;
+  if (!confirm('Delete your custom voice? This cannot be undone. If calls use it, they go back to your Standard voice.')) return;
+  $('liveVoiceAudio').pause();
+  setBtnLoading(btn, true, 'Deleting…');
+  status.textContent = '';
+  try {
+    const resp = await authedFetch('/api/voice-clone?target=agent&action=delete', { method: 'DELETE' });
+    const out = await resp.json().catch(() => ({}));
+    if (!resp.ok) { status.textContent = out.error || 'Could not delete your voice. Try again.'; return; }
+    const key = `custom:${clone.id}`;
+    voicePreviewUrls.delete(key);
+    previewStoreDelete(key);
+    voicePending = { type: 'agent', provider: 'custom', agentVoiceId: null };
+    await loadAgentState();
+    status.textContent = 'Your voice was deleted. You can add a new one.';
+  } catch {
+    status.textContent = 'Could not delete your voice. Check your connection and try again.';
+  } finally {
+    setBtnLoading(btn, false);
+  }
+});
+
 // The floating Apply button steps out of the way while the screen or a voice list scrolls, and returns when it stops.
 (function attachVoiceScroll() {
   let timer = null;
@@ -5069,6 +5103,17 @@ async function previewStorePut(id, blob, b64) {
     return;
   } catch { /* fall back */ }
   try { localStorage.setItem(`${PREVIEW_STORE}:${id}`, b64); } catch { /* storage full: stays in memory only */ }
+}
+async function previewStoreDelete(id) {
+  try {
+    const db = await previewDb();
+    await new Promise((resolve) => {
+      const tx = db.transaction('clips', 'readwrite');
+      tx.objectStore('clips').delete(id);
+      tx.oncomplete = tx.onerror = resolve;
+    });
+  } catch { /* nothing stored */ }
+  try { localStorage.removeItem(`${PREVIEW_STORE}:${id}`); } catch { /* ignore */ }
 }
 const previewInflight = new Map();
 function livePreviewUrl(id) {
