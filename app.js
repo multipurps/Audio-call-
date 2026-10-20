@@ -4826,16 +4826,24 @@ async function playVoicePreview(provider, id, btn) {
     audio.onplay = () => { btn.innerHTML = PAUSE_SVG; };
     audio.onpause = audio.onended = () => { btn.innerHTML = PLAY_SVG; };
     await audio.play();
-  } catch (err) {
-    status.textContent = `Could not play the preview: ${err.message}`;
+  } catch {
+    flashPreviewError(btn);
   }
+}
+// A preview that cannot play says so on its own card for a moment, then the card returns to normal.
+function flashPreviewError(btn) {
+  const meta = btn.closest('.voiceCard')?.querySelector('.voiceMeta');
+  if (!meta) return;
+  meta.dataset.original ??= meta.textContent;
+  meta.textContent = 'Preview not available right now';
+  setTimeout(() => { meta.textContent = meta.dataset.original; delete meta.dataset.original; }, 3000);
 }
 const previewPrefetched = new Set();
 async function prefetchVoicePreviews(provider, voices) {
   if (previewPrefetched.has(provider)) return;
   previewPrefetched.add(provider);
   for (const v of voices || []) {
-    try { await voicePreviewUrl(provider, v.id); } catch { /* a tap retries this one */ }
+    try { await voicePreviewUrl(provider, v.id); } catch { return; /* stop here; a tap retries one voice */ }
   }
 }
 function renderVoiceList(containerId, voices, provider, note) {
@@ -4918,13 +4926,15 @@ $('cloneBtn').addEventListener('click', async () => {
     clearTimeout(timer);
     timer = setTimeout(() => $('voiceApplyBtn').classList.remove('isHidden'), 350);
   };
-  const targets = [document.querySelector('#sheet-voice .sheetBody'), ...['liveVoiceList', 'agentVoiceListCustom', 'agentVoiceListLive'].map($)];
-  for (const el of targets) if (el) el.addEventListener('scroll', hide, { passive: true });
+  const body = document.querySelector('#sheet-voice .sheetBody');
+  if (body) body.addEventListener('scroll', hide, { passive: true });
 })();
 function showVoiceTab(which) {
   // Standard = GPT-Live presets. Custom = your cloned voice. Live = built-in presets.
   // Whichever is selected is the default for calls.
   const provider = which === 'custom' ? 'custom' : 'live';
+  $('voiceApplyStatus').textContent = '';
+  $('liveVoiceAudio').pause();
   voicePending = which === 'standard'
     ? { type: 'standard', liveVoiceId: voicePrefs?.liveVoiceId ?? null }
     : { type: 'agent', provider, agentVoiceId: agentState?.active && agentState.provider === provider ? agentState.voiceId : null };

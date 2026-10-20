@@ -1297,10 +1297,9 @@ button.isLoadingIcon::before{position:absolute; top:50%; left:50%; width:16px; h
 @keyframes btnSpin{to{transform:rotate(360deg);}}
 @media (prefers-reduced-motion: reduce){button.isLoading::before{animation-duration:2s;}}
 
-/* Voice sheet: the preset lists scroll inside their own box; Apply floats on its own. */
-#liveVoiceList, #agentVoiceListCustom, #agentVoiceListLive { max-height: 52vh; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-right: 4px; }
+/* Voice sheet: the whole screen scrolls; Apply floats on its own and hides while scrolling. */
 #sheet-voice .sheetBody { padding-bottom: calc(110px + env(safe-area-inset-bottom)); }
 .voiceStatus { margin: 10px 4px 0; }
 .voiceStatus:empty { display: none; }
-.voiceApplyFloat { position: fixed; left: 22px; right: 22px; bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 5; box-shadow: 0 10px 28px rgba(0,0,0,0.45); transition: opacity .25s ease, transform .25s ease; }
+.voiceApplyFloat { position: absolute; left: 22px; width: calc(100% - 44px); box-sizing: border-box; bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 5; transition: opacity .25s ease, transform .25s ease; }
 .voiceApplyFloat.isHidden { opacity: 0; transform: translateY(14px); pointer-events: none; }
