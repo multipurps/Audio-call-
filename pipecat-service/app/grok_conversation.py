@@ -40,10 +40,18 @@ async def fetch_agent_link(settings: Settings, user_id: str | None, session_id: 
         return None
     rest = _Rest(url, service_key, timeout_secs=4.0)
     try:
-        rows = await rest.select(
-            "user_agents", select="voice_id,active,provider",
-            filters={"user_id": f"eq.{user_id}", "active": "eq.true"}, limit=1,
-        )
+        filters = {"user_id": f"eq.{user_id}", "active": "eq.true"}
+        try:
+            rows = await rest.select("user_agents", select="voice_id,active,provider", filters=filters, limit=1)
+        except Exception as exc:  # noqa: BLE001
+            # This lookup runs on EVERY call. If the provider column has not been added to the
+            # database yet (HTTP 400, "column ... does not exist"), a missing column must not
+            # stop every call from connecting: read without it. Before the column exists the only
+            # agent is Grok, so that is what such a row means. Any other failure still raises.
+            if "HTTP 400" not in str(exc) or "provider" not in str(exc):
+                raise
+            logger.warning("user_agents.provider column missing; reading without it session=%s", session_id)
+            rows = await rest.select("user_agents", select="voice_id,active", filters=filters, limit=1)
     except Exception as exc:  # noqa: BLE001 - the Custom voice must not silently become GPT-Live
         logger.error("agent lookup failed session=%s error=%s; call not connected", session_id, type(exc).__name__)
         raise RuntimeError("the Custom voice could not be checked; call not connected") from None

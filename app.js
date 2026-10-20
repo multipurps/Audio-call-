@@ -8,6 +8,7 @@ import { DEFAULT_MOOD, selectMood, toggleArgue, argueVisible, moodButtonLabel, m
 import { answeredCallPill, assistantCallPill, listenInPill, liveCallView, endedCallLabel, formatCallTimer, TERMINAL_STATUSES } from './lib/callStatus.js';
 import { userError, friendlyAccountName } from './lib/userFacing.js';
 import * as Tutorial from './lib/tutorial.js';
+import { fileToWavBase64, looksLikeAudio } from './lib/voiceClip.js';
 import { pickFirstCallChannel, firstCallPrompt, firstCallExplainer } from './lib/firstCall.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -4895,15 +4896,19 @@ $('cloneBtn').addEventListener('click', async () => {
   if (!$('cloneConsent').checked) { status.textContent = 'Tick the box to confirm this is your voice, or that you have the right to use it.'; return; }
   if (!name) { status.textContent = 'Give the voice a name.'; return; }
   if (!file) { status.textContent = 'Choose one audio clip.'; return; }
-  if (file.size > 4 * 1024 * 1024) { status.textContent = 'The clip is too large. Use a clip under 4 MB.'; return; }
+  if (!looksLikeAudio(file)) { status.textContent = 'Choose an audio file, such as an MP3, M4A or WAV recording of your voice.'; return; }
   btn.disabled = true;
-  status.textContent = 'Cloning your voice…';
+  status.textContent = 'Reading your clip…';
   try {
-    const data = await readFileBase64(file);
+    // Any audio the phone can play is decoded here and sent as a short WAV, the format the clone
+    // service always accepts, so the format and the 4 MB limit are never the user's problem.
+    const clip = await fileToWavBase64(file);
+    status.textContent = clip.trimmed ? `Cloning your voice from the first ${Math.round(clip.seconds)} seconds…` : 'Cloning your voice…';
+    const data = clip.base64;
     const resp = await authedFetch('/api/voice-clone?target=agent&action=clone', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, consent: true, sample: { type: file.type || 'audio/mpeg', data } }),
+      body: JSON.stringify({ name, consent: true, sample: { type: 'audio/wav', data } }),
     });
     const out = await resp.json().catch(() => ({}));
     if (!resp.ok) { status.textContent = out.error || 'Could not clone your voice.'; return; }
