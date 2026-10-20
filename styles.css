@@ -1296,3 +1296,9 @@ button.isLoadingIcon > *{visibility:hidden;}
 button.isLoadingIcon::before{position:absolute; top:50%; left:50%; width:16px; height:16px; margin:-8px 0 0 -8px;}
 @keyframes btnSpin{to{transform:rotate(360deg);}}
 @media (prefers-reduced-motion: reduce){button.isLoading::before{animation-duration:2s;}}
+
+/* Voice sheet: the Apply bar stays at the bottom; the preset lists scroll inside their own box. */
+#liveVoiceList, #agentVoiceListCustom, #agentVoiceListLive { max-height: 52vh; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-right: 4px; }
+.voiceApplyBar { flex: 0 0 auto; padding: 12px 22px calc(14px + env(safe-area-inset-bottom)); background: var(--bg, #0b0b0c); border-top: 1px solid rgba(255,255,255,0.06); transition: opacity .25s ease, transform .25s ease; }
+.voiceApplyBar .hint { margin: 8px 4px 0; min-height: 18px; }
+.voiceApplyBar.isHidden { opacity: 0; transform: translateY(12px); pointer-events: none; }

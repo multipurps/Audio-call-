@@ -1114,6 +1114,18 @@
     <div id="voicePaneCustom" class="hidden">
       <p class="hint" style="margin:0 0 12px;">Your own cloned voice. Emysa speaks as you on calls.</p>
       <div id="agentVoiceListCustom"></div>
+      <div class="sectionLabel" style="margin-top:20px;">Clone your voice</div>
+      <p class="hint" style="margin:0 0 12px;">One clear clip of 5 to 15 seconds, recorded in a quiet room. Only clone your own voice, or one you have the right to use.</p>
+      <div class="field"><label>Name</label>
+        <div class="inputWrap"><input type="text" id="cloneName" placeholder="My voice" maxlength="60" autocomplete="off"></div>
+      </div>
+      <div class="field"><label>Clip</label><input type="file" id="cloneFile" accept="audio/*"></div>
+      <label style="display:flex; gap:8px; align-items:flex-start; margin:8px 0;">
+        <input type="checkbox" id="cloneConsent" style="margin-top:3px;">
+        <span class="hint" style="margin:0;">This is my own voice, or I have the right to use it.</span>
+      </label>
+      <button class="primaryBtn" id="cloneBtn">Clone voice</button>
+      <p class="hint" id="cloneStatus" style="margin:10px 4px 0; min-height:18px;"></p>
     </div>
     <div id="voicePaneLive" class="hidden">
       <p class="hint" style="margin:0 0 12px;">Built-in voices. Emysa uses the one you choose on calls.</p>
@@ -1122,9 +1134,10 @@
 
     <audio id="liveVoiceAudio" style="display:none;"></audio>
 
-    <button class="primaryBtn" id="voiceApplyBtn" style="margin-top:22px;" disabled>Apply Changes</button>
-    <p class="hint" id="voiceApplyStatus" style="margin:10px 4px 0; min-height:18px;"></p>
-
+  </div>
+  <div class="voiceApplyBar" id="voiceApplyBar">
+    <button class="primaryBtn" id="voiceApplyBtn" disabled>Apply Changes</button>
+    <p class="hint" id="voiceApplyStatus"></p>
   </div>
 </div>
 

@@ -4790,6 +4790,54 @@ async function loadAgentState() {
     if (resp.ok) { agentState = data; renderVoiceSettings(); }
   } catch { /* the Standard voices still work */ }
 }
+const voicePreviewUrls = new Map();
+const voicePreviewInflight = new Map();
+function voicePreviewUrl(provider, id) {
+  const key = `${provider}:${id}`;
+  if (voicePreviewUrls.has(key)) return Promise.resolve(voicePreviewUrls.get(key));
+  if (voicePreviewInflight.has(key)) return voicePreviewInflight.get(key);
+  const job = (async () => {
+    let blob = await previewStoreGet(key);
+    if (!blob) {
+      const resp = await authedFetch(`/api/voice-clone?target=agent&action=preview&provider=${provider}&voice=${encodeURIComponent(id)}`);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || 'Preview unavailable');
+      blob = new Blob([Uint8Array.from(atob(data.audioBase64), (c) => c.charCodeAt(0))], { type: data.mimeType || 'audio/mpeg' });
+      await previewStorePut(key, blob, data.audioBase64);
+    }
+    const url = URL.createObjectURL(blob);
+    voicePreviewUrls.set(key, url);
+    return url;
+  })().finally(() => voicePreviewInflight.delete(key));
+  voicePreviewInflight.set(key, job);
+  return job;
+}
+async function playVoicePreview(provider, id, btn) {
+  const audio = $('liveVoiceAudio');
+  const status = $('voiceApplyStatus');
+  const key = `${provider}:${id}`;
+  if (!audio.paused && audio.dataset.voice === key) { audio.pause(); return; }
+  audio.pause();
+  status.textContent = '';
+  try {
+    const url = await voicePreviewUrl(provider, id);
+    audio.dataset.voice = key;
+    audio.src = url;
+    audio.onplay = () => { btn.innerHTML = PAUSE_SVG; };
+    audio.onpause = audio.onended = () => { btn.innerHTML = PLAY_SVG; };
+    await audio.play();
+  } catch (err) {
+    status.textContent = `Could not play the preview: ${err.message}`;
+  }
+}
+const previewPrefetched = new Set();
+async function prefetchVoicePreviews(provider, voices) {
+  if (previewPrefetched.has(provider)) return;
+  previewPrefetched.add(provider);
+  for (const v of voices || []) {
+    try { await voicePreviewUrl(provider, v.id); } catch { /* a tap retries this one */ }
+  }
+}
 function renderVoiceList(containerId, voices, provider, note) {
   const list = $(containerId);
   if (!list) return;
@@ -4805,21 +4853,76 @@ function renderVoiceList(containerId, voices, provider, note) {
     const selected = voicePending.type === 'agent' && voicePending.provider === provider && voicePending.agentVoiceId === v.id;
     const card = document.createElement('div');
     card.className = 'voiceCard' + (selected ? ' selected' : '');
-    card.innerHTML = `<div class="cBody"><div class="cValue"></div><div class="voiceMeta"></div></div>
+    card.innerHTML = `<button class="playCircleBtn" aria-label="Preview">${PLAY_SVG}</button>
+      <div class="cBody"><div class="cValue"></div><div class="voiceMeta"></div></div>
       <svg class="voiceCheck" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     card.querySelector('.cValue').textContent = v.name;
     card.querySelector('.voiceMeta').textContent = v.tone || '';
+    card.querySelector('.playCircleBtn').addEventListener('click', (e) => { e.stopPropagation(); haptic(); playVoicePreview(provider, v.id, e.currentTarget); });
     card.addEventListener('click', () => { haptic(); voicePending = { type: 'agent', provider, agentVoiceId: v.id }; renderVoiceSettings(); });
     list.appendChild(card);
   }
+  if (voices?.length) prefetchVoicePreviews(provider, voices);
 }
 function renderAgentVoices() {
   if (!agentState) return;
   const custom = agentState.custom || {};
-  const customNote = custom.error || (custom.voices?.length ? '' : 'You have no custom voices yet.');
+  const customNote = custom.error || (custom.voices?.length ? '' : 'You have no custom voices yet. Clone your voice below.');
   renderVoiceList('agentVoiceListCustom', custom.voices, 'custom', customNote);
   renderVoiceList('agentVoiceListLive', agentState.live?.voices, 'live', '');
 }
+function readFileBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1] || '');
+    r.onerror = () => reject(new Error('Could not read the clip'));
+    r.readAsDataURL(file);
+  });
+}
+$('cloneBtn').addEventListener('click', async () => {
+  const btn = $('cloneBtn');
+  const status = $('cloneStatus');
+  const name = $('cloneName').value.trim();
+  const file = $('cloneFile').files?.[0];
+  if (!$('cloneConsent').checked) { status.textContent = 'Tick the box to confirm this is your voice, or that you have the right to use it.'; return; }
+  if (!name) { status.textContent = 'Give the voice a name.'; return; }
+  if (!file) { status.textContent = 'Choose one audio clip.'; return; }
+  if (file.size > 4 * 1024 * 1024) { status.textContent = 'The clip is too large. Use a clip under 4 MB.'; return; }
+  btn.disabled = true;
+  status.textContent = 'Cloning your voice…';
+  try {
+    const data = await readFileBase64(file);
+    const resp = await authedFetch('/api/voice-clone?target=agent&action=clone', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, consent: true, sample: { type: file.type || 'audio/mpeg', data } }),
+    });
+    const out = await resp.json().catch(() => ({}));
+    if (!resp.ok) { status.textContent = out.error || 'Could not clone your voice.'; return; }
+    status.textContent = 'Your voice is ready. It is in the Custom list.';
+    $('cloneName').value = '';
+    $('cloneFile').value = '';
+    $('cloneConsent').checked = false;
+    await loadAgentState();
+  } catch (err) {
+    status.textContent = err.message || 'Could not clone your voice.';
+  } finally {
+    btn.disabled = false;
+  }
+});
+// The Apply bar steps out of the way while a preset list is being scrolled, and returns when it stops.
+(function attachVoiceListScroll() {
+  let timer = null;
+  for (const id of ['liveVoiceList', 'agentVoiceListCustom', 'agentVoiceListLive']) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener('scroll', () => {
+      $('voiceApplyBar').classList.add('isHidden');
+      clearTimeout(timer);
+      timer = setTimeout(() => $('voiceApplyBar').classList.remove('isHidden'), 350);
+    }, { passive: true });
+  }
+})();
 function showVoiceTab(which) {
   // Standard = GPT-Live presets. Custom = your cloned voice. Live = built-in presets.
   // Whichever is selected is the default for calls.

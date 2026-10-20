@@ -14,7 +14,8 @@ export default async function handler(req, res) {
 
   if (req.query?.target === 'agent') {
     const inworldKey = await getSecret(supabase, 'INWORLD_API_KEY');
-    return agentRoute(req, res, supabase, userId, { inworld: inworldKey });
+    const xaiKey = await getSecret(supabase, 'XAI_API_KEY');
+    return agentRoute(req, res, supabase, userId, { inworld: inworldKey, xai: xaiKey });
   }
 
   const action = req.query?.action;

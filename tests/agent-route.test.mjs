@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { agentRoute, LIVE_VOICES } from '../lib/agentRoute.js';
 
 function fakeRes() {
-  return { code: 0, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } };
+  return { code: 0, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; }, setHeader() {} };
 }
 function fakeSupabase({ row = null, failWrite = false } = {}) {
   const writes = [];
@@ -74,4 +74,59 @@ test('choose: refuses an unknown provider, an unknown preset and a malformed id'
     assert.equal(res.code, 400);
   }
   assert.equal(sb.writes.length, 0);
+});
+
+test('preview: a built-in preset plays the shared sentence; an unknown preset is refused', async () => {
+  let sent = null;
+  globalThis.fetch = async (url, init) => {
+    sent = { url, body: JSON.parse(init.body) };
+    return { ok: true, status: 200, arrayBuffer: async () => new Uint8Array([1, 2]).buffer, headers: { get: () => 'audio/mpeg' } };
+  };
+  const res = fakeRes();
+  await agentRoute({ method: 'GET', query: { action: 'preview', provider: 'live', voice: 'eve' } }, res, fakeSupabase(), 'u1', { xai: 'xai-key' });
+  assert.equal(res.code, 200);
+  assert.equal(sent.body.text, 'This is how I sound when I call for you.');
+  assert.equal(sent.body.voice_id, 'eve');
+  const bad = fakeRes();
+  await agentRoute({ method: 'GET', query: { action: 'preview', provider: 'live', voice: 'nobody' } }, bad, fakeSupabase(), 'u1', { xai: 'xai-key' });
+  assert.equal(bad.code, 400);
+});
+
+test('preview: a custom voice must be one the user owns', async () => {
+  stubInworld();
+  const res = fakeRes();
+  await agentRoute({ method: 'GET', query: { action: 'preview', provider: 'custom', voice: 'ws__other' } }, res, fakeSupabase(), 'u1', { inworld: 'key' });
+  assert.equal(res.code, 400);
+});
+
+test('clone: needs a name, consent, a clip, and a clip under 4 MB', async () => {
+  const base = { name: 'My voice', consent: true, sample: { type: 'audio/mpeg', data: 'AAAA' } };
+  const cases = [
+    [{ ...base, name: '' }, /name/],
+    [{ ...base, consent: false }, /Confirm/],
+    [{ ...base, sample: {} }, /clip/],
+    [{ ...base, sample: { type: 'text/plain', data: 'AAAA' } }, /audio/],
+    [{ ...base, sample: { type: 'audio/mpeg', data: 'A'.repeat(6 * 1024 * 1024) } }, /too large/],
+  ];
+  for (const [body, msg] of cases) {
+    const res = fakeRes();
+    await agentRoute({ method: 'POST', query: { action: 'clone' }, body }, res, fakeSupabase(), 'u1', { inworld: 'key' });
+    assert.equal(res.code, 400);
+    assert.match(res.body.error, msg);
+  }
+});
+
+test('clone: a good clip creates the voice in the user’s workspace and returns its id', async () => {
+  let sent = null;
+  globalThis.fetch = async (url, init) => {
+    sent = { url, body: JSON.parse(init.body), auth: init.headers.Authorization };
+    return { ok: true, status: 200, json: async () => ({ voice: { voiceId: 'ws__new' } }) };
+  };
+  const res = fakeRes();
+  await agentRoute({ method: 'POST', query: { action: 'clone' }, body: { name: 'My voice', consent: true, sample: { type: 'audio/mpeg', data: 'AAAA' } } }, res, fakeSupabase(), 'u1', { inworld: 'key123' });
+  assert.equal(res.code, 200);
+  assert.equal(res.body.voiceId, 'ws__new');
+  assert.equal(sent.body.displayName, 'My voice');
+  assert.deepEqual(sent.body.voiceSamples, ['AAAA']);
+  assert.equal(sent.auth, 'Basic key123');
 });
