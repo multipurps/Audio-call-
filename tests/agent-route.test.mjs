@@ -127,7 +127,7 @@ test('clone: a good clip creates the voice in the user’s workspace and returns
   assert.equal(res.code, 200);
   assert.equal(res.body.voiceId, 'ws__new');
   assert.equal(sent.body.displayName, 'My voice');
-  assert.deepEqual(sent.body.voiceSamples, ['AAAA']);
+  assert.deepEqual(sent.body.voiceSamples, [{ audioData: 'AAAA' }]);
   assert.equal(sent.auth, 'Basic key123');
 });
 
