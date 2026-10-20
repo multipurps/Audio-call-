@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import webpush from 'web-push';
-import { publicKeyFromPrivate, readVapid, subjectProblem, classifyPushFailure, summarizeFailures } from '../lib/vapid.js';
+import { publicKeyFromPrivate, readVapid, subjectProblem, classifyPushFailure, summarizeFailures, cleanSubject, cleanKey } from '../lib/vapid.js';
 
 const good = webpush.generateVAPIDKeys();
 const other = webpush.generateVAPIDKeys();
@@ -95,3 +95,23 @@ test('every sender uses the shared keys and the key endpoint hands out the signi
   assert.match(read('admin/admin.js'), /await repairAlerts\(\);/);
 });
 import { readFileSync } from 'node:fs';
+
+test('a subject pasted with a space and <brackets> is cleaned, and the send still works', () => {
+  assert.equal(cleanSubject('mailto: <ayodeleart1@gmail.com>'), 'mailto:ayodeleart1@gmail.com');
+  assert.equal(cleanSubject('"mailto:a@b.co"'), 'mailto:a@b.co');
+  assert.equal(cleanSubject('  MAILTO:  a@b.co '), 'mailto:a@b.co');
+  assert.equal(cleanSubject('https://emysa.app'), 'https://emysa.app');
+  const v = readVapid({ VAPID_PUBLIC_KEY: good.publicKey, VAPID_PRIVATE_KEY: good.privateKey, VAPID_SUBJECT: 'mailto: <ayodeleart1@gmail.com>' });
+  assert.equal(v.subject, 'mailto:ayodeleart1@gmail.com');
+  assert.equal(v.subjectProblem, null);
+  assert.equal(v.subjectFixed, true);
+  assert.equal(readVapid({ VAPID_PRIVATE_KEY: good.privateKey, VAPID_SUBJECT: subject }).subjectFixed, false);
+  webpush.setVapidDetails(v.subject, v.publicKey, v.privateKey); // must not throw
+});
+
+test('keys pasted with quotes or spaces still work', () => {
+  assert.equal(cleanKey(` "${good.privateKey}" `), good.privateKey);
+  const v = readVapid({ VAPID_PUBLIC_KEY: `"${good.publicKey}"`, VAPID_PRIVATE_KEY: ` ${good.privateKey}\n`, VAPID_SUBJECT: subject });
+  assert.equal(v.configured, true);
+  assert.equal(v.keysMismatch, false);
+});

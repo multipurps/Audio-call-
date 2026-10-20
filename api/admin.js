@@ -340,6 +340,7 @@ async function sendAnnouncement(req, res, supabase) {
     sent, failed: failures.length, removed, total: (subs || []).length,
     reasons: summarizeFailures(failures).map(({ kind, status, reason, count }) => ({ kind, status, reason, count })),
     keysMismatch: vapid.keysMismatch,
+    subjectFixed: vapid.subjectFixed,
   });
 }
 

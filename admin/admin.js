@@ -570,6 +570,7 @@ $('announceSendBtn').addEventListener('click', async () => {
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) { $('announceHint').textContent = data.error || 'Send failed.'; return; }
     const why = (data.reasons || []).map((r) => `${r.count}× ${r.reason}`);
+    if (data.subjectFixed) why.push('VAPID_SUBJECT in Vercel has a space or brackets. The server cleaned it for this send. Set it to exactly mailto:you@example.com.');
     if (data.keysMismatch) why.push('The server\u2019s push keys were not a matching pair. The app now uses the private key\u2019s own public key, so each device re-registers the next time the app is opened.');
     $('announceHint').textContent = `Sent to ${data.sent} of ${data.total} subscribed users.${why.length ? ` ${why.join(' ')}` : ''}`;
     $('announceTitle').value = '';
