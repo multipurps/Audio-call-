@@ -25,6 +25,7 @@ import { availableChannels } from '../lib/phoneLines.js';
 import { createCallRecord, markCallPlaced, markCallFailed, findDuplicateActiveCall } from '../lib/callSession.js';
 import { classifyPlacementError, isRetryCommand, ownerMessageFor, planRetry } from '../lib/callAttempts.js';
 import { transcribeAudioBuffer, resolveSttApiKey } from '../lib/sttClient.js';
+import { readVapid } from '../lib/vapid.js';
 
 
 
@@ -69,7 +70,7 @@ export default async function handler(req, res) {
     case 'summarizeCall': return summarizeCall(req, res, supabase, userId);
     case 'deleteSession': return deleteSession(req, res, supabase, userId);
     case 'savePushSubscription': return savePushSubscription(req, res, supabase, userId);
-    case 'pushKey': return res.status(200).json({ publicKey: process.env.VAPID_PUBLIC_KEY || null });
+    case 'pushKey': return res.status(200).json({ publicKey: readVapid(process.env).publicKey });
     default: return res.status(400).json({ error: 'Unknown or missing action' });
   }
 }

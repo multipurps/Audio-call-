@@ -272,7 +272,22 @@ async function enableAlerts() {
   if (!saved.ok) throw new Error('Could not save this device for notifications.');
 }
 
+// A device subscribed under a different key than the server signs with cannot receive anything, and
+// looks "on" anyway. When permission is already granted, quietly re-register it with the server's key.
+async function repairAlerts() {
+  try {
+    if (!pushSupported() || Notification.permission !== 'granted') return;
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return;
+    const keyResp = await authedFetch('/api/assistant?action=pushKey');
+    const { publicKey } = await keyResp.json().catch(() => ({}));
+    if (publicKey && !sameKey(sub, keyBytes(publicKey))) await enableAlerts();
+  } catch { /* the card below still offers the button */ }
+}
+
 async function renderAlertsCard(el) {
+  await repairAlerts();
   const on = await alertsOn();
   const box = document.createElement('div');
   box.className = 'aCard wide';
@@ -554,7 +569,9 @@ $('announceSendBtn').addEventListener('click', async () => {
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) { $('announceHint').textContent = data.error || 'Send failed.'; return; }
-    $('announceHint').textContent = `Sent to ${data.sent} of ${data.total} subscribed users.`;
+    const why = (data.reasons || []).map((r) => `${r.count}× ${r.reason}`);
+    if (data.keysMismatch) why.push('The server\u2019s push keys were not a matching pair. The app now uses the private key\u2019s own public key, so each device re-registers the next time the app is opened.');
+    $('announceHint').textContent = `Sent to ${data.sent} of ${data.total} subscribed users.${why.length ? ` ${why.join(' ')}` : ''}`;
     $('announceTitle').value = '';
     $('announceBody').value = '';
   } catch {

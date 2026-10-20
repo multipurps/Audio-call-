@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import webpush from 'web-push';
+import { readVapid, classifyPushFailure, summarizeFailures } from '../lib/vapid.js';
 import { getServiceClient, getAdminAccess, normEmail, maskEmail } from '../lib/supabaseAdmin.js';
 import { AI_ACTIONS, handleAiAction } from '../lib/aiBehaviorAdmin.js';
 import { keysStatus, keysSave } from '../lib/secrets.js';
@@ -294,41 +295,52 @@ async function analytics(req, res, supabase, access) {
 
 async function sendAnnouncement(req, res, supabase) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const vapidPublic = process.env.VAPID_PUBLIC_KEY;
-  const vapidPrivate = process.env.VAPID_PRIVATE_KEY;
-  const vapidSubject = process.env.VAPID_SUBJECT;
-  if (!vapidPublic || !vapidPrivate || !vapidSubject) {
+  const vapid = readVapid(process.env);
+  if (!vapid.configured) {
     return res.status(500).json({ error: 'Server not configured (missing VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT)' });
   }
+  if (!vapid.privateKeyValid) {
+    return res.status(500).json({ error: 'VAPID_PRIVATE_KEY is not a valid push key. Generate a new pair and set both VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY.' });
+  }
+  if (vapid.subjectProblem) return res.status(500).json({ error: vapid.subjectProblem });
 
   const { title, body } = req.body || {};
   if (!title || !body) return res.status(400).json({ error: 'title and body are required' });
 
   await supabase.from('announcements').insert({ title, body });
-  webpush.setVapidDetails(vapidSubject, vapidPublic, vapidPrivate);
+  // Signed with the private key's own public half, so a mismatched env pair cannot make every push fail.
+  webpush.setVapidDetails(vapid.subject, vapid.publicKey, vapid.privateKey);
 
   const { data: subs, error: subsErr } = await supabase.from('push_subscriptions').select('*');
   if (subsErr) return res.status(500).json({ error: subsErr.message });
 
   const payload = JSON.stringify({ title, body });
   let sent = 0;
-  let failed = 0;
+  let removed = 0;
+  const failures = [];
 
   await Promise.all(
     (subs || []).map(async (sub) => {
       try {
-        await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload);
+        await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload, { TTL: 86400, timeout: 8000 });
         sent++;
       } catch (err) {
-        failed++;
+        const why = classifyPushFailure(err);
+        failures.push(why);
+        console.warn(`send-announcement: send failed status=${why.status || 'none'} kind=${why.kind} ${String(err?.body || err?.message || '').slice(0, 160)}`);
         if (err.statusCode === 410 || err.statusCode === 404) {
+          removed++;
           await supabase.from('push_subscriptions').delete().eq('id', sub.id);
         }
       }
     })
   );
 
-  return res.status(200).json({ sent, failed, total: (subs || []).length });
+  return res.status(200).json({
+    sent, failed: failures.length, removed, total: (subs || []).length,
+    reasons: summarizeFailures(failures).map(({ kind, status, reason, count }) => ({ kind, status, reason, count })),
+    keysMismatch: vapid.keysMismatch,
+  });
 }
 
 // ---------- revenue, credits, provider cost rates ----------
