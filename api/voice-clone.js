@@ -13,9 +13,8 @@ export default async function handler(req, res) {
   if (!userId) return res.status(401).json({ error: 'Not signed in' });
 
   if (req.query?.target === 'agent') {
-    const xaiKey = await getSecret(supabase, 'XAI_API_KEY');
-    if (!xaiKey) return res.status(500).json({ error: 'The Custom voice is not configured on the server' });
-    return agentRoute(req, res, supabase, userId, xaiKey);
+    const inworldKey = await getSecret(supabase, 'INWORLD_API_KEY');
+    return agentRoute(req, res, supabase, userId, { inworld: inworldKey });
   }
 
   const action = req.query?.action;

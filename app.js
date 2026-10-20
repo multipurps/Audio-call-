@@ -4732,7 +4732,7 @@ const PAUSE_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5
 
 function voiceIsDirty() {
   if (!voicePrefs) return false;
-  if (voicePending.type === 'agent') return !(agentState?.active && agentState.voiceId === voicePending.agentVoiceId);
+  if (voicePending.type === 'agent') return !(agentState?.active && agentState.provider === voicePending.provider && agentState.voiceId === voicePending.agentVoiceId);
   if (voicePending.type !== savedVoiceType()) return true;
   return voicePending.type === 'standard' && voicePending.liveVoiceId !== voicePrefs.liveVoiceId;
 }
@@ -4740,7 +4740,7 @@ function voiceIsDirty() {
 function renderVoiceSettings() {
   if (!voicePrefs) return;
   const savedName = agentState?.active
-    ? (agentState.voiceName ? `Emysa · ${agentState.voiceName}` : 'Emysa agent')
+    ? (agentState.voiceName ? `${agentState.provider === 'custom' ? 'Custom' : 'Live'} · ${agentState.voiceName}` : 'Emysa')
     : (voicePrefs.liveVoiceName || 'Not chosen yet');
   $('currentVoiceName').textContent = savedName;
   const list = $('liveVoiceList');
@@ -4770,7 +4770,7 @@ async function loadVoicePrefs() {
   voicePrefs = await resp.json();
   await loadAgentState();
   voicePending = agentState?.active
-    ? { type: 'agent', agentVoiceId: agentState.voiceId }
+    ? { type: 'agent', provider: agentState.provider, agentVoiceId: agentState.voiceId }
     : { type: 'standard', liveVoiceId: voicePrefs.liveVoiceId };
   renderVoiceSettings();
   prefetchLivePreviews(voicePrefs.voices || []);
@@ -4781,103 +4781,56 @@ function savedVoiceType() {
   return agentState?.active ? 'agent' : 'standard';
 }
 
-// ---- Agent voice: the Emysa agent. The voice is picked here, like Standard, with Apply Changes. ----
-let agentState = null; // { active, voiceId, voiceName, voices }
-let agentPreview = null;
+// ---- Custom and Live voices: the agent choices on the voice screen ----
+let agentState = null; // { active, provider, voiceId, voiceName, custom: {voices, error}, live: {voices} }
 async function loadAgentState() {
   try {
     const resp = await authedFetch('/api/voice-clone?target=agent&action=status');
     const data = await resp.json().catch(() => ({}));
     if (resp.ok) { agentState = data; renderVoiceSettings(); }
-  } catch { /* the other voices still work */ }
+  } catch { /* the Standard voices still work */ }
 }
-const agentPreviewInflight = new Map();
-function agentPreviewUrl(id) {
-  const key = `agent:${id}`;
-  if (livePreviewCache.has(key)) return Promise.resolve(livePreviewCache.get(key));
-  if (agentPreviewInflight.has(key)) return agentPreviewInflight.get(key);
-  const job = (async () => {
-    let blob = await previewStoreGet(key);
-    if (!blob) {
-      const resp = await authedFetch(`/api/voice-clone?target=agent&action=preview&voice=${encodeURIComponent(id)}`);
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(data.error || 'Preview unavailable');
-      blob = new Blob([Uint8Array.from(atob(data.audioBase64), (c) => c.charCodeAt(0))], { type: data.mimeType || 'audio/mpeg' });
-      await previewStorePut(key, blob, data.audioBase64);
-    }
-    const url = URL.createObjectURL(blob);
-    livePreviewCache.set(key, url);
-    return url;
-  })().finally(() => agentPreviewInflight.delete(key));
-  agentPreviewInflight.set(key, job);
-  return job;
-}
-async function previewAgentVoice(id, btn) {
-  const audio = $('liveVoiceAudio');
-  const status = $('voiceApplyStatus');
-  if (!audio.paused && audio.dataset.voice === `agent:${id}`) { audio.pause(); return; }
-  audio.pause();
-  status.textContent = '';
-  try {
-    if (!livePreviewCache.has(`agent:${id}`)) btn.classList.add('loading');
-    const url = await agentPreviewUrl(id);
-    audio.dataset.voice = `agent:${id}`;
-    audio.src = url;
-    audio.onplay = () => { btn.innerHTML = PAUSE_SVG; };
-    audio.onpause = audio.onended = () => { btn.innerHTML = PLAY_SVG; };
-    await audio.play();
-  } catch (err) {
-    status.textContent = `Could not play the preview: ${err.message}`;
-  } finally {
-    btn.classList.remove('loading');
+function renderVoiceList(containerId, voices, provider, note) {
+  const list = $(containerId);
+  if (!list) return;
+  list.textContent = '';
+  if (note) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = note;
+    list.appendChild(p);
+    return;
   }
-}
-let agentPrefetchStarted = false;
-async function prefetchAgentPreviews(voices) {
-  if (agentPrefetchStarted) return;
-  agentPrefetchStarted = true;
-  for (const v of voices) {
-    try { await agentPreviewUrl(v.id); } catch { /* a tap retries this one */ }
+  for (const v of voices || []) {
+    const selected = voicePending.type === 'agent' && voicePending.provider === provider && voicePending.agentVoiceId === v.id;
+    const card = document.createElement('div');
+    card.className = 'voiceCard' + (selected ? ' selected' : '');
+    card.innerHTML = `<div class="cBody"><div class="cValue"></div><div class="voiceMeta"></div></div>
+      <svg class="voiceCheck" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    card.querySelector('.cValue').textContent = v.name;
+    card.querySelector('.voiceMeta').textContent = v.tone || '';
+    card.addEventListener('click', () => { haptic(); voicePending = { type: 'agent', provider, agentVoiceId: v.id }; renderVoiceSettings(); });
+    list.appendChild(card);
   }
 }
 function renderAgentVoices() {
-  const list = $('agentVoiceList');
-  if (!list) return;
-  list.textContent = '';
-  if (agentState?.voicesError) {
-    const note = document.createElement('p');
-    note.className = 'hint';
-    note.textContent = 'Voices are unavailable right now. Try again in a moment.';
-    list.appendChild(note);
-    return;
-  }
-  const voices = agentState?.voices || [];
-  for (const v of voices) {
-    const card = document.createElement('div');
-    card.className = 'voiceCard' + (voicePending.type === 'agent' && voicePending.agentVoiceId === v.id ? ' selected' : '');
-    card.dataset.voice = v.id;
-    card.innerHTML = `<button class="playCircleBtn" aria-label="Preview ${v.name}">${PLAY_SVG}</button>
-      <div class="cBody"><div class="cValue"></div><div class="voiceMeta"></div></div>
-      <svg class="voiceCheck" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    card.querySelector('.cValue').textContent = v.name;
-    const g = String(v.gender || '').toLowerCase();
-    const gender = g.includes('female') ? 'Feminine' : g.includes('male') ? 'Masculine' : '';
-    card.querySelector('.voiceMeta').textContent = [gender, v.accent ? v.accent.charAt(0).toUpperCase() + v.accent.slice(1) : '', 'English'].filter(Boolean).join(' · ');
-    card.querySelector('.playCircleBtn').addEventListener('click', (e) => { e.stopPropagation(); previewAgentVoice(v.id, e.currentTarget); });
-    card.addEventListener('click', () => { haptic(); voicePending = { type: 'agent', agentVoiceId: v.id }; renderVoiceSettings(); });
-    list.appendChild(card);
-  }
-  if (voices.length) prefetchAgentPreviews(voices);
+  if (!agentState) return;
+  const custom = agentState.custom || {};
+  const customNote = custom.error || (custom.voices?.length ? '' : 'You have no custom voices yet.');
+  renderVoiceList('agentVoiceListCustom', custom.voices, 'custom', customNote);
+  renderVoiceList('agentVoiceListLive', agentState.live?.voices, 'live', '');
 }
 function showVoiceTab(which) {
-  // Two choices, Standard (GPT-Live voices) and Custom (your own voice on the Grok agent).
+  // Standard = GPT-Live presets. Custom = your cloned voice. Live = built-in presets.
   // Whichever is selected is the default for calls.
-  voicePending = which === 'custom'
-    ? { type: 'agent', agentVoiceId: agentState?.active ? agentState.voiceId : null }
-    : { type: 'standard', liveVoiceId: voicePrefs?.liveVoiceId ?? null };
+  const provider = which === 'custom' ? 'custom' : 'live';
+  voicePending = which === 'standard'
+    ? { type: 'standard', liveVoiceId: voicePrefs?.liveVoiceId ?? null }
+    : { type: 'agent', provider, agentVoiceId: agentState?.active && agentState.provider === provider ? agentState.voiceId : null };
   document.querySelectorAll('#voiceTypeGroup .segmentedBtn').forEach((b) => b.classList.toggle('active', b.dataset.vtype === which));
   $('voicePaneStandard').classList.toggle('hidden', which !== 'standard');
   $('voicePaneCustom').classList.toggle('hidden', which !== 'custom');
+  $('voicePaneLive').classList.toggle('hidden', which !== 'live');
   loadAgentState();
 }
 document.querySelectorAll('#voiceTypeGroup .segmentedBtn').forEach((b) => b.addEventListener('click', () => { haptic(); showVoiceTab(b.dataset.vtype); }));
@@ -4981,7 +4934,7 @@ $('voiceApplyBtn').addEventListener('click', async () => {
   btn.disabled = true; status.textContent = 'Saving…';
   if (voicePending.type === 'agent') {
     const resp = await authedFetch('/api/voice-clone?target=agent&action=choose', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voiceId: voicePending.agentVoiceId }),
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: voicePending.provider, voiceId: voicePending.agentVoiceId }),
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) { status.textContent = data.error || 'Could not save.'; renderVoiceSettings(); return; }

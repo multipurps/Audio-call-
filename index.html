@@ -1102,7 +1102,7 @@
 
     <div class="segmented" id="voiceTypeGroup" style="margin-bottom:6px;">
       <button class="segmentedBtn active" data-vtype="standard">Standard</button>
-      <button class="segmentedBtn" data-vtype="custom">Custom</button>
+      <button class="segmentedBtn" data-vtype="custom">Custom</button><button class="segmentedBtn" data-vtype="live">Live</button>
     </div>
 
     <div id="voicePaneStandard">
@@ -1112,8 +1112,12 @@
     </div>
 
     <div id="voicePaneCustom" class="hidden">
-      <p class="hint" style="margin:0 0 12px;">Your own voice, cloned on xAI. Emysa speaks as you on calls.</p>
-      <div id="agentVoiceList"></div>
+      <p class="hint" style="margin:0 0 12px;">Your own cloned voice. Emysa speaks as you on calls.</p>
+      <div id="agentVoiceListCustom"></div>
+    </div>
+    <div id="voicePaneLive" class="hidden">
+      <p class="hint" style="margin:0 0 12px;">Built-in voices. Emysa uses the one you choose on calls.</p>
+      <div id="agentVoiceListLive"></div>
     </div>
 
     <audio id="liveVoiceAudio" style="display:none;"></audio>

@@ -378,25 +378,27 @@ async function loadKeys() {
   const el = $('sec-keys');
   try {
     const { keys } = await api('keys-status');
-    const k = keys.XAI_API_KEY;
-    const state = k.set
-      ? `Set · ends in ${esc(k.last4)} · from ${k.source === 'admin' ? 'this panel' : 'the server settings'}${k.updatedAt ? ' · ' + new Date(k.updatedAt).toLocaleString() : ''}`
-      : 'Not set. Calls to the Emysa agent will not work until a key is saved.';
-    el.innerHTML = `<div class="aCard">
-      <div class="aHint" style="margin:0 0 12px;">${esc(k.label)}. Used for the Emysa agent (Grok speech-to-speech) on calls and for listing your voices. Saved here, it takes effect within a minute. Keep it private: it is never shown in full.</div>
-      <div class="aHint" style="margin:0 0 12px;">${state}</div>
-      <div class="aField"><label>New ${esc(k.label)}</label><input type="password" id="keyValue" autocomplete="off" placeholder="Paste the key"></div>
-      <button class="aBtn" id="keySave">Save key</button><div class="aHint" id="keyHint"></div></div>`;
-    $('keySave').onclick = async () => {
-      const value = $('keyValue').value;
-      $('keyHint').textContent = 'Saving…';
-      try {
-        await api('keys-save', { method: 'POST', body: { name: 'XAI_API_KEY', value } });
-        $('keyValue').value = '';
-        $('keyHint').textContent = 'Saved.';
-        await loadKeys();
-      } catch (err) { $('keyHint').textContent = err.message; }
-    };
+    el.innerHTML = Object.entries(keys).map(([name, k]) => {
+      const state = k.set
+        ? `Set · ends in ${esc(k.last4)} · from ${k.source === 'admin' ? 'this panel' : 'the server settings'}${k.updatedAt ? ' · ' + new Date(k.updatedAt).toLocaleString() : ''}`
+        : 'Not set.';
+      return `<div class="aCard" data-key="${esc(name)}">
+        <div class="aHint" style="margin:0 0 12px;">${esc(k.label)}. Saved here, it takes effect within a minute. Keep it private: it is never shown in full.</div>
+        <div class="aHint" style="margin:0 0 12px;">${state}</div>
+        <div class="aField"><label>New ${esc(k.label)}</label><input type="password" class="keyValue" autocomplete="off" placeholder="Paste the key"></div>
+        <button class="aBtn keySave">Save key</button><div class="aHint keyHint"></div></div>`;
+    }).join('');
+    el.querySelectorAll('.aCard').forEach((card) => {
+      card.querySelector('.keySave').onclick = async () => {
+        const hint = card.querySelector('.keyHint');
+        hint.textContent = 'Saving…';
+        try {
+          await api('keys-save', { method: 'POST', body: { name: card.dataset.key, value: card.querySelector('.keyValue').value } });
+          hint.textContent = 'Saved.';
+          await loadKeys();
+        } catch (err) { hint.textContent = err.message; }
+      };
+    });
   } catch (err) { fail(el, err); }
 }
 

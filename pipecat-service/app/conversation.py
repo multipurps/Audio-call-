@@ -890,6 +890,7 @@ class CallConversation(_BaseConversation):
             greeting=self.greeting_text,
             voice_id=link.voice_id,
             transcript=self.transcript,
+            provider=link.provider,
         )
         # No fallback: if the agent cannot start, the call fails and the reason is logged.
         try:

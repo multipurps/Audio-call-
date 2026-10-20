@@ -274,6 +274,8 @@ class Settings:
     luna_api_key: str | None = field(default=None, repr=False)
     #: xAI API key for the Grok speech-to-speech agent. Server-side only; never sent to the app.
     xai_api_key: str | None = field(default=None, repr=False)
+    #: Inworld API key for the Custom (cloned) voice agent. Server-side only.
+    inworld_api_key: str | None = field(default=None, repr=False)
 
     # -- conversational behaviour ---------------------------------------
     system_prompt: str | None = None
@@ -333,6 +335,7 @@ class Settings:
             self.openai_api_key,
             self.luna_api_key,
             self.xai_api_key,
+            self.inworld_api_key,
             self.supabase_service_role_key,
         )
         return tuple(v for v in values if v and len(v) >= 8)
@@ -543,6 +546,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         openai_api_key=_env(env, "OPENAI_API_KEY"),
         luna_api_key=luna_key,
         xai_api_key=_env(env, "XAI_API_KEY"),
+        inworld_api_key=_env(env, "INWORLD_API_KEY"),
         latency_log=_env_bool(env, "ASSISTANT_LATENCY_LOG", True),
         system_prompt=_env(env, "ASSISTANT_SYSTEM_PROMPT"),
         greeting=_env(env, "ASSISTANT_GREETING"),
