@@ -24,6 +24,10 @@ logger = logging.getLogger("emysa.agent")
 
 _KEY_CACHE: dict[str, Any] = {"value": None, "at": 0.0}
 _KEY_TTL_SECS = 60.0
+# The agent provider can refuse every reply (a model the account may not use, no credits). Such a
+# call hears the first line and then nothing, while the provider keeps billing for listening. After
+# this many failed replies in a row, with no speech between them, the call ends and says why.
+MAX_CONSECUTIVE_AGENT_ERRORS = 3
 
 
 @dataclass(frozen=True)
@@ -138,8 +142,10 @@ class GrokAgentConversation:
         self._transcript = transcript
         self._greeting = greeting
         if provider == "inworld":
+            model = getattr(settings, "inworld_model", None)
+            extra = {"model": model} if model else {}
             self._session_update = build_inworld_session(
-                instructions=prompt, voice_id=voice_id, rate=settings.bridge_sample_rate,
+                instructions=prompt, voice_id=voice_id, rate=settings.bridge_sample_rate, **extra,
             )
         else:
             self._session_update = build_session_update(
@@ -149,6 +155,12 @@ class GrokAgentConversation:
         self._task: asyncio.Task[None] | None = None
         self._stopped = False
         self._warned_rate = False
+        # Reply timing: from the moment the caller stops talking to the first agent audio.
+        self._turn_ended_at: float | None = None
+        self._opened_at: float | None = None
+        self._greeting_timed = False
+        self._latencies_ms: list[int] = []
+        self._errors_in_row = 0
         self.call_active = False
         self.sender = PacedAudioSender(
             session_id=session_id,
@@ -170,6 +182,7 @@ class GrokAgentConversation:
                 raise RuntimeError("the xAI key is not set")
             self._client = GrokRealtimeClient(api_key=key, session_update=self._session_update)
         await self._client.start()
+        self._opened_at = time.monotonic()
         self.sender.start()
         if self._greeting:
             await self._client.send_greeting(self._greeting)
@@ -193,11 +206,14 @@ class GrokAgentConversation:
         return True
 
     async def _pump(self) -> None:
-        """Agent events in, agent audio out. Ends when the agent side closes."""
+        """Agent events in, agent audio out. Ends when the agent side closes, or gives up on it."""
+        ended_reason = "agent-ended"
         try:
             assert self._client is not None
             async for event in self._client.events():
                 if event.kind == "audio":
+                    self._errors_in_row = 0
+                    self._note_first_audio()
                     await self.sender.enqueue(event.audio, self._settings.bridge_sample_rate)
                 elif event.kind == "interrupted":
                     await self.sender.interrupt()
@@ -206,8 +222,18 @@ class GrokAgentConversation:
                 elif event.kind == "agent_transcript" and event.text and self._transcript is not None:
                     self._transcript.note("ai", event.text)
                 elif event.kind == "error":
+                    self._errors_in_row += 1
                     logger.warning("agent error session=%s message=%s", self._session_id, event.text)
+                    if self._errors_in_row >= MAX_CONSECUTIVE_AGENT_ERRORS:
+                        logger.error(
+                            "agent gave up session=%s after %d failed replies in a row; ending the call. Last error: %s",
+                            self._session_id, self._errors_in_row, event.text,
+                        )
+                        ended_reason = "agent-error"
+                        break
                 elif event.kind == "other":
+                    if event.raw_type == "input_audio_buffer.speech_stopped":
+                        self._turn_ended_at = time.monotonic()
                     logger.info("agent event type=%s session=%s", event.raw_type or "-", self._session_id)
         except asyncio.CancelledError:
             raise
@@ -215,7 +241,19 @@ class GrokAgentConversation:
             logger.warning("agent event loop ended session=%s error=%s", self._session_id, type(exc).__name__)
         finally:
             if not self._stopped and self._on_ended is not None:
-                await self._on_ended("agent-ended")
+                await self._on_ended(ended_reason)
+
+    def _note_first_audio(self) -> None:
+        """Log how long the agent took: the opening line after connect, and each reply after the caller stopped."""
+        now = time.monotonic()
+        if self._turn_ended_at is not None:
+            ms = int((now - self._turn_ended_at) * 1000)
+            self._turn_ended_at = None
+            self._latencies_ms.append(ms)
+            logger.info("agent latency ms=%d kind=reply session=%s", ms, self._session_id)
+        elif not self._greeting_timed and self._opened_at is not None:
+            self._greeting_timed = True
+            logger.info("agent latency ms=%d kind=greeting session=%s", int((now - self._opened_at) * 1000), self._session_id)
 
     async def stop(self, reason: str = "stopped") -> None:
         self._stopped = True
@@ -238,4 +276,9 @@ class GrokAgentConversation:
         logger.info("agent conversation stopped session=%s reason=%s", self._session_id, reason)
 
     def stats(self) -> dict[str, Any]:
-        return {"engine": "agent", **self.sender.stats()}
+        out: dict[str, Any] = {"engine": "agent", **self.sender.stats()}
+        if self._latencies_ms:
+            out["replyLatencyMsLast"] = self._latencies_ms[-1]
+            out["replyLatencyMsAvg"] = int(sum(self._latencies_ms) / len(self._latencies_ms))
+            out["replies"] = len(self._latencies_ms)
+        return out

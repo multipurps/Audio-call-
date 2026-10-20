@@ -276,6 +276,9 @@ class Settings:
     xai_api_key: str | None = field(default=None, repr=False)
     #: Inworld API key for the Custom (cloned) voice agent. Server-side only.
     inworld_api_key: str | None = field(default=None, repr=False)
+    #: The language model behind the Custom voice, as Inworld names it (e.g. "openai/gpt-4o-mini").
+    #: None uses the default in app/inworld_realtime.py. It must be a model the Inworld account may use.
+    inworld_model: str | None = None
 
     # -- conversational behaviour ---------------------------------------
     system_prompt: str | None = None
@@ -547,6 +550,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         luna_api_key=luna_key,
         xai_api_key=_env(env, "XAI_API_KEY"),
         inworld_api_key=_env(env, "INWORLD_API_KEY"),
+        inworld_model=_env(env, "INWORLD_REALTIME_MODEL"),
         latency_log=_env_bool(env, "ASSISTANT_LATENCY_LOG", True),
         system_prompt=_env(env, "ASSISTANT_SYSTEM_PROMPT"),
         greeting=_env(env, "ASSISTANT_GREETING"),

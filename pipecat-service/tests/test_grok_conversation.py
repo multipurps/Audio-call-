@@ -229,3 +229,85 @@ async def test_a_key_saved_in_admin_wins_over_the_server_setting(patched):
     assert await gc.resolve_xai_key(settings) == "xai-admin-key-1111"
     _FakeRest.rows = []
     assert await gc.resolve_xai_key(settings) == "xai-admin-key-1111"  # cached for a minute
+
+
+def _err(text="This model is currently not available on your plan."):
+    return RealtimeEvent("error", text=text)
+
+
+@pytest.mark.asyncio
+async def test_a_call_whose_replies_keep_failing_is_ended_with_the_reason(patched):
+    """The Inworld plan error: the opening line plays, then every reply is refused. The call must not sit
+    there silently being billed for listening."""
+    clients, _ = patched
+    ended = []
+
+    async def on_ended(reason):
+        ended.append(reason)
+
+    conv = make_conv(on_ended=on_ended)
+    await conv.start()
+    clients[0].events_to_yield = [
+        RealtimeEvent("audio", audio=b"greeting"),
+        RealtimeEvent("user_transcript", text="hello?"), _err(),
+        RealtimeEvent("user_transcript", text="are you there?"), _err(),
+        RealtimeEvent("user_transcript", text="talk to me"), _err(),
+        RealtimeEvent("audio", audio=b"never reached"),
+    ]
+    await conv._task
+    assert ended == ["agent-error"]
+    assert gc.MAX_CONSECUTIVE_AGENT_ERRORS == 3
+
+
+@pytest.mark.asyncio
+async def test_a_reply_that_works_resets_the_count_so_a_hiccup_does_not_end_the_call(patched):
+    clients, _ = patched
+    ended = []
+
+    async def on_ended(reason):
+        ended.append(reason)
+
+    conv = make_conv(on_ended=on_ended)
+    await conv.start()
+    clients[0].events_to_yield = [_err(), _err(), RealtimeEvent("audio", audio=b"ok"), _err(), _err()]
+    await conv._task
+    assert ended == ["agent-ended"]  # only the stream closing; never gave up
+
+
+@pytest.mark.asyncio
+async def test_reply_time_is_logged_from_the_caller_stopping_to_the_first_agent_audio(patched, caplog, monkeypatch):
+    import logging
+    clients, _ = patched
+    now = {"t": 100.0}
+    # only this module's clock is replaced; the event loop keeps the real one
+    monkeypatch.setattr(gc, "time", types.SimpleNamespace(monotonic=lambda: now["t"], time=gc.time.time))
+    conv = make_conv()
+    await conv.start()  # connected at t=100.0
+
+    async def events():
+        now["t"] = 100.5
+        yield RealtimeEvent("audio", audio=b"greeting")          # opening line 0.5 s after connect
+        now["t"] = 101.0
+        yield RealtimeEvent("other", raw_type="input_audio_buffer.speech_stopped")  # caller stops
+        now["t"] = 101.9
+        yield RealtimeEvent("audio", audio=b"reply")             # first reply audio 0.9 s later
+
+    clients[0].events = events
+    with caplog.at_level(logging.INFO, logger="emysa.agent"):
+        await conv._task
+    lines = [r.getMessage() for r in caplog.records if "agent latency" in r.getMessage()]
+    assert lines[0].startswith("agent latency ms=500 kind=greeting")
+    assert lines[1].startswith("agent latency ms=900 kind=reply")
+    assert conv.stats()["replyLatencyMsLast"] == 900 and conv.stats()["replies"] == 1
+
+
+def test_the_inworld_model_can_be_set_without_a_code_change(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(gc, "build_inworld_session", lambda **kw: seen.update(kw) or {})
+    for model, expect in (("openai/gpt-4o-mini", "openai/gpt-4o-mini"), (None, None)):
+        seen.clear()
+        settings = types.SimpleNamespace(xai_api_key="k", inworld_api_key="k", inworld_model=model, bridge_sample_rate=16000,
+                                         mock_mode=False, supabase_url=None, supabase_service_role_key=None)
+        gc.GrokAgentConversation(settings=settings, session_id="c", serializer=None, send_audio=None, send_control=None,
+                                 on_ended=None, prompt="P", greeting=None, voice_id="v", transcript=None, provider="inworld")
+        assert seen.get("model") == expect
