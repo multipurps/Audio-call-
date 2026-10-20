@@ -31,7 +31,7 @@
 </script>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-10-16.1">
+<link rel="stylesheet" href="styles.css?v=2026-10-18.1">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -149,7 +149,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-10-17.1').catch(function (err) {
+        import('./app.js?v=2026-10-18.1').catch(function (err) {
           showBootError('Something went wrong. Check your connection and try again.', 'Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -1113,20 +1113,17 @@
     </div>
 
     <div id="voicePaneCustom" class="hidden">
-      <p class="hint" style="margin:0 0 12px;">Your own cloned voice. Emysa speaks as you on calls.</p>
+      <div class="sectionLabel">Voice</div>
+      <p class="hint" style="margin:0 0 12px;">A voice you create from a recording. Emysa speaks as you.</p>
       <div id="agentVoiceListCustom"></div>
-      <div class="sectionLabel" style="margin-top:20px;">Clone your voice</div>
-      <p class="hint" style="margin:0 0 12px;">One clear clip of your voice, recorded in a quiet room. Any audio file works (MP3, M4A, WAV, a Voice Memo); Emysa uses up to 15 seconds of the speech. Only clone your own voice, or one you have the right to use.</p>
-      <div class="field"><label>Name</label>
-        <div class="inputWrap"><input type="text" id="cloneName" placeholder="My voice" maxlength="60" autocomplete="off"></div>
+      <div class="voiceAddHead"><span>+</span> Add New Voice</div>
+      <p class="hint voiceNeeds" id="voiceNeeds">Needs <b>5 to 15 seconds</b> of you speaking clearly. 3 seconds is the minimum.</p>
+      <div id="voiceCloneSection" style="display:flex; gap:10px;">
+        <button type="button" class="secondaryBtn" id="recordVoiceBtn">Record</button>
+        <button type="button" class="secondaryBtn" id="uploadVoiceBtn">Upload</button>
       </div>
-      <div class="field"><label>Clip</label><input type="file" id="cloneFile" accept="audio/*,video/mp4,video/quicktime,video/webm,.mp3,.m4a,.aac,.wav,.wave,.caf,.aif,.aiff,.flac,.ogg,.oga,.opus,.webm,.mp4,.mov,.3gp,.amr"></div>
-      <label style="display:flex; gap:8px; align-items:flex-start; margin:8px 0;">
-        <input type="checkbox" id="cloneConsent" style="margin-top:3px;">
-        <span class="hint" style="margin:0;">This is my own voice, or I have the right to use it.</span>
-      </label>
-      <button class="primaryBtn" id="cloneBtn">Clone voice</button>
-      <p class="hint" id="cloneStatus" style="margin:10px 4px 0; min-height:18px;"></p>
+      <input type="file" id="cloneFile" accept="audio/*,video/mp4,video/quicktime,video/webm,.mp3,.m4a,.aac,.wav,.wave,.caf,.aif,.aiff,.flac,.ogg,.oga,.opus,.webm,.mp4,.mov,.3gp,.amr" style="display:none;">
+      <p class="hint voiceCloneStatus" id="cloneStatus"></p>
     </div>
     <div id="voicePaneLive" class="hidden">
       <p class="hint" style="margin:0 0 12px;">Built-in voices. Emysa uses the one you choose on calls.</p>
@@ -1522,7 +1519,7 @@
     <p class="callDetailAgainStatus" id="callDetailAgainStatus" role="status"></p>
   </div>
 </dialog>
-  <script src="btnLoading.js?v=2026-10-16.1" defer></script>
+  <script src="btnLoading.js?v=2026-10-18.1" defer></script>
   <script src="callWakeLock.js?v=2026-10-17.1" defer></script>
   <script src="tabpill.js?v=2026-10-12.6" defer></script>
 </body>

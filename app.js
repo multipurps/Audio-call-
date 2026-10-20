@@ -8,7 +8,7 @@ import { DEFAULT_MOOD, selectMood, toggleArgue, argueVisible, moodButtonLabel, m
 import { answeredCallPill, assistantCallPill, listenInPill, liveCallView, endedCallLabel, formatCallTimer, TERMINAL_STATUSES } from './lib/callStatus.js';
 import { userError, friendlyAccountName } from './lib/userFacing.js';
 import * as Tutorial from './lib/tutorial.js';
-import { fileToWavBase64, looksLikeAudio } from './lib/voiceClip.js';
+import { fileToWavBase64, looksLikeAudio, CLIP_MIN_SECONDS, CLIP_MAX_SECONDS } from './lib/voiceClip.js';
 import { pickFirstCallChannel, firstCallPrompt, firstCallExplainer } from './lib/firstCall.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -4876,7 +4876,7 @@ function renderVoiceList(containerId, voices, provider, note) {
 function renderAgentVoices() {
   if (!agentState) return;
   const custom = agentState.custom || {};
-  const customNote = custom.error || (custom.voices?.length ? '' : 'You have no custom voices yet. Clone your voice below.');
+  const customNote = custom.error || '';
   renderVoiceList('agentVoiceListCustom', custom.voices, 'custom', customNote);
   renderVoiceList('agentVoiceListLive', agentState.live?.voices, 'live', '');
 }
@@ -4888,41 +4888,118 @@ function readFileBase64(file) {
     r.readAsDataURL(file);
   });
 }
-$('cloneBtn').addEventListener('click', async () => {
-  const btn = $('cloneBtn');
+// ---- Custom voice: Record or Upload, then clone ----
+// One clip of 5 to 15 seconds (3 is the minimum, only the first 15 are used). The browser turns
+// whatever it gets into a short WAV (lib/voiceClip.js). No form: the voice is named automatically
+// and the "this is my own voice" confirmation is a single tap, asked once per session.
+$('voiceNeeds').innerHTML = `Needs <b>5 to ${CLIP_MAX_SECONDS} seconds</b> of you speaking clearly. ${CLIP_MIN_SECONDS} seconds is the minimum.`;
+
+function confirmOwnVoice() {
+  try { if (sessionStorage.getItem('voiceConsent')) return true; } catch { /* ask every time */ }
+  if (!confirm('Only add your own voice, or one you have the right to use. Continue?')) return false;
+  try { sessionStorage.setItem('voiceConsent', '1'); } catch { /* ignore */ }
+  return true;
+}
+function nextVoiceName() {
+  const n = (agentState?.custom?.voices?.length || 0) + 1;
+  return n === 1 ? 'My voice' : `My voice ${n}`;
+}
+const fmtClock = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+
+// Clone from a recorded Blob or a picked File. `btn` is the button the person pressed.
+async function cloneVoiceFrom(blob, btn) {
   const status = $('cloneStatus');
-  const name = $('cloneName').value.trim();
-  const file = $('cloneFile').files?.[0];
-  if (!$('cloneConsent').checked) { status.textContent = 'Tick the box to confirm this is your voice, or that you have the right to use it.'; return; }
-  if (!name) { status.textContent = 'Give the voice a name.'; return; }
-  if (!file) { status.textContent = 'Choose one audio clip.'; return; }
-  if (!looksLikeAudio(file)) { status.textContent = 'Choose an audio file, such as an MP3, M4A or WAV recording of your voice.'; return; }
-  btn.disabled = true;
+  const other = btn === $('recordVoiceBtn') ? $('uploadVoiceBtn') : $('recordVoiceBtn');
+  setBtnLoading(btn, true, 'Cloning…');
+  other.disabled = true;
   status.textContent = 'Reading your clip…';
   try {
-    // Any audio the phone can play is decoded here and sent as a short WAV, the format the clone
-    // service always accepts, so the format and the 4 MB limit are never the user's problem.
-    const clip = await fileToWavBase64(file);
-    status.textContent = clip.trimmed ? `Cloning your voice from the first ${Math.round(clip.seconds)} seconds…` : 'Cloning your voice…';
-    const data = clip.base64;
+    const clip = await fileToWavBase64(blob);
+    status.textContent = clip.trimmed ? `Cloning from the first ${Math.round(clip.seconds)} seconds…` : 'Cloning your voice…';
     const resp = await authedFetch('/api/voice-clone?target=agent&action=clone', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, consent: true, sample: { type: 'audio/wav', data } }),
+      body: JSON.stringify({ name: nextVoiceName(), consent: true, sample: { type: 'audio/wav', data: clip.base64 } }),
     });
     const out = await resp.json().catch(() => ({}));
     if (!resp.ok) { status.textContent = out.error || 'Could not clone your voice.'; return; }
-    status.textContent = 'Your voice is ready. It is in the Custom list.';
-    $('cloneName').value = '';
-    $('cloneFile').value = '';
-    $('cloneConsent').checked = false;
     await loadAgentState();
+    if (out.voiceId) { voicePending = { type: 'agent', provider: 'custom', agentVoiceId: out.voiceId }; renderVoiceSettings(); }
+    status.textContent = 'Your voice is ready. Tap Apply Changes to use it.';
   } catch (err) {
     status.textContent = err.message || 'Could not clone your voice.';
   } finally {
-    btn.disabled = false;
+    setBtnLoading(btn, false);
+    other.disabled = false;
   }
+}
+
+let voiceRec = null; // { recorder, stream, startedAt, tick, cancelled }
+function cancelVoiceRecording() { if (voiceRec) { voiceRec.cancelled = true; stopVoiceRecording(); } }
+function stopVoiceRecording() {
+  if (!voiceRec) return;
+  clearInterval(voiceRec.tick);
+  try { if (voiceRec.recorder.state !== 'inactive') voiceRec.recorder.stop(); } catch { /* already stopped */ }
+}
+$('recordVoiceBtn').addEventListener('click', async () => {
+  const btn = $('recordVoiceBtn');
+  const status = $('cloneStatus');
+  if (voiceRec) { stopVoiceRecording(); return; }
+  if (btn.disabled || !confirmOwnVoice()) return;
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    status.textContent = 'Recording is not available here. Use Upload instead.';
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+  } catch {
+    status.textContent = 'Microphone access is off. Allow it in your phone settings, or use Upload.';
+    return;
+  }
+  const recorder = new MediaRecorder(stream);
+  const chunks = [];
+  const rec = { recorder, stream, startedAt: Date.now(), tick: null, cancelled: false };
+  voiceRec = rec;
+  recorder.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data); };
+  recorder.onstop = async () => {
+    const seconds = (Date.now() - rec.startedAt) / 1000;
+    stream.getTracks().forEach((t) => t.stop());
+    clearInterval(rec.tick);
+    voiceRec = null;
+    btn.textContent = 'Record';
+    $('uploadVoiceBtn').disabled = false;
+    if (rec.cancelled) { status.textContent = ''; return; }
+    if (seconds < CLIP_MIN_SECONDS) { status.textContent = `That was too short. Record at least ${CLIP_MIN_SECONDS} seconds.`; return; }
+    await cloneVoiceFrom(new Blob(chunks, { type: recorder.mimeType || 'audio/mp4' }), btn);
+  };
+  recorder.start();
+  $('uploadVoiceBtn').disabled = true;
+  status.textContent = 'Speak naturally in a quiet room.';
+  const paint = () => {
+    const sec = Math.min((Date.now() - rec.startedAt) / 1000, CLIP_MAX_SECONDS);
+    btn.textContent = `Stop · ${fmtClock(sec)} / ${fmtClock(CLIP_MAX_SECONDS)}`;
+    if (sec >= 5 && status.textContent === 'Speak naturally in a quiet room.') status.textContent = 'Good length. Tap Stop when you are done.';
+    if (sec >= CLIP_MAX_SECONDS) stopVoiceRecording();
+  };
+  paint();
+  rec.tick = setInterval(paint, 250);
 });
+
+$('uploadVoiceBtn').addEventListener('click', () => {
+  if ($('uploadVoiceBtn').disabled || !confirmOwnVoice()) return;
+  $('cloneStatus').textContent = '';
+  $('cloneFile').click();
+});
+$('cloneFile').addEventListener('change', async () => {
+  const input = $('cloneFile');
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  if (!looksLikeAudio(file)) { $('cloneStatus').textContent = 'Choose an audio file, such as an MP3, M4A or WAV recording of your voice.'; return; }
+  await cloneVoiceFrom(file, $('uploadVoiceBtn'));
+});
+
 // The floating Apply button steps out of the way while the screen or a voice list scrolls, and returns when it stops.
 (function attachVoiceScroll() {
   let timer = null;
@@ -4935,6 +5012,7 @@ $('cloneBtn').addEventListener('click', async () => {
   if (body) body.addEventListener('scroll', hide, { passive: true });
 })();
 function showVoiceTab(which) {
+  if (which !== 'custom') cancelVoiceRecording();
   // Standard = GPT-Live presets. Custom = your cloned voice. Live = built-in presets.
   // Whichever is selected is the default for calls.
   const provider = which === 'custom' ? 'custom' : 'live';

@@ -1303,3 +1303,9 @@ button.isLoadingIcon::before{position:absolute; top:50%; left:50%; width:16px; h
 .voiceStatus:empty { display: none; }
 .voiceApplyFloat { position: absolute; left: 22px; width: calc(100% - 44px); box-sizing: border-box; bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 5; transition: opacity .25s ease, transform .25s ease; }
 .voiceApplyFloat.isHidden { opacity: 0; transform: translateY(14px); pointer-events: none; }
+
+/* Custom voice page: one hint line for the audio length, one quiet status line */
+.voiceNeeds{margin:-4px 4px 12px;}
+.voiceNeeds b{color:var(--text); font-weight:600;}
+.voiceCloneStatus{margin:12px 4px 0;}
+.voiceCloneStatus:empty{display:none;}
