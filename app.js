@@ -4925,7 +4925,7 @@ async function cloneVoiceFrom(blob, btn) {
     });
     const out = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      status.textContent = out.detail ? `${out.error} (${out.detail})` : (out.error || 'Could not clone your voice.'); // detail is sent to admins only
+      status.textContent = out.detail ? `${out.error} (${out.detail})` : out.reason ? `${out.error} Reason: ${out.reason}` : (out.error || 'Could not clone your voice.'); // detail is admin-only; reason is the cleaned provider reason for a refused clip
       if (resp.status === 409) await loadAgentState(); // they already have one: show it, with Delete
       return;
     }

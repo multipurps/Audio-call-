@@ -324,3 +324,80 @@ test('clone: an upstream refusal returns an accurate message and code; only an a
   assert.match(user.body.error, /busy right now/);
   assert.equal(user.body.detail, undefined, 'an ordinary user never sees the provider’s reason');
 });
+
+import { cleanReason } from '../lib/agentRoute.js';
+
+test('the reason shown for a refused clip is short and carries no urls, keys, ids or audio', () => {
+  assert.equal(cleanReason('No speech detected in sample'), 'No speech detected in sample');
+  const dirty = cleanReason(`Bad request, see https://docs.inworld.ai/x for ws__ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd and ${'QUFB'.repeat(50)}`);
+  assert.ok(!/https?:|docs\.inworld|QUFB|ABCDEFGHIJKLMNOP/.test(dirty), dirty);
+  assert.ok(cleanReason('x'.repeat(500)).length <= 180);
+  assert.equal(cleanReason(undefined), '');
+});
+
+test('clone: a refused clip returns the cleaned reason to an ordinary user', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const u = new URL(url);
+    const json = (b, ok, status) => ({ ok, status, json: async () => b, text: async () => JSON.stringify(b) });
+    if ((init.method || 'GET') === 'GET') return json({ voices: [], nextPageToken: '' }, true, 200);
+    if (u.pathname === '/voices/v1/voices:clone') return json({ error: { status: 'INVALID_ARGUMENT', message: 'Sample audio contains no detectable speech' } }, false, 400);
+    return json({}, true, 200);
+  };
+  const res = fakeRes();
+  try {
+    await agentRoute({ method: 'POST', query: { action: 'clone' }, body: { ...CLONE_BODY }, headers: {} }, res, fakeSupabase(), 'u1', { inworld: 'key' });
+  } finally { globalThis.fetch = realFetch; }
+  assert.equal(res.code, 502);
+  assert.equal(res.body.code, 'bad_sample');
+  assert.equal(res.body.reason, 'Sample audio contains no detectable speech');
+  assert.equal(res.body.detail, undefined, 'the raw HTTP detail stays admin-only');
+});
+
+test('clone: if Inworld refuses the owner tags, one retry with the marker in description only creates the voice', async () => {
+  const realFetch = globalThis.fetch;
+  const bodies = [];
+  globalThis.fetch = async (url, init = {}) => {
+    const u = new URL(url);
+    const json = (b, ok, status) => ({ ok, status, json: async () => b, clone() { return this; }, text: async () => JSON.stringify(b) });
+    if ((init.method || 'GET') === 'GET') {
+      // after the clone exists it is listed, owned by description
+      return json({ voices: bodies.length > 1 ? [{ voiceId: 'ws__my_voice_1', displayName: 'My voice', source: 'IVC', description: 'emysa-user-u1' }] : [], nextPageToken: '' }, true, 200);
+    }
+    if (u.pathname === '/voices/v1/voices:clone') {
+      bodies.push(JSON.parse(init.body));
+      if (bodies.length === 1) return json({ error: { status: 'INVALID_ARGUMENT', message: 'tags[0] is invalid' } }, false, 400);
+      return json({ voice: { voiceId: 'ws__my_voice_1', displayName: 'My voice' } }, true, 200);
+    }
+    return json({}, true, 200);
+  };
+  const res = fakeRes();
+  try {
+    await agentRoute({ method: 'POST', query: { action: 'clone' }, body: { ...CLONE_BODY }, headers: {} }, res, fakeSupabase(), 'u1', { inworld: 'key' });
+  } finally { globalThis.fetch = realFetch; }
+  assert.equal(res.code, 200, JSON.stringify(res.body));
+  assert.equal(res.body.voiceId, 'ws__my_voice_1');
+  assert.equal(bodies.length, 2);
+  assert.deepEqual(bodies[0].tags, ['emysa-user-u1']);
+  assert.equal(bodies[1].tags, undefined);
+  assert.equal(bodies[1].description, 'emysa-user-u1', 'ownership is still recorded');
+});
+
+test('clone: when both attempts are refused, the user gets one accurate message and the reason', async () => {
+  const realFetch = globalThis.fetch;
+  let posts = 0;
+  globalThis.fetch = async (url, init = {}) => {
+    const u = new URL(url);
+    const json = (b, ok, status) => ({ ok, status, json: async () => b, clone() { return this; }, text: async () => JSON.stringify(b) });
+    if ((init.method || 'GET') === 'GET') return json({ voices: [], nextPageToken: '' }, true, 200);
+    if (u.pathname === '/voices/v1/voices:clone') { posts += 1; return json({ message: 'Sample too short' }, false, 400); }
+    return json({}, true, 200);
+  };
+  const res = fakeRes();
+  try {
+    await agentRoute({ method: 'POST', query: { action: 'clone' }, body: { ...CLONE_BODY }, headers: {} }, res, fakeSupabase(), 'u1', { inworld: 'key' });
+  } finally { globalThis.fetch = realFetch; }
+  assert.equal(posts, 2, 'exactly one retry, never a loop');
+  assert.equal(res.body.code, 'bad_sample');
+  assert.equal(res.body.reason, 'Sample too short');
+});
