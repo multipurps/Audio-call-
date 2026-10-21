@@ -4893,10 +4893,10 @@ function readFileBase64(file) {
   });
 }
 // ---- Custom voice: Record or Upload, then clone ----
-// One clip of 5 to 15 seconds (3 is the minimum, only the first 15 are used). The browser turns
+// One clip of 10 to 30 seconds is best (3 is the minimum, only the first 30 are used). The browser turns
 // whatever it gets into a short WAV (lib/voiceClip.js). No form: the voice is named automatically
 // and the "this is my own voice" confirmation is a single tap, asked once per session.
-$('voiceNeeds').innerHTML = `Needs <b>5 to ${CLIP_MAX_SECONDS} seconds</b> of you speaking clearly. ${CLIP_MIN_SECONDS} seconds is the minimum.`;
+$('voiceNeeds').innerHTML = `Best with <b>10 to ${CLIP_MAX_SECONDS} seconds</b> of you speaking clearly. ${CLIP_MIN_SECONDS} seconds is the minimum.`;
 
 function confirmOwnVoice() {
   try { if (sessionStorage.getItem('voiceConsent')) return true; } catch { /* ask every time */ }
@@ -4925,7 +4925,7 @@ async function cloneVoiceFrom(blob, btn) {
     });
     const out = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      status.textContent = out.error || 'Could not clone your voice.';
+      status.textContent = out.detail ? `${out.error} (${out.detail})` : (out.error || 'Could not clone your voice.'); // detail is sent to admins only
       if (resp.status === 409) await loadAgentState(); // they already have one: show it, with Delete
       return;
     }

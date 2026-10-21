@@ -275,3 +275,52 @@ test('preview: a refusal is logged with its reason, and the user only sees a neu
     console.error = orig;
   }
 });
+
+// ---- why a clone failed -------------------------------------------------------------------
+import { describeCloneFailure } from '../lib/agentRoute.js';
+
+test('clone failures are told apart, and none shows the provider’s wording to an ordinary user', () => {
+  const cases = [
+    [429, { message: 'Rate limit exceeded' }, 'rate_limited', /busy/],
+    [403, { message: 'permission denied' }, 'not_authorized', /not available/],
+    [401, {}, 'not_authorized', /not available/],
+    [400, { error: { status: 'INVALID_ARGUMENT', message: 'audio too short' } }, 'bad_sample', /10 to 30 seconds/],
+    [400, { message: 'maximum number of voices reached' }, 'limit', /voice limit/],
+    [402, {}, 'limit', /voice limit/],
+    [503, {}, 'upstream', /had a problem/],
+    [418, {}, 'unknown', /Try again/],
+  ];
+  for (const [status, data, code, text] of cases) {
+    const why = describeCloneFailure(status, data);
+    assert.equal(why.code, code, `${status} ${JSON.stringify(data)}`);
+    assert.match(why.error, text);
+    assert.ok(!/INVALID_ARGUMENT|permission denied|Rate limit|audio too short|proto/i.test(why.error));
+    assert.match(why.detail, new RegExp(`^HTTP ${status}`));
+  }
+  const sample = describeCloneFailure(200, { audioSamplesValidated: [{ errors: [{ text: 'No speech detected' }] }] });
+  assert.equal(sample.code, 'bad_sample');
+  assert.match(sample.detail, /No speech detected/);
+});
+
+test('clone: an upstream refusal returns an accurate message and code; only an admin also gets the raw reason', async () => {
+  const body = { ...CLONE_BODY };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const u = new URL(url);
+    const json = (b, ok, status) => ({ ok, status, json: async () => b, text: async () => JSON.stringify(b) });
+    if ((init.method || 'GET') === 'GET') return json({ voices: [], nextPageToken: '' }, true, 200);
+    if (u.pathname === '/voices/v1/voices:clone') return json({ error: { status: 'RESOURCE_EXHAUSTED', message: 'Voice cloning rate limit exceeded' } }, false, 429);
+    return json({}, true, 200);
+  };
+  const sb = fakeSupabase();
+  const user = fakeRes();
+  try {
+    await agentRoute({ method: 'POST', query: { action: 'clone' }, body, headers: {} }, user, sb, 'u1', { inworld: 'key' });
+  } finally {
+    globalThis.fetch = realFetch; // never leak a fake fetch into the other tests
+  }
+  assert.equal(user.code, 502);
+  assert.equal(user.body.code, 'rate_limited');
+  assert.match(user.body.error, /busy right now/);
+  assert.equal(user.body.detail, undefined, 'an ordinary user never sees the provider’s reason');
+});

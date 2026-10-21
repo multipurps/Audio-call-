@@ -23,13 +23,13 @@ test('the old clutter is gone: no name field, consent checkbox, native file pick
 });
 
 test('the page says how much audio is needed, and the numbers come from the clip rules', () => {
-  assert.match(pane, /id="voiceNeeds"[^>]*>[^<]*<b>5 to 15 seconds<\/b>/);
-  assert.equal(CLIP_MAX_SECONDS, 15);
+  assert.match(pane, /id="voiceNeeds"[^>]*>[^<]*<b>10 to 30 seconds<\/b>/);
+  assert.equal(CLIP_MAX_SECONDS, 30);
   assert.equal(CLIP_MIN_SECONDS, 3);
-  assert.match(app, /Needs <b>5 to \$\{CLIP_MAX_SECONDS\} seconds<\/b>[^`]*\$\{CLIP_MIN_SECONDS\} seconds is the minimum/);
+  assert.match(app, /Best with <b>10 to \$\{CLIP_MAX_SECONDS\} seconds<\/b>[^`]*\$\{CLIP_MIN_SECONDS\} seconds is the minimum/);
 });
 
-test('recording shows a live timer against the 15 second cap and stops by itself', () => {
+test('recording shows a live timer against the clip-length cap and stops by itself', () => {
   assert.match(app, /Stop · \$\{fmtClock\(sec\)\} \/ \$\{fmtClock\(CLIP_MAX_SECONDS\)\}/);
   assert.match(app, /if \(sec >= CLIP_MAX_SECONDS\) stopVoiceRecording\(\)/);
   assert.match(app, /Record at least \$\{CLIP_MIN_SECONDS\} seconds/);

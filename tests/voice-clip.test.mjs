@@ -32,9 +32,9 @@ test('stereo is averaged and resampling keeps the duration', () => {
   assert.ok(Math.abs(out.length - 24000) <= 1);
 });
 
-test('a long clip is cut to 15 seconds starting at the first speech, and stays small', () => {
+test('a long clip is cut to the maximum length starting at the first speech, and stays small', () => {
   const silence = new Float32Array(CLIP_RATE * 2);
-  const speech = tone(40, CLIP_RATE);
+  const speech = tone(CLIP_MAX_SECONDS + 25, CLIP_RATE);
   const all = new Float32Array(silence.length + speech.length);
   all.set(silence); all.set(speech, silence.length);
   const { wav, seconds } = prepareClip([all], CLIP_RATE);
@@ -71,15 +71,15 @@ test('base64 of the clip round-trips', () => {
 test('fileToWavBase64 decodes with the browser decoder and reports trimming; undecodable files get a clear message', async () => {
   class Ctx {
     async decodeAudioData() {
-      const data = tone(30, 44100);
-      return { numberOfChannels: 1, sampleRate: 44100, duration: 30, getChannelData: () => data };
+      const data = tone(60, 44100);
+      return { numberOfChannels: 1, sampleRate: 44100, duration: 60, getChannelData: () => data };
     }
     close() {}
   }
   const file = { size: 1000, arrayBuffer: async () => new ArrayBuffer(8) };
   const out = await fileToWavBase64(file, Ctx);
   assert.equal(out.trimmed, true);
-  assert.ok(out.seconds <= 15.001);
+  assert.ok(out.seconds <= CLIP_MAX_SECONDS + 0.001);
   assert.ok(Buffer.from(out.base64, 'base64').subarray(0, 4).toString() === 'RIFF');
 
   class Bad { async decodeAudioData() { throw new Error('EncodingError'); } close() {} }
