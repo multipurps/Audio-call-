@@ -894,6 +894,8 @@ class CallConversation(_BaseConversation):
             provider=link.provider,
             # Custom voice: Inworld hears, takes turns and speaks; our own model (Luna) writes the replies.
             brain=LlmBrain.from_settings(self._settings) if link.provider == "inworld" else None,
+            # Luna's [[END_CALL]] / Grok's end_call: hang up once the goodbye has played.
+            on_end_call=self._schedule_assistant_hangup,
         )
         # No fallback: if the agent cannot start, the call fails and the reason is logged.
         try:
@@ -908,14 +910,20 @@ class CallConversation(_BaseConversation):
     async def note_call_active(self, source: str) -> bool:
         if self._agent is not None:
             # The call is answered for talk-time and the end report, as on the other engines.
-            if self._answered_at is None:
+            first = self._answered_at is None
+            if first:
                 self._answered_at = time.monotonic()
             # The same answer stamp every other engine writes (queued/ringing -> in_progress, answered_at).
             # Minutes are charged from answered_at, so an agent call must stamp it too: without this a
             # custom-voice call is never marked answered, and ends with no talk time on its row.
             if self.call_context is not None:
                 await self.call_context.set_in_progress()
-            return await self._agent.note_call_active(source)
+            active = await self._agent.note_call_active(source)
+            if first:
+                # The supervisor ends the call on the time budget and once goodbyes have been exchanged.
+                # It was only started on the other engines, so a Custom voice call never hung up.
+                self._after_answer()
+            return active
         return await super().note_call_active(source)
 
     async def _resolve_call_voice_and_engine(self) -> None:
@@ -1236,6 +1244,9 @@ class CallConversation(_BaseConversation):
 
     async def _inject_wrapup_cue(self, text: str) -> None:
         """Tell the model, mid-call, that time is running out (it speaks the wrap-up itself)."""
+        if self._agent is not None:
+            await self._agent.inject_cue(text)
+            return
         if self._context is None or self._task is None or self._stopped:
             return
         role = "developer" if self.engine == "live" else "system"
@@ -1245,7 +1256,25 @@ class CallConversation(_BaseConversation):
     async def _wrapup_hangup(self, reason: str, quick: bool) -> None:
         await self._graceful_assistant_hangup(quick=quick)
 
+    async def _agent_goodbye_wait(self, *, quick: bool) -> None:
+        """Agent calls: wait until the goodbye has been spoken and played out, bounded so a call never hangs open."""
+        agent = self._agent
+        await asyncio.sleep(0.8 if quick else 0.4)
+        deadline = time.monotonic() + 10.0
+        while not self._stopped and agent is not None and agent.is_speaking() and time.monotonic() < deadline:
+            await asyncio.sleep(0.1)
+        await asyncio.sleep(0.6)  # let the last audio reach the callee
+
     async def _graceful_assistant_hangup(self, *, quick: bool = False) -> None:
+        if self._agent is not None:
+            await self._agent_goodbye_wait(quick=quick)
+            if self._stopped:
+                return
+            clog("INFO", self._session_id, "assistant requested call termination", engine="agent")
+            with contextlib.suppress(Exception):
+                await self._send_control('{"type":"hangup","reason":"assistant-ended-call"}')
+            await self.stop("assistant-ended-call")
+            return
         if self._live_state is not None:
             if quick:
                 await asyncio.sleep(0.8)  # the goodbyes were already exchanged; let the last audio land

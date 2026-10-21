@@ -237,6 +237,11 @@ def wrapup_cue(stage: str, budget_secs: int) -> str:
     )
 
 
+def is_hard_cue(text: str) -> bool:
+    """True for the "time is up" cue (say goodbye now), false for the early "start closing" one."""
+    return text.startswith("Time is up")
+
+
 # --------------------------------------------------------------------------- supervisor
 
 class WrapUpSupervisor:

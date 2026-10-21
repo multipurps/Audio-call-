@@ -32,6 +32,24 @@ _EMOJI = re.compile(
 )
 _MARKDOWN = re.compile(r"[*_`#~]+")
 
+#: How Luna ends a call. She only writes the words to be spoken, so she cannot call a tool: like the
+#: classic pipeline, she adds this token at the very end of her goodbye. It is never spoken; the call
+#: conversation strips it and hangs up once the goodbye has been said.
+END_CALL_TAG = "[[END_CALL]]"
+_END_CALL_TAG = re.compile(r"\[\[\s*END[_ ]?CALL\s*\]\]", re.I)
+
+#: Appended to the instructions Luna is given on a Custom voice call. It also overrides the shared
+#: instructions' mention of an end_call action, which only GPT-Live has.
+HANGUP_RULES = (
+    "Ending the call: you are on a live phone call and you write only the words to be spoken aloud. "
+    "You hang up by writing the exact token " + END_CALL_TAG + " at the very end of your last line. "
+    "Do that when the conversation is finished and you are saying your final goodbye, or when the "
+    "person clearly asks you to hang up or end the call (say a brief goodbye first, then the token). "
+    "The token is never spoken. Never write it while the person is still asking or talking, never "
+    "write it on a line that is not a goodbye, and never mention it. For you the token is the "
+    "end_call action: ignore any other instruction about handing an action to a backend."
+)
+
 
 def split_ready(buffer: str, min_chars: int) -> tuple[list[str], str]:
     """The complete sentences at the front of `buffer` (each at least `min_chars` long), and the rest."""
@@ -48,10 +66,14 @@ def split_ready(buffer: str, min_chars: int) -> tuple[list[str], str]:
 def clean_for_speech(text: str) -> str:
     """Text as it should be spoken: no markdown marks or emoji, one space between words.
 
-    Square-bracket tags such as [laughs] are left alone: the voice reads those as delivery cues."""
+    Square-bracket tags such as [laughs] are left alone: the voice reads those as delivery cues.
+    The end-of-call token is kept whole (the markdown pass would otherwise eat its underscore) so the
+    call conversation can see it and hang up; it is never spoken."""
+    text = _END_CALL_TAG.sub("\x00", text)
     text = _MARKDOWN.sub("", text)
     text = _EMOJI.sub("", text)
-    return re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
+    return text.replace("\x00", END_CALL_TAG)
 
 
 class LlmBrain:

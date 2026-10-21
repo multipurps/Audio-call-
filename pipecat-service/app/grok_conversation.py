@@ -16,9 +16,12 @@ from typing import Any, Awaitable, Callable
 from app.call_context import _Rest
 from app.config import Settings
 from app.conversation import PacedAudioSender
-from app.grok_realtime import GrokRealtimeClient, build_session_update
+from app.call_wrapup import is_hard_cue
+from app.emotion import should_end_call
+from app.grok_realtime import END_CALL_TOOL, GrokRealtimeClient, build_session_update
 from app.inworld_realtime import InworldRealtimeClient, build_inworld_session
 from app.monitor import DIRECTION_CALLER, DIRECTION_EMYSA, get_hub
+from app.own_brain import HANGUP_RULES as BRAIN_HANGUP_RULES
 
 logger = logging.getLogger("emysa.agent")
 
@@ -32,6 +35,9 @@ MAX_CONSECUTIVE_AGENT_ERRORS = 3
 SPEAK_DONE_TIMEOUT_SECS = 12.0
 # An error right after we cancelled speech is the provider answering the cancel, not a failed reply.
 CANCEL_ERROR_GRACE_SECS = 1.5
+# Grok hangs up by calling end_call: after the model's goodbye (the response that follows the call)
+# has finished. If that never completes, the call still ends after this long.
+END_CALL_RESPONSE_TIMEOUT_SECS = 8.0
 # Said once if the brain fails to write a reply, so the caller is not left in silence.
 BRAIN_FALLBACK_LINE = "Sorry, I lost my train of thought. Could you say that again?"
 
@@ -141,6 +147,7 @@ class GrokAgentConversation:
         transcript: Any = None,
         provider: str = "grok",
         brain: Any = None,
+        on_end_call: Callable[[], None] | None = None,
     ) -> None:
         self._settings = settings
         self._provider = provider
@@ -151,6 +158,16 @@ class GrokAgentConversation:
         # Our own model writes the replies when one is given (Inworld only hears, takes turns and speaks).
         self._brain = brain if provider == "inworld" else None
         self._prompt = prompt
+        # Hanging up: the call conversation passes this in; it ends the call once the goodbye has played.
+        self._on_end_call = on_end_call
+        self._hangup_requested = False
+        self._last_user_text = ""
+        self._cues: list[str] = []          # wrap-up cues for Luna's next reply (time budget)
+        self._cue_task: asyncio.Task[None] | None = None
+        self._ending_after_done = False     # Grok called end_call: hang up when its goodbye is done
+        self._end_skip_dones = 0            # response.done events to let pass first (the one that carried the call)
+        self._spoke_this_response = False   # the response in progress has produced audio (a goodbye)
+        self._end_timer: asyncio.Task[None] | None = None
         if provider == "inworld":
             model = getattr(settings, "inworld_model", None)
             extra = {"model": model} if model else {}
@@ -161,6 +178,7 @@ class GrokAgentConversation:
         else:
             self._session_update = build_session_update(
                 instructions=prompt, voice_id=voice_id, rate=settings.bridge_sample_rate,
+                end_call_tool=on_end_call is not None,
             )
         self._client: GrokRealtimeClient | None = None
         self._task: asyncio.Task[None] | None = None
@@ -238,16 +256,25 @@ class GrokAgentConversation:
         try:
             assert self._client is not None
             async for event in self._client.events():
+                if event.kind == "user_transcript" and event.text:
+                    self._last_user_text = event.text
                 if event.kind == "audio":
                     if self._drop_audio:
                         continue  # the tail of a line the caller cut off
                     self._errors_in_row = 0
+                    self._spoke_this_response = True
                     self._note_first_audio()
                     await self.sender.enqueue(event.audio, self._settings.bridge_sample_rate)
                 elif event.kind == "interrupted":
                     await self.sender.interrupt()
+                    if self._ending_after_done:
+                        # The caller spoke over the goodbye ("bye... oh, one more thing"): never hang up on them.
+                        self._ending_after_done = False
+                        logger.info("agent hangup cancelled, caller spoke session=%s", self._session_id)
                     if self._brain is not None:
                         await self._barge_in()
+                elif event.kind == "function_call":
+                    await self._on_function_call(event)
                 elif event.kind == "response_done":
                     self._line_done()
                     logger.info("agent event type=response.done session=%s", self._session_id)
@@ -257,7 +284,8 @@ class GrokAgentConversation:
                         await self._start_turn(event.text)
                 elif event.kind == "user_transcript" and event.text and self._brain is not None:
                     await self._start_turn(event.text)
-                elif event.kind == "agent_transcript" and event.text and self._transcript is not None:
+                elif event.kind == "agent_transcript" and event.text and self._transcript is not None and self._brain is None:
+                    # With our own brain the spoken lines are noted as they are sent (see _speak).
                     self._transcript.note("ai", event.text)
                 elif event.kind == "error":
                     if self._cancel_sent_at is not None and time.monotonic() - self._cancel_sent_at < CANCEL_ERROR_GRACE_SECS:
@@ -273,6 +301,16 @@ class GrokAgentConversation:
                         ended_reason = "agent-error"
                         break
                 elif event.kind == "other":
+                    if event.raw_type == "response.created":
+                        self._spoke_this_response = False
+                    elif event.raw_type == "response.done":
+                        if self._ending_after_done:
+                            if self._end_skip_dones > 0:
+                                self._end_skip_dones -= 1   # the response that carried the call; the goodbye follows
+                            else:
+                                self._ending_after_done = False
+                                self._request_hangup("assistant-ended-call")
+                        self._spoke_this_response = False
                     if event.raw_type == "input_audio_buffer.speech_stopped":
                         self._turn_ended_at = time.monotonic()
                     logger.info("agent event type=%s session=%s", event.raw_type or "-", self._session_id)
@@ -292,6 +330,8 @@ class GrokAgentConversation:
         self._drop_audio = False
         self._inflight += 1
         self._idle.clear()
+        if self._brain is not None and self._transcript is not None:
+            self._transcript.note("ai", text)  # lets the goodbye detector see what Emysa said
         await self._client.send_speak(text)
 
     def _line_done(self) -> None:
@@ -340,18 +380,27 @@ class GrokAgentConversation:
         await self._cancel_turn()  # the previous reply (and its partial history) is settled first
         if self._turn_ended_at is not None:
             logger.info("agent stt ms=%d session=%s", int((time.monotonic() - self._turn_ended_at) * 1000), self._session_id)
+        self._last_user_text = text
         self._history.append({"role": "user", "content": text})
         self._turn_task = asyncio.create_task(self._run_turn(), name=f"agent-brain-{self._session_id}")
+
+    def _brain_prompt(self, cues: list[str]) -> str:
+        """The instructions Luna gets: the app's, how to hang up, and any time-budget cue for this reply."""
+        parts = [self._prompt, BRAIN_HANGUP_RULES, *cues]
+        return "\n\n".join(parts)
 
     async def _run_turn(self) -> None:
         started = time.monotonic()
         queue: asyncio.Queue[str | None] = asyncio.Queue()
         spoken: list[str] = []
+        cues, self._cues = self._cues, []
+        prompt = self._brain_prompt(cues)
+        end_requested = False
 
         async def produce() -> None:
             try:
                 first = True
-                async for sentence in self._brain.stream_sentences(self._prompt, list(self._history)):
+                async for sentence in self._brain.stream_sentences(prompt, list(self._history)):
                     if first:
                         first = False
                         logger.info("agent brain first_sentence_ms=%d session=%s", int((time.monotonic() - started) * 1000), self._session_id)
@@ -366,6 +415,13 @@ class GrokAgentConversation:
                 sentence = await queue.get()
                 if sentence is None:
                     break
+                # Luna hangs up with [[END_CALL]] at the end of her goodbye. It is never spoken. The same
+                # guard as the classic engine applies: not while the caller is still asking or talking.
+                end, sentence = should_end_call(sentence, self._last_user_text)
+                if end:
+                    end_requested = True
+                if not sentence:
+                    continue
                 await self._wait_idle()
                 await self._speak(sentence)
                 spoken.append(sentence)
@@ -382,6 +438,10 @@ class GrokAgentConversation:
             producer.cancel()
             if spoken:
                 self._history.append({"role": "assistant", "content": " ".join(spoken)})
+        if end_requested and not failed:
+            await self._wait_idle()  # the goodbye has been spoken in full
+            self._request_hangup("assistant-ended-call")
+            return
         if failed:
             if self._brain_failures >= MAX_CONSECUTIVE_AGENT_ERRORS:
                 logger.error("agent gave up session=%s after %d failed replies in a row; ending the call", self._session_id, self._brain_failures)
@@ -390,6 +450,85 @@ class GrokAgentConversation:
             elif not spoken:
                 await self._wait_idle()
                 await self._speak(BRAIN_FALLBACK_LINE)
+
+    # -- hanging up --------------------------------------------------------------------------
+
+    def _request_hangup(self, reason: str) -> None:
+        """Ask the call to end. It waits for the goodbye audio to play out before hanging up."""
+        if self._hangup_requested or self._stopped:
+            return
+        self._hangup_requested = True
+        logger.info("agent requested hangup session=%s reason=%s", self._session_id, reason)
+        if self._on_end_call is not None:
+            self._on_end_call()
+
+    def is_speaking(self) -> bool:
+        """True while a line is still being spoken or its audio is still being played to the caller."""
+        return self._inflight > 0 or bool(getattr(self.sender, "speaking", False))
+
+    async def _on_function_call(self, event: Any) -> None:
+        """Grok called a function. The only one it has is end_call (hang up)."""
+        if self._client is None or not event.call_id:
+            return
+        if event.text != END_CALL_TOOL:
+            logger.warning("agent called an unknown function session=%s name=%s", self._session_id, event.text)
+            await self._client.send_function_result(event.call_id, {"ok": False, "note": "Unknown action."})
+            return
+        end, _ = should_end_call("[[END_CALL]]", self._last_user_text)
+        if not end:
+            # The same guard as the other engines: the person is still asking or talking.
+            logger.info("agent end_call ignored, caller is still talking session=%s", self._session_id)
+            await self._client.send_function_result(
+                event.call_id, {"ok": False, "note": "The person is still talking. Do not hang up; carry on."},
+            )
+            await self._client.send_response_create()
+            return
+        logger.info("agent called end_call session=%s", self._session_id)
+        # The model is told to say goodbye first, then call end_call: in that case its goodbye is already
+        # in this response and the call ends when it is done. A silent call gets a goodbye asked for.
+        said_goodbye = self._spoke_this_response
+        self._ending_after_done = True
+        self._end_skip_dones = 0 if said_goodbye else 1
+        await self._client.send_function_result(
+            event.call_id, {"ok": True, "note": "The call is ending. If you have not already, say a brief goodbye."},
+        )
+        if not said_goodbye:
+            await self._client.send_response_create()
+        if self._end_timer is not None:
+            self._end_timer.cancel()
+        self._end_timer = asyncio.create_task(self._end_call_timeout(), name=f"agent-end-{self._session_id}")
+
+    async def _end_call_timeout(self) -> None:
+        await asyncio.sleep(END_CALL_RESPONSE_TIMEOUT_SECS)
+        if self._ending_after_done:
+            self._ending_after_done = False
+            self._request_hangup("assistant-ended-call")
+
+    async def inject_cue(self, text: str) -> None:
+        """A wrap-up cue from the time budget. Luna sees it in her next reply; "time is up" starts that reply now."""
+        if self._stopped:
+            return
+        if self._brain is None:
+            # Grok writes its own replies and has no way to be told mid-call. The budget's final
+            # force-hangup still ends the call; goodbyes and end_call end it earlier.
+            logger.info("agent wrap-up cue not delivered (no own brain) session=%s", self._session_id)
+            return
+        self._cues.append(text)
+        if is_hard_cue(text):
+            if self._cue_task is not None:
+                self._cue_task.cancel()
+            self._cue_task = asyncio.create_task(self._run_cue_turn(), name=f"agent-cue-{self._session_id}")
+
+    async def _run_cue_turn(self) -> None:
+        prev = self._turn_task
+        if prev is not None and not prev.done():
+            await asyncio.wait({prev})  # let the reply being spoken finish; never cut it off
+        if self._stopped or self._hangup_requested or not self._cues:
+            return
+        await self._wait_idle()
+        if self._turn_task is not None and not self._turn_task.done():
+            return  # the caller spoke meanwhile; that reply carries the cue
+        self._turn_task = asyncio.create_task(self._run_turn(), name=f"agent-brain-{self._session_id}")
 
     def _note_first_audio(self) -> None:
         """Log how long the agent took: the opening line after connect, and each reply after the caller stopped."""
@@ -405,6 +544,9 @@ class GrokAgentConversation:
 
     async def stop(self, reason: str = "stopped") -> None:
         self._stopped = True
+        for helper in (self._end_timer, self._cue_task):
+            if helper is not None and helper is not asyncio.current_task():
+                helper.cancel()
         await self._cancel_turn()
         task = self._task
         if task is not None and task is not asyncio.current_task():

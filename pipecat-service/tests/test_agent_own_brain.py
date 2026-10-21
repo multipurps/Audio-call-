@@ -140,7 +140,8 @@ async def test_a_finished_turn_is_answered_by_the_brain_one_line_at_a_time(rig):
     client.push("response_done")
     await settle()
     assert client.spoken[-1] == "I can help with that."          # ...the next only after it finished
-    assert brain.prompts == ["THE INSTRUCTIONS"]
+    assert len(brain.prompts) == 1 and brain.prompts[0].startswith("THE INSTRUCTIONS")
+    assert "[[END_CALL]]" in brain.prompts[0]                    # Luna is told how to hang up
     assert brain.histories[0] == [{"role": "assistant", "content": "Hi, Emysa here."},
                                   {"role": "user", "content": "Can you help me?"}]
     client.push("response_done")
