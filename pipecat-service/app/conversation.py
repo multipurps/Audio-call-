@@ -863,6 +863,7 @@ class CallConversation(_BaseConversation):
             return False
         from app.call_context import build_extra_context
         from app.grok_conversation import GrokAgentConversation, fetch_agent_link
+        from app.own_brain import LlmBrain
         from app.live import build_live_system_prompt
 
         link = await fetch_agent_link(self._settings, uid, self._session_id)
@@ -891,6 +892,8 @@ class CallConversation(_BaseConversation):
             voice_id=link.voice_id,
             transcript=self.transcript,
             provider=link.provider,
+            # Custom voice: Inworld hears, takes turns and speaks; our own model (Luna) writes the replies.
+            brain=LlmBrain.from_settings(self._settings) if link.provider == "inworld" else None,
         )
         # No fallback: if the agent cannot start, the call fails and the reason is logged.
         try:

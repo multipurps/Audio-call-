@@ -28,6 +28,12 @@ _KEY_TTL_SECS = 60.0
 # call hears the first line and then nothing, while the provider keeps billing for listening. After
 # this many failed replies in a row, with no speech between them, the call ends and says why.
 MAX_CONSECUTIVE_AGENT_ERRORS = 3
+# With our own brain: how long to wait for the line being spoken to finish before sending the next one.
+SPEAK_DONE_TIMEOUT_SECS = 12.0
+# An error right after we cancelled speech is the provider answering the cancel, not a failed reply.
+CANCEL_ERROR_GRACE_SECS = 1.5
+# Said once if the brain fails to write a reply, so the caller is not left in silence.
+BRAIN_FALLBACK_LINE = "Sorry, I lost my train of thought. Could you say that again?"
 
 
 @dataclass(frozen=True)
@@ -134,6 +140,7 @@ class GrokAgentConversation:
         voice_id: str | None,
         transcript: Any = None,
         provider: str = "grok",
+        brain: Any = None,
     ) -> None:
         self._settings = settings
         self._provider = provider
@@ -141,11 +148,15 @@ class GrokAgentConversation:
         self._on_ended = on_ended
         self._transcript = transcript
         self._greeting = greeting
+        # Our own model writes the replies when one is given (Inworld only hears, takes turns and speaks).
+        self._brain = brain if provider == "inworld" else None
+        self._prompt = prompt
         if provider == "inworld":
             model = getattr(settings, "inworld_model", None)
             extra = {"model": model} if model else {}
             self._session_update = build_inworld_session(
-                instructions=prompt, voice_id=voice_id, rate=settings.bridge_sample_rate, **extra,
+                instructions=prompt, voice_id=voice_id, rate=settings.bridge_sample_rate,
+                own_llm=self._brain is not None, **extra,
             )
         else:
             self._session_update = build_session_update(
@@ -161,6 +172,16 @@ class GrokAgentConversation:
         self._greeting_timed = False
         self._latencies_ms: list[int] = []
         self._errors_in_row = 0
+        # Own-brain state: what has been said, the reply being written/spoken, and what Inworld is still speaking.
+        self._history: list[dict[str, str]] = []
+        self._turn_task: asyncio.Task[None] | None = None
+        self._inflight = 0          # lines sent to be spoken whose response.done has not arrived
+        self._stale_dones = 0       # response.done events still owed by lines we cancelled
+        self._idle = asyncio.Event()
+        self._idle.set()
+        self._drop_audio = False    # after a barge-in, audio of the cut-off line is not played
+        self._cancel_sent_at: float | None = None
+        self._brain_failures = 0
         self.call_active = False
         self.sender = PacedAudioSender(
             session_id=session_id,
@@ -184,8 +205,14 @@ class GrokAgentConversation:
         await self._client.start()
         self._opened_at = time.monotonic()
         self.sender.start()
+        if self._brain is not None:
+            logger.info("agent brain=own model=%s session=%s", getattr(self._brain, "model", "?"), self._session_id)
         if self._greeting:
-            await self._client.send_greeting(self._greeting)
+            if self._brain is not None:
+                self._history.append({"role": "assistant", "content": self._greeting})
+                await self._speak(self._greeting)
+            else:
+                await self._client.send_greeting(self._greeting)
         self._task = asyncio.create_task(self._pump(), name=f"grok-events-{self._session_id}")
 
     async def push_audio(self, frame: Any) -> None:
@@ -212,16 +239,30 @@ class GrokAgentConversation:
             assert self._client is not None
             async for event in self._client.events():
                 if event.kind == "audio":
+                    if self._drop_audio:
+                        continue  # the tail of a line the caller cut off
                     self._errors_in_row = 0
                     self._note_first_audio()
                     await self.sender.enqueue(event.audio, self._settings.bridge_sample_rate)
                 elif event.kind == "interrupted":
                     await self.sender.interrupt()
+                    if self._brain is not None:
+                        await self._barge_in()
+                elif event.kind == "response_done":
+                    self._line_done()
+                    logger.info("agent event type=response.done session=%s", self._session_id)
                 elif event.kind == "user_transcript" and event.text and self._transcript is not None:
                     self._transcript.note("contact", event.text)
+                    if self._brain is not None:
+                        await self._start_turn(event.text)
+                elif event.kind == "user_transcript" and event.text and self._brain is not None:
+                    await self._start_turn(event.text)
                 elif event.kind == "agent_transcript" and event.text and self._transcript is not None:
                     self._transcript.note("ai", event.text)
                 elif event.kind == "error":
+                    if self._cancel_sent_at is not None and time.monotonic() - self._cancel_sent_at < CANCEL_ERROR_GRACE_SECS:
+                        logger.info("agent error right after cancel, not counted session=%s message=%s", self._session_id, event.text)
+                        continue
                     self._errors_in_row += 1
                     logger.warning("agent error session=%s message=%s", self._session_id, event.text)
                     if self._errors_in_row >= MAX_CONSECUTIVE_AGENT_ERRORS:
@@ -243,6 +284,113 @@ class GrokAgentConversation:
             if not self._stopped and self._on_ended is not None:
                 await self._on_ended(ended_reason)
 
+    # -- own brain ---------------------------------------------------------------------------
+
+    async def _speak(self, text: str) -> None:
+        """Send one line to be spoken. Lines go one at a time: the next waits for this one's response.done."""
+        assert self._client is not None
+        self._drop_audio = False
+        self._inflight += 1
+        self._idle.clear()
+        await self._client.send_speak(text)
+
+    def _line_done(self) -> None:
+        if self._stale_dones > 0:
+            self._stale_dones -= 1  # the end of a line we cancelled
+        else:
+            self._inflight = max(0, self._inflight - 1)
+        if self._inflight == 0:
+            self._idle.set()
+
+    async def _wait_idle(self) -> None:
+        try:
+            await asyncio.wait_for(self._idle.wait(), SPEAK_DONE_TIMEOUT_SECS)
+        except asyncio.TimeoutError:
+            logger.warning("agent line never finished; sending the next anyway session=%s", self._session_id)
+            self._inflight = 0
+            self._stale_dones = 0
+            self._idle.set()
+
+    async def _cancel_turn(self) -> None:
+        task, self._turn_task = self._turn_task, None
+        if task is None or task.done() or task is asyncio.current_task():
+            return  # a turn that is ending the call is already finishing: never cancel it from inside
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001 - its own errors were handled in the task
+            pass
+
+    async def _barge_in(self) -> None:
+        """The caller started talking: stop writing the reply, stop what is being spoken."""
+        self._drop_audio = True
+        await self._cancel_turn()
+        if self._inflight > 0 and self._client is not None:
+            self._stale_dones += self._inflight
+            self._inflight = 0
+            self._idle.set()
+            self._cancel_sent_at = time.monotonic()
+            try:
+                await self._client.send_cancel()
+            except Exception:  # noqa: BLE001 - the socket may be closing
+                pass
+
+    async def _start_turn(self, text: str) -> None:
+        """The caller finished a turn: Luna writes the reply."""
+        await self._cancel_turn()  # the previous reply (and its partial history) is settled first
+        if self._turn_ended_at is not None:
+            logger.info("agent stt ms=%d session=%s", int((time.monotonic() - self._turn_ended_at) * 1000), self._session_id)
+        self._history.append({"role": "user", "content": text})
+        self._turn_task = asyncio.create_task(self._run_turn(), name=f"agent-brain-{self._session_id}")
+
+    async def _run_turn(self) -> None:
+        started = time.monotonic()
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        spoken: list[str] = []
+
+        async def produce() -> None:
+            try:
+                first = True
+                async for sentence in self._brain.stream_sentences(self._prompt, list(self._history)):
+                    if first:
+                        first = False
+                        logger.info("agent brain first_sentence_ms=%d session=%s", int((time.monotonic() - started) * 1000), self._session_id)
+                    await queue.put(sentence)
+            finally:
+                await queue.put(None)
+
+        producer = asyncio.create_task(produce())
+        failed = False
+        try:
+            while True:
+                sentence = await queue.get()
+                if sentence is None:
+                    break
+                await self._wait_idle()
+                await self._speak(sentence)
+                spoken.append(sentence)
+            await producer  # surfaces a failure of the model call
+            self._brain_failures = 0
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - reported; after repeated failures the call ends
+            failed = True
+            self._brain_failures += 1
+            logger.warning("agent brain failed session=%s count=%d error=%s: %s", self._session_id,
+                           self._brain_failures, type(exc).__name__, str(exc)[:200])
+        finally:
+            producer.cancel()
+            if spoken:
+                self._history.append({"role": "assistant", "content": " ".join(spoken)})
+        if failed:
+            if self._brain_failures >= MAX_CONSECUTIVE_AGENT_ERRORS:
+                logger.error("agent gave up session=%s after %d failed replies in a row; ending the call", self._session_id, self._brain_failures)
+                if not self._stopped and self._on_ended is not None:
+                    await self._on_ended("agent-error")
+            elif not spoken:
+                await self._wait_idle()
+                await self._speak(BRAIN_FALLBACK_LINE)
+
     def _note_first_audio(self) -> None:
         """Log how long the agent took: the opening line after connect, and each reply after the caller stopped."""
         now = time.monotonic()
@@ -257,6 +405,7 @@ class GrokAgentConversation:
 
     async def stop(self, reason: str = "stopped") -> None:
         self._stopped = True
+        await self._cancel_turn()
         task = self._task
         if task is not None and task is not asyncio.current_task():
             task.cancel()

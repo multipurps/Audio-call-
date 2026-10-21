@@ -25,8 +25,11 @@ DEFAULT_STT = "inworld/inworld-stt-1"
 
 
 def build_inworld_session(*, instructions: str, voice_id: str | None, rate: int = 16000,
-                          model: str = DEFAULT_MODEL) -> dict[str, Any]:
-    """The session settings sent on connect: the app's instructions, the chosen voice, 16 kHz PCM."""
+                          model: str = DEFAULT_MODEL, own_llm: bool = False) -> dict[str, Any]:
+    """The session settings sent on connect: the app's instructions, the chosen voice, 16 kHz PCM.
+
+    With `own_llm`, Inworld still hears the caller, takes turns and transcribes, but does not write
+    replies (create_response is off): our own model does, and the reply is sent back to be spoken."""
     return {
         "type": "realtime",
         "model": model,
@@ -39,7 +42,7 @@ def build_inworld_session(*, instructions: str, voice_id: str | None, rate: int 
                 "turn_detection": {
                     "type": "semantic_vad",
                     "eagerness": "medium",
-                    "create_response": True,
+                    "create_response": not own_llm,
                     "interrupt_response": True,
                 },
             },
@@ -79,9 +82,20 @@ class InworldRealtimeClient:
         if pcm:
             await self._send({"type": "input_audio_buffer.append", "audio": base64.b64encode(pcm).decode("ascii")})
 
-    async def send_greeting(self, text: str) -> None:
-        """A scripted opening line, spoken without the language model."""
+    async def send_speak(self, text: str) -> None:
+        """Text spoken verbatim in the session's voice, without Inworld's language model.
+
+        Inworld documents response.speak for this. One at a time is the supported pattern: the
+        next is sent after the previous one's response.done."""
         await self._send({"type": "response.speak", "text": text})
+
+    async def send_greeting(self, text: str) -> None:
+        """A scripted opening line."""
+        await self.send_speak(text)
+
+    async def send_cancel(self) -> None:
+        """Stop the line being spoken (the caller talked over it)."""
+        await self._send({"type": "response.cancel"})
 
     async def events(self) -> AsyncIterator[RealtimeEvent]:
         assert self._ws is not None, "start() first"
@@ -94,6 +108,8 @@ class InworldRealtimeClient:
                     yield RealtimeEvent("audio", audio=base64.b64decode(b64), raw_type=kind)
             elif kind == "input_audio_buffer.speech_started":
                 yield RealtimeEvent("interrupted", raw_type=kind)
+            elif kind == "response.done":
+                yield RealtimeEvent("response_done", raw_type=kind)
             elif kind == "conversation.item.input_audio_transcription.completed":
                 yield RealtimeEvent("user_transcript", text=str(data.get("transcript", "")), raw_type=kind)
             elif kind == "response.output_audio_transcript.done":
