@@ -5,7 +5,7 @@ import { primeAudioSession, createCallOutput, watchLifecycle, pickOutputMode, mi
 import { createPlayback } from './lib/appCallPlayback.js';
 import { describeMonitorMessage, describeMonitorClose, noAudioMessage, MONITOR_NO_AUDIO_MS } from './lib/monitorStatus.js';
 import { DEFAULT_MOOD, selectMood, toggleArgue, argueVisible, moodButtonLabel, moodPayload, moodChipVisible } from './lib/moodPicker.js';
-import { answeredCallPill, assistantCallPill, listenInPill, liveCallView, endedCallLabel, formatCallTimer, TERMINAL_STATUSES } from './lib/callStatus.js';
+import { answeredCallPill, assistantCallPill, listenInPill, liveCallView, endedCallLabel, formatCallTimer, formatCallMinutes, TERMINAL_STATUSES } from './lib/callStatus.js';
 import { userError, friendlyAccountName } from './lib/userFacing.js';
 import * as Tutorial from './lib/tutorial.js';
 import { fileToWavBase64, looksLikeAudio, CLIP_MIN_SECONDS, CLIP_MAX_SECONDS } from './lib/voiceClip.js';
@@ -1282,14 +1282,8 @@ function openAssistantCallScreen(opts) {
   setCallStatePill('connecting', 'Connecting…');
   playHeaderCallIntro().then(() => { if (assistantCallOpen) $('callScreen').classList.remove('hidden'); });
 
-  const startedAt = Date.now();
-  clearInterval(callTimerInterval);
-  callTimerInterval = setInterval(() => {
-    const secs = Math.floor((Date.now() - startedAt) / 1000);
-    const m = String(Math.floor(secs / 60)).padStart(2, '0');
-    const s = String(secs % 60).padStart(2, '0');
-    $('callTimer').textContent = `${m}:${s}`;
-  }, 1000);
+  // No clock until Emysa joins: she has not answered yet, so nothing is being charged (see startAppCallClock).
+  resetAppCallClock(trainer ? null : (homeBalance?.remaining ?? null), !trainer);
 
   $('callEndBtn').onclick = () => endAssistantCall();
   $('callMinimizeBtn').onclick = () => minimizeCallScreenToChat();
@@ -1374,12 +1368,53 @@ function showTrainerGate() {
 // call row as the service writes it, so it stays visible while you talk.
 let appCall = null;
 
+// The in-app call's clock. It starts when Emysa joins (the service's "ready"), the same moment the service
+// stamps calls.answered_at, and minutes are charged from answered_at. So the time and the minutes shown
+// here are what is being billed. Training calls are free, so they show the time only.
+let appCallJoinedAtMs = null;
+let appCallClock = null;
+let appCallMinutesAtStart = null;
+let appCallShowMinutes = false;
+
+function renderAppCallClock() {
+  const timer = $('callTimer');
+  const mins = $('callMinutes');
+  const text = formatCallTimer(appCallJoinedAtMs);
+  timer.classList.toggle('pending', text === null);
+  timer.setAttribute('aria-hidden', text === null ? 'true' : 'false');
+  timer.textContent = text ?? '\u00a0';
+  const m = appCallShowMinutes ? formatCallMinutes(appCallJoinedAtMs, appCallMinutesAtStart) : null;
+  mins.hidden = m === null;
+  mins.textContent = m ?? '';
+}
+function resetAppCallClock(minutesAtStart, showMinutes) {
+  clearInterval(appCallClock);
+  appCallClock = null;
+  appCallJoinedAtMs = null;
+  appCallMinutesAtStart = minutesAtStart;
+  appCallShowMinutes = showMinutes;
+  renderAppCallClock();
+}
+function startAppCallClock() {
+  if (appCallJoinedAtMs !== null) return; // "ready" is counted once
+  appCallJoinedAtMs = Date.now();
+  clearInterval(appCallClock);
+  appCallClock = setInterval(renderAppCallClock, 1000);
+  renderAppCallClock();
+}
+function freezeAppCallClock() {
+  clearInterval(appCallClock);
+  appCallClock = null;
+  if (appCallJoinedAtMs !== null) renderAppCallClock();
+}
+
 function stopAppCallSession({ hangUp = false } = {}) {
   const call = appCall;
   appCall = null;
   window.callWakeLock?.stop();
   if (!call) return;
   clearInterval(call.transcriptTimer);
+  freezeAppCallClock(); // keep the last time and minutes on screen; they stop counting
   if (trainerCall) { const t = trainerCall; trainerCall = null; clearInterval(t.timer); if (call.callId) trainerFinish(t, call.callId); }
   // The call was a briefing: once the service has saved the transcript, turn it
   // into a call plan in chat (which the user still has to confirm).
@@ -1621,6 +1656,7 @@ async function startAppCallSession() {
       if (info.kind === 'ended') { call.ended = true; finishAppCallUi('Call ended', { close: true }); return; }
       if (msg.type === 'ready') {
         call.opened = true;
+        startAppCallClock();
         call.briefable = !trainerCall;
         if (trainerCall) { const t = trainerCall; t.timer = setInterval(() => trainerLearn(t, call.callId), 15000); }
         startMic();

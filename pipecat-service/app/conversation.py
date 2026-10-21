@@ -910,6 +910,11 @@ class CallConversation(_BaseConversation):
             # The call is answered for talk-time and the end report, as on the other engines.
             if self._answered_at is None:
                 self._answered_at = time.monotonic()
+            # The same answer stamp every other engine writes (queued/ringing -> in_progress, answered_at).
+            # Minutes are charged from answered_at, so an agent call must stamp it too: without this a
+            # custom-voice call is never marked answered, and ends with no talk time on its row.
+            if self.call_context is not None:
+                await self.call_context.set_in_progress()
             return await self._agent.note_call_active(source)
         return await super().note_call_active(source)
 

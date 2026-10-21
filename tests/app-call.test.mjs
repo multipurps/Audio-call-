@@ -35,8 +35,21 @@ test('app-call-start creates the call row and mints a token matching the pipecat
   const rows = f.db.tables?.calls || (await f.db.from('calls').select('*')).data;
   const row = rows.find((r) => r.id === callId);
   assert.equal(row.platform, 'app');
-  assert.equal(row.status, 'in_progress');
   assert.equal(row.user_id, 'user-1');
+  // Minutes are charged from answered_at. Emysa has not joined yet, so the row must not carry it: the
+  // service marks the call in_progress and stamps answered_at when she joins. Pre-stamping it here
+  // charged the person for the connection time before anyone had answered.
+  assert.equal(row.status, 'ringing');
+  assert.equal(row.answered_at ?? null, null);
+});
+
+test('a call that never connects is canceled with no talk time, so it is never charged', async () => {
+  const { completeCall } = await import('../lib/callHangup.js');
+  const updates = [];
+  const supabase = { from: () => ({ update: (u) => { updates.push(u); return { eq: () => ({ in: async () => ({}) }) }; } }) };
+  await completeCall(supabase, { id: 'c1', answered_at: null, user_id: 'user-1' }).catch(() => {});
+  assert.equal(updates[0].status, 'canceled');
+  assert.equal('duration_seconds' in updates[0], false);
 });
 
 test('the call reports the Grok agent when Custom is on, and GPT-Live otherwise', async () => {

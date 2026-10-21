@@ -186,8 +186,10 @@ async function appCallStart(req, res, supabase, userId) {
     to_number: 'Emysa',
     objective: 'Have a live voice conversation with the user.',
     instructions: briefingInstructions(contactNames),
-    status: 'in_progress',
-    answered_at: new Date().toISOString(),
+    // Minutes are charged from answered_at (sql/027). Emysa has not joined yet: the service marks the call
+    // in_progress and stamps answered_at the moment she does (conversation.note_call_active). A call that
+    // never connects therefore ends 'canceled' with no talk time, and costs nothing.
+    status: 'ringing',
     session_id: chatSessionId,
     transcript: [],
   }).select('id').single();

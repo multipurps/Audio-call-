@@ -237,3 +237,23 @@ async def test_a_working_reply_resets_the_failure_count(rig):
     await settle()
     assert conv._brain_failures == 0
     await conv.stop()
+
+
+@pytest.mark.asyncio
+async def test_an_agent_call_stamps_the_answer_when_the_ai_joins():
+    """Minutes are charged from answered_at. The custom-voice (agent) engine must write it, as the others do."""
+    from app.conversation import CallConversation
+
+    stamped = []
+
+    class Ctx:
+        async def set_in_progress(self): stamped.append("in_progress")
+
+    class Agent:
+        async def note_call_active(self, source): return True
+
+    conv = object.__new__(CallConversation)
+    conv._agent, conv._answered_at, conv.call_context = Agent(), None, Ctx()
+    assert await CallConversation.note_call_active(conv, "relay-signal") is True
+    assert stamped == ["in_progress"]
+    assert conv._answered_at is not None
