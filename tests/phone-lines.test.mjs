@@ -138,13 +138,16 @@ async function api(f, action, body, opts) {
   return request(handler, action, body, opts);
 }
 
-test('line actions refuse users the admin has not approved, before any Twilio call', async () => {
+test('new accounts need no approval to set up a line, but renting a number still needs the owner', async () => {
   const f = lineFixture({ approved: false });
-  for (const action of ['line-get', 'line-verify-start', 'line-rent-buy']) {
-    const res = await api(f, action, { phone: '+2348011112222', phoneNumber: '+14155550101' }, { method: action === 'line-get' ? 'GET' : 'POST' });
-    assert.equal(res.code, 403, action);
-  }
-  assert.equal(f.calls.length, 0);
+  const get = await api(f, 'line-get', {}, { method: 'GET' });
+  assert.equal(get.code, 200, 'an unapproved account can see its line setup');
+  const verify = await api(f, 'line-verify-start', { phone: '+2348011112222' });
+  assert.notEqual(verify.code, 403, 'an unapproved account can add its own number');
+  const callsBefore = f.calls.length;
+  const rent = await api(f, 'line-rent-buy', { phoneNumber: '+14155550101' }, { method: 'POST' });
+  assert.equal(rent.code, 403, 'buying a real phone number still needs approval');
+  assert.equal(f.calls.length, callsBefore, 'nothing reached Twilio for the refused rental');
 });
 
 test('bring your own number: verify starts, code is shown, polling flips it to verified', async () => {

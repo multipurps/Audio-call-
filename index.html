@@ -149,7 +149,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-10-18.1').catch(function (err) {
+        import('./app.js?v=2026-10-21.1').catch(function (err) {
           showBootError('Something went wrong. Check your connection and try again.', 'Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -1273,7 +1273,7 @@
     <div class="sheetTitle">Referrals</div>
   </div>
   <div class="sheetBody">
-    <p>Share your code — you and your friend each get bonus calling minutes once they sign up.</p>
+    <p>Share your code with friends. Bonus minutes for referrals are paused for now.</p>
     <div class="codeCard">
       <div class="codeCardLabel">Your code</div>
       <div class="codeCardValue" id="referralCodeValue">——————</div>

@@ -384,11 +384,12 @@ async function listCalls(req, res, supabase, userId) {
   return res.status(200).json({ calls });
 }
 
-// Phone line actions. Approval is enforced HERE, server-side: the app only
-// hides screens from unapproved users, which is not access control, and these
-// actions can start real Twilio charges.
+// Phone line actions. Anyone can set up a line (new accounts are no longer approved by hand), but
+// renting a number buys a real Twilio number, so that one action still needs the owner's approval.
 async function lineAction(action, req, res, supabase, userId) {
-  if (!(await isApproved(supabase, userId))) return res.status(403).json({ error: 'Your account is not approved yet.' });
+  if (action === 'line-rent-buy' && !(await isApproved(supabase, userId))) {
+    return res.status(403).json({ error: 'Renting a number needs the owner\'s approval.' });
+  }
   const send = (result) => (result.error
     ? res.status(result.status || 400).json({ error: result.error })
     : res.status(200).json(result));

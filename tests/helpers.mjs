@@ -5,11 +5,14 @@ import vm from 'node:vm';
 
 // In-memory Supabase query double: all writes execute synchronously at await,
 // including conditional updates, so concurrent claim tests exercise the CAS.
-export function database(seed = {}) {
+// funded (default true): a user with no user_usage row is treated as someone who has already bought
+// minutes, so the many tests that are about calls, lines or chat do not each need billing setup. The
+// real rule is the opposite (no row = 0 minutes) and is tested with { funded: false }.
+export function database(seed = {}, { funded = true } = {}) {
   const tables = structuredClone(seed);
   return { tables, from(table) {
     tables[table] ||= [];
-    let mode = 'select', values, one = false, cap = Infinity, ordering;
+    let mode = 'select', values, one = false, cap = Infinity, ordering, eqUser;
     const filters = [];
     const q = {
       select() { return q; },
@@ -17,7 +20,7 @@ export function database(seed = {}) {
       update(value) { mode = 'update'; values = value; return q; },
       upsert(value) { mode = 'upsert'; values = value; return q; },
       delete() { mode = 'delete'; return q; },
-      eq(key, value) { filters.push((r) => r[key] === value); return q; },
+      eq(key, value) { if (key === 'user_id') eqUser = value; filters.push((r) => r[key] === value); return q; },
       // SQL semantics: NULL <> 'x' is NULL, so PostgREST .neq() never matches NULL columns.
       neq(key, value) { filters.push((r) => r[key] !== undefined && r[key] !== null && r[key] !== value); return q; },
       // Minimal PostgREST .or(): supports `col.is.null`, `col.neq.x` and `col.eq.x` clauses.
@@ -49,6 +52,11 @@ export function database(seed = {}) {
       then(ok, fail) {
         try {
           let rows = tables[table].filter((r) => filters.every((f) => f(r)));
+          if (funded && table === 'user_usage' && mode === 'select' && eqUser !== undefined && !rows.length) {
+            const row = { user_id: eqUser, call_minutes_used: 0, monthly_minute_limit: 60, bonus_minutes: 0 };
+            tables[table].push(row);
+            rows = [row];
+          }
           if (mode === 'insert') {
             rows = (Array.isArray(values) ? values : [values]).map((value) => ({
               id: randomUUID(), created_at: new Date().toISOString(), updated_at: new Date().toISOString(),

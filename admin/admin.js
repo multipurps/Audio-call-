@@ -316,7 +316,7 @@ async function loadUsers() {
       <div class="aRow" data-id="${u.id}">
         <div class="aFlex"><div style="min-width:0"><div class="t">${esc(u.email)}</div>
           <div class="m">${num(Math.max(0, u.minutes_limit + u.bonus_minutes - u.minutes_used))} min left · used ${num(u.minutes_used)} of ${num(u.minutes_limit)}${u.bonus_minutes ? ` + ${num(u.bonus_minutes)} credit` : ''}</div></div>
-          <button class="aBtn sm ${u.approved ? 'ghost' : ''}" data-a="approve">${u.approved ? 'Approved' : 'Approve'}</button></div>
+          <button class="aBtn sm ${u.approved ? 'ghost' : ''}" data-a="approve" title="New accounts no longer need approval. This only allows renting a phone number.">${u.approved ? 'Can rent a number' : 'Allow number rental'}</button></div>
         <div class="aFlex" style="margin-top:10px;"><input type="number" min="0" step="10" value="${u.minutes_limit}" style="width:90px;" aria-label="Monthly limit">
           <button class="aBtn ghost sm" data-a="limit">Save limit</button><button class="aBtn ghost sm" data-a="credit" style="margin-left:auto;">+ Credit</button></div>
       </div>`).join('') || '<div class="aHint">No users.</div>';

@@ -196,7 +196,7 @@ $('signupSubmit').addEventListener('click', async () => {
   $('signupHint').textContent = 'Working...';
   const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName }, emailRedirectTo: window.location.origin + '/index.html' } });
   if (error) { $('signupHint').textContent = error.message; return; }
-  $('signupHint').textContent = 'Check your email to confirm, then wait for approval.';
+  $('signupHint').textContent = 'Check your email to confirm your account, then sign in.';
 });
 
 $('loginGoogle').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin + '/index.html' } }));
@@ -281,27 +281,6 @@ async function ensureNotificationsEnabled({ fromTap = false } = {}) {
   }
 }
 
-async function checkApproval(userId) {
-  const { data } = await supabase.from('user_approvals').select('approved').eq('user_id', userId).maybeSingle();
-  return !!data?.approved;
-}
-
-// A user stuck on the pending screen had no way to find out they'd been
-// approved short of signing out and back in — poll while pending so
-// approval takes effect on its own.
-let pendingPollTimer = null;
-function stopPendingPoll() {
-  if (pendingPollTimer) { clearInterval(pendingPollTimer); pendingPollTimer = null; }
-}
-function startPendingPoll() {
-  stopPendingPoll();
-  pendingPollTimer = setInterval(async () => {
-    if (!currentUser) { stopPendingPoll(); return; }
-    const approved = await checkApproval(currentUser.id);
-    if (approved) { stopPendingPoll(); enterApp(currentSession); }
-  }, 15000);
-}
-
 async function enterApp(session) {
   currentSession = session;
   currentUser = session.user;
@@ -318,16 +297,10 @@ async function enterApp(session) {
   } catch (err) {
     console.error('profile tagging failed (non-fatal):', err);
   }
-  const approved = await checkApproval(currentUser.id);
+  // No approval step: anyone who signs in gets in. Minutes are a separate matter: a new account has 0
+  // until it buys some (see lib/billing.js STARTING_MINUTES), so there is nothing to approve.
   $('authBoot').style.display = 'none';
   document.querySelectorAll('.authPanel').forEach((p) => p.classList.remove('active'));
-  if (!approved) {
-    revealAuthScreen();
-    $('pendingBox').style.display = 'block';
-    startPendingPoll();
-    return;
-  }
-  stopPendingPoll();
   // First-run setup: a calling line (required), then name/language/country.
   const step = await onboardingStep();
   if (step) { showOnboardingStep(step); return; }
@@ -4168,7 +4141,10 @@ async function loadReferrals() {
   const data = await resp.json();
   $('referralCodeValue').textContent = data.code || '——————';
   $('referralCount').textContent = data.referralCount ?? 0;
-  $('referralMinutes').textContent = (data.referralCount ?? 0) * (data.bonusPerReferral ?? 30);
+  const perReferral = data.bonusPerReferral ?? 0;
+  $('referralMinutes').textContent = (data.referralCount ?? 0) * perReferral;
+  // Referral minutes are paused, so do not show an earnings box that can only say 0.
+  $('referralMinutes').parentElement.classList.toggle('hidden', perReferral <= 0);
 }
 $('referralCopyBtn').addEventListener('click', async () => {
   const code = $('referralCodeValue').textContent;
@@ -4185,7 +4161,7 @@ $('referralCopyLinkBtn').addEventListener('click', async () => {
 $('referralShareBtn').addEventListener('click', async () => {
   const code = $('referralCodeValue').textContent;
   const url = `${window.location.origin}/?ref=${code}`;
-  if (navigator.share) { try { await navigator.share({ title: 'Emysa', text: `Use my code ${code} on Emysa and we both get bonus calling minutes.`, url }); } catch {} }
+  if (navigator.share) { try { await navigator.share({ title: 'Emysa', text: `Join me on Emysa with my code ${code}.`, url }); } catch {} }
   else {
     const ok = await copyText(url);
     $('referralShareBtn').textContent = ok ? 'Link copied!' : 'Could not copy';

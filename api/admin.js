@@ -4,6 +4,7 @@ import { readVapid, classifyPushFailure, summarizeFailures } from '../lib/vapid.
 import { getServiceClient, getAdminAccess, normEmail, maskEmail } from '../lib/supabaseAdmin.js';
 import { AI_ACTIONS, handleAiAction } from '../lib/aiBehaviorAdmin.js';
 import { keysStatus, keysSave } from '../lib/secrets.js';
+import { STARTING_MINUTES } from '../lib/billing.js';
 
 // Every admin-only action lives here behind ?action=..., instead of one
 // file per action — Vercel's Hobby plan caps a deployment at 12 serverless
@@ -145,7 +146,7 @@ async function listUsers(req, res, supabase) {
       created_at: u.created_at,
       approved: !!approvalMap.get(u.id),
       minutes_used: usageMap.get(u.id)?.call_minutes_used ?? 0,
-      minutes_limit: usageMap.get(u.id)?.monthly_minute_limit ?? 60,
+      minutes_limit: usageMap.get(u.id)?.monthly_minute_limit ?? STARTING_MINUTES,
       bonus_minutes: Number(usageMap.get(u.id)?.bonus_minutes ?? 0),
     }));
 

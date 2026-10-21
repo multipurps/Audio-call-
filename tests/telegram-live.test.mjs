@@ -4,10 +4,13 @@ import assert from 'node:assert';
 // Row written by the retired relay: says connected, but mp-relay has no login for this user.
 let row = { user_id: 'u1', status: 'connected', display_name: 'Old Me', phone_last4: '1234', last_error: null };
 const writes = [];
+// This user has bought minutes (a missing usage row means 0 minutes and would be refused with a 402).
+const funded = { call_minutes_used: 0, monthly_minute_limit: 60, bonus_minutes: 0 };
+const rowFor = (table) => (table === 'telegram_accounts' ? row : table === 'user_usage' ? funded : null);
 const chain = (table) => {
   const api = new Proxy({}, { get: (_t, k) => {
-    if (k === 'then') return (res) => res({ data: table === 'telegram_accounts' ? row : null, error: null });
-    if (k === 'maybeSingle' || k === 'single') return async () => ({ data: table === 'telegram_accounts' ? row : null, error: null });
+    if (k === 'then') return (res) => res({ data: rowFor(table), error: null });
+    if (k === 'maybeSingle' || k === 'single') return async () => ({ data: rowFor(table), error: null });
     if (k === 'upsert' || k === 'update' || k === 'insert') return (r) => { writes.push([table, k, r]); return api; };
     return () => api;
   } });

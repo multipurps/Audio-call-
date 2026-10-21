@@ -21,7 +21,10 @@ import { notifyAdminsOfPurchase } from '../lib/adminPush.js';
 // parsing is off for this file and JSON is parsed by hand below.
 export const config = { api: { bodyParser: false } };
 
-const BONUS_MINUTES = 30;
+// Referral bonuses are paused: every new account starts with 0 minutes until it buys some, and a
+// referral reward would hand minutes to an account that has not paid (including a brand-new referrer).
+// Referrals are still recorded (profiles.referred_by) so a reward can later be tied to a purchase.
+const BONUS_MINUTES = 0;
 
 export async function readRawBody(req) {
   if (typeof req.rawBody === 'string' || Buffer.isBuffer(req.rawBody)) return Buffer.from(req.rawBody);
@@ -104,12 +107,14 @@ async function redeem(req, res, supabase, userId) {
 
   await supabase.from('profiles').update({ referred_by: referrer.user_id }).eq('user_id', userId);
 
-  for (const uid of [referrer.user_id, userId]) {
-    const { data: usage } = await supabase.from('user_usage').select('bonus_minutes').eq('user_id', uid).maybeSingle();
-    await supabase.from('user_usage').upsert(
-      { user_id: uid, bonus_minutes: (usage?.bonus_minutes || 0) + BONUS_MINUTES },
-      { onConflict: 'user_id' }
-    );
+  if (BONUS_MINUTES > 0) {
+    for (const uid of [referrer.user_id, userId]) {
+      const { data: usage } = await supabase.from('user_usage').select('bonus_minutes').eq('user_id', uid).maybeSingle();
+      await supabase.from('user_usage').upsert(
+        { user_id: uid, bonus_minutes: (usage?.bonus_minutes || 0) + BONUS_MINUTES },
+        { onConflict: 'user_id' }
+      );
+    }
   }
 
   return res.status(200).json({ ok: true, bonusMinutes: BONUS_MINUTES });

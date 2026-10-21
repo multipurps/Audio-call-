@@ -66,7 +66,7 @@ test('signature: valid, tampered, stale and missing', () => {
 test('balance is limit + bonus - used, never negative', () => {
   assert.deepEqual(remainingMinutes({ call_minutes_used: 12, monthly_minute_limit: 60, bonus_minutes: 0 }), { used: 12, limit: 60, remaining: 48 });
   assert.equal(remainingMinutes({ call_minutes_used: 90, monthly_minute_limit: 60, bonus_minutes: 0 }).remaining, 0);
-  assert.equal(remainingMinutes(null).remaining, 60);
+  assert.equal(remainingMinutes(null).remaining, 0, 'no usage row means no minutes, never a free allowance');
 });
 
 test('billing status returns balance and the server price list', async () => {
