@@ -8,6 +8,7 @@ import { DEFAULT_MOOD, selectMood, toggleArgue, argueVisible, moodButtonLabel, m
 import { answeredCallPill, assistantCallPill, listenInPill, liveCallView, endedCallLabel, formatCallTimer, formatCallMinutes, TERMINAL_STATUSES } from './lib/callStatus.js';
 import { userError, friendlyAccountName } from './lib/userFacing.js';
 import * as Tutorial from './lib/tutorial.js';
+import { installOverlayStacking } from './lib/overlayStack.js';
 import { fileToWavBase64, looksLikeAudio, CLIP_MIN_SECONDS, CLIP_MAX_SECONDS } from './lib/voiceClip.js';
 import { pickFirstCallChannel, firstCallPrompt, firstCallExplainer } from './lib/firstCall.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -3986,6 +3987,10 @@ document.querySelectorAll('#termsContactEmail, #privacyContactEmail, #helpContac
 const todayLabel = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 $('termsUpdatedDate').textContent = todayLabel;
 $('privacyUpdatedDate').textContent = todayLabel;
+
+// Sheets, Premium, Add time and the verify/sign-in screen stack in the order they were opened, so a
+// screen launched from a sheet appears on top of it (lib/overlayStack.js).
+installOverlayStacking();
 
 function openSheet(id) {
   haptic();
