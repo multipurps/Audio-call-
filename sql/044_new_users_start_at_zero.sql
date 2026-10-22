@@ -1,31 +1,33 @@
--- New accounts start with 0 minutes. Only a purchase (or an admin credit) adds any.
+-- No free minutes for anyone: an account has exactly the minutes it bought (or that you credited by hand).
+-- Safe to run more than once, and safe whether or not an earlier version of this file was already run.
 --
--- Before this, an account with no user_usage row counted as having 60 minutes (the code fell back to 60),
--- and every row created for a new account (first call charge, first purchase, a referral) got
--- monthly_minute_limit = 60 from the column default. The code no longer invents minutes; this makes the
--- database agree. Safe to run more than once.
+-- Background: the balance is monthly_minute_limit + bonus_minutes - call_minutes_used. Every account used
+-- to carry a free monthly_minute_limit of 60 (the column default), and purchases land in bonus_minutes.
+-- Minutes are spent from the free part first, so just setting the limit to 0 would wrongly charge the
+-- earlier free usage to what people paid for. The update below prevents that.
 
--- 1) Keep what existing people have today. Every account that was approved before this change and has
---    no usage row yet gets its 60 written down explicitly, so nobody loses minutes they already had.
-insert into user_usage (user_id, monthly_minute_limit)
-select a.user_id, 60
-  from user_approvals a
- where a.approved = true
-   and not exists (select 1 from user_usage u where u.user_id = a.user_id)
-on conflict (user_id) do nothing;
-
--- 2) Every NEW row starts at 0 (first call charge, first purchase, anything else that creates a row).
+-- 1) Every NEW row starts at 0 (first call charge, first purchase, anything that creates a row).
 alter table user_usage alter column monthly_minute_limit set default 0;
 
--- 3) Fix rows that were created for new accounts between the code deploy and this script running
---    (they picked up the old default of 60). Accounts approved before this change are left alone.
-update user_usage u
-   set monthly_minute_limit = 0,
+-- 2) Remove the free 60 from every existing account.
+--    Before: balance = 60 + bought - used.   After: balance = bought - (used beyond the free 60).
+--    Only the unspent part of the free 60 disappears. Minutes people bought are never reduced.
+--    Limits other than 60 (ones you set by hand in the admin) are left exactly as they are.
+update user_usage
+   set call_minutes_used = greatest(0, call_minutes_used - monthly_minute_limit),
+       monthly_minute_limit = 0,
        updated_at = now()
- where u.monthly_minute_limit = 60
-   and not exists (select 1 from user_approvals a where a.user_id = u.user_id and a.approved = true);
+ where monthly_minute_limit = 60;
 
--- Check (run after): the default should read 0, and only grandfathered accounts should have a limit of 60.
+-- Preview, if you want to see the effect BEFORE running 2 (read-only):
+-- select count(*) as accounts_with_free_60,
+--        coalesce(sum(greatest(0, monthly_minute_limit - call_minutes_used)), 0) as free_minutes_removed
+--   from user_usage where monthly_minute_limit = 60;
+-- Limits you set by hand (these are NOT changed):
+-- select user_id, monthly_minute_limit, bonus_minutes, call_minutes_used
+--   from user_usage where monthly_minute_limit > 0 and monthly_minute_limit <> 60;
+--
+-- Check (run after): the default should read 0 and no row should show 60.
 -- select column_default from information_schema.columns
 --  where table_name = 'user_usage' and column_name = 'monthly_minute_limit';
 -- select monthly_minute_limit, count(*) from user_usage group by 1 order by 1;

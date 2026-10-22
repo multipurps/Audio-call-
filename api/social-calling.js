@@ -1,5 +1,5 @@
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
-import { minutesLeft, NO_MINUTES_MESSAGE } from '../lib/billing.js';
+import { minutesLeft, minutesGate } from '../lib/billing.js';
 import { resolveWhatsappStatus } from '../lib/whatsappStatus.js';
 import { attemptStateForProviderStatus } from '../lib/callAttempts.js';
 import { describeSocialCallEnd } from '../lib/socialCallEnd.js';
@@ -684,8 +684,8 @@ async function placeCall(req, res, supabase, userId) {
   const to = String(req.body?.to || req.body?.toNumber || '').trim();
   if (platform !== 'telegram' && platform !== 'whatsapp' && platform !== 'signal') return res.status(400).json({ error: "platform must be 'telegram', 'whatsapp' or 'signal'" });
   if (!to) return res.status(400).json({ error: 'to required' });
-  const left = await minutesLeft(supabase, userId);
-  if (left && left.remaining <= 0) return res.status(402).json({ error: NO_MINUTES_MESSAGE, code: 'no-minutes' });
+  const gate = minutesGate(await minutesLeft(supabase, userId));
+  if (!gate.ok) return res.status(gate.status).json({ error: gate.error, code: gate.code });
 
   // Repeated button presses / retried requests must not dial twice.
   const duplicate = await findDuplicateActiveCall(supabase, userId, platform, to);

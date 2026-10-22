@@ -1,5 +1,5 @@
 import { confirmCallPlan, saveCallPlan } from '../lib/callPlans.js';
-import { minutesLeft, NO_MINUTES_MESSAGE } from '../lib/billing.js';
+import { minutesLeft, minutesGate } from '../lib/billing.js';
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { endCallRow } from '../lib/callHangup.js';
 import { createHmac, randomUUID } from 'node:crypto';
@@ -154,8 +154,8 @@ async function recoverSummaries(req, res, supabase, userId) {
 // mints a short-lived token for the browser; the browser never sees the secret.
 async function appCallStart(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const left = await minutesLeft(supabase, userId);
-  if (left && left.remaining <= 0) return res.status(402).json({ error: NO_MINUTES_MESSAGE, code: 'no-minutes' });
+  const gate = minutesGate(await minutesLeft(supabase, userId));
+  if (!gate.ok) return res.status(gate.status).json({ error: gate.error, code: gate.code });
   const secret = process.env.ASSISTANT_BRIDGE_SECRET;
   let wsBase = (process.env.PUBLIC_ASSISTANT_WS_URL || process.env.ASSISTANT_BRIDGE_URL || '').trim();
   if (!secret) return res.status(501).json({ error: 'Live calls are not set up: ASSISTANT_BRIDGE_SECRET is missing on Vercel', code: 'missing-secret' });

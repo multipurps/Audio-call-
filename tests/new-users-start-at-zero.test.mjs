@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { database } from './helpers.mjs';
 import handler from '../api/referrals.js';
-import { remainingMinutes, minutesLeft, STARTING_MINUTES } from '../lib/billing.js';
+import { remainingMinutes, minutesLeft, minutesGate, MINUTES_CHECK_FAILED_MESSAGE, STARTING_MINUTES } from '../lib/billing.js';
 import { placeCall } from '../lib/phoneCalls.js';
 
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
@@ -41,10 +41,26 @@ test('a phone call is refused for an account with no minutes, before anything re
   assert.match(out.error, /minutes exhausted/);
 });
 
-test('all three server entry points refuse a call at 0 minutes', () => {
-  assert.match(read('api/calls.js'), /left && left\.remaining <= 0\) return res\.status\(402\)/);
-  assert.match(read('api/social-calling.js'), /left && left\.remaining <= 0\) return res\.status\(402\)/);
-  assert.match(read('api/assistant.js'), /left && left\.remaining <= 0/);
+test('all three server entry points refuse a call at 0 minutes, and when the balance cannot be read', () => {
+  for (const file of ['api/calls.js', 'api/social-calling.js', 'api/assistant.js']) {
+    const src = read(file);
+    assert.match(src, /minutesGate\(await minutesLeft\(supabase, userId\)\)/, file);
+    assert.doesNotMatch(src, /left && left\.remaining <= 0/, `${file} must not let a call through when the balance is unreadable`);
+  }
+});
+
+test('minutesGate: unreadable balance and empty balance both block; only a positive balance passes', () => {
+  assert.deepEqual({ ...minutesGate(null) }, { ok: false, status: 503, code: 'minutes-unchecked', error: MINUTES_CHECK_FAILED_MESSAGE });
+  assert.equal(minutesGate({ remaining: 0 }).status, 402);
+  assert.equal(minutesGate({ remaining: 0 }).code, 'no-minutes');
+  assert.equal(minutesGate({ remaining: 0.5 }).ok, true);
+  assert.equal(minutesGate({ remaining: 30 }).ok, true);
+});
+
+test('minutesLeft reports a failed lookup as null (which the gate then refuses)', async () => {
+  const broken = { rpc: async () => ({ data: null, error: null }), from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: { message: 'connection reset' } }) }) }) }) };
+  assert.equal(await minutesLeft(broken, 'u1'), null);
+  assert.equal(minutesGate(await minutesLeft(broken, 'u1')).ok, false);
 });
 
 test('redeeming a referral code gives nobody minutes, and still records who referred whom', async () => {
@@ -73,14 +89,13 @@ test('no code path falls back to a free allowance', () => {
   }
 });
 
-test('the migration backfills approved accounts, makes new rows start at 0, and repairs early rows', () => {
+test('the migration gives nobody free minutes and never reduces what was bought', () => {
   const sql = read('sql/044_new_users_start_at_zero.sql');
   assert.match(sql, /alter column monthly_minute_limit set default 0/);
-  assert.match(sql, /from user_approvals a\s+where a\.approved = true\s+and not exists/);
-  assert.match(sql, /on conflict \(user_id\) do nothing/);
-  assert.match(sql, /set monthly_minute_limit = 0/);
-  assert.match(sql, /not exists \(select 1 from user_approvals a where a\.user_id = u\.user_id and a\.approved = true\)/);
+  assert.match(sql, /set call_minutes_used = greatest\(0, call_minutes_used - monthly_minute_limit\),\s+monthly_minute_limit = 0/);
+  assert.match(sql, /where monthly_minute_limit = 60;/);
   assert.doesNotMatch(sql, /set default 60/);
+  assert.doesNotMatch(sql, /insert into user_usage/, 'no account is given a free 60 any more, approved or not');
   // nothing after this migration puts the 60 back
   const later = readdirSync(new URL('../sql/', import.meta.url)).filter((f) => f > '044');
   for (const f of later) assert.doesNotMatch(read(`sql/${f}`), /monthly_minute_limit[^\n]*default 60/, f);
@@ -92,4 +107,29 @@ test('there is no approval step left for new accounts', () => {
   assert.doesNotMatch(app, /checkApproval|startPendingPoll/);
   assert.doesNotMatch(app, /wait for approval/i);
   assert.match(app, /Check your email to confirm your account, then sign in\./);
+});
+
+import { loadApi, request } from './helpers.mjs';
+
+test('starting a live call is refused (503) when the balance lookup fails, and nothing external is called', async () => {
+  const db = database({}, { funded: false });
+  const failing = { tables: db.tables, rpc: async () => ({ data: null, error: null }), from(table) {
+    if (table !== 'user_usage') return db.from(table);
+    const q = { select: () => q, eq: () => q, maybeSingle: async () => ({ data: null, error: { message: 'connection reset' } }), then: (r) => r({ data: null, error: { message: 'connection reset' } }) };
+    return q;
+  } };
+  const network = [];
+  const { default: handler } = await loadApi('api/calls.js', failing, async (url) => { network.push(String(url)); return { ok: true, status: 200, json: async () => ({}) }; });
+  const r = await request(handler, 'app-call-start', {});
+  assert.equal(r.code, 503);
+  assert.equal(r.data.code, 'minutes-unchecked');
+  assert.equal(network.length, 0);
+});
+
+test('starting a live call with no minutes is refused (402) before anything is set up', async () => {
+  const db = database({}, { funded: false });
+  const { default: handler } = await loadApi('api/calls.js', db, async () => ({ ok: true, status: 200, json: async () => ({}) }));
+  const r = await request(handler, 'app-call-start', {});
+  assert.equal(r.code, 402);
+  assert.equal(r.data.code, 'no-minutes');
 });
