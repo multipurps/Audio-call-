@@ -5,7 +5,7 @@ import { LANGUAGE_NAMES } from '../lib/callLanguages.js';
 // Languages the transcription model accepts as a pinned language. Igbo is not
 // one of them, so it is left to auto-detect.
 const STT_LANGUAGES = new Set(['en', 'es', 'fr', 'pt', 'de', 'ha', 'yo', 'sw', 'ar', 'hi', 'zh']);
-import { minutesLeft, NO_MINUTES_MESSAGE } from '../lib/billing.js';
+import { minutesLeft, NO_MINUTES_MESSAGE, NO_MINUTES_CHAT_REPLY } from '../lib/billing.js';
 import { prepareCall, saveCallPlan, confirmCallPlan, attachCallPlans } from '../lib/callPlans.js';
 import { resolveVoiceChoice, stripSpeechMarkers } from '../lib/voiceChoice.js';
 import { resolveCallPlatform } from '../lib/callPlatform.js';
@@ -299,6 +299,14 @@ async function sendImage(req, res, supabase, userId) {
   const newMessages = [];
   newMessages.push(await insertMessage(supabase, userId, sessionId, 'user', caption?.trim() || '📷 Sent a photo', null, msgSource));
 
+  if (msgSource === 'text') {
+    const left = await minutesLeft(supabase, userId);
+    if (left && left.remaining < 1) {
+      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', NO_MINUTES_CHAT_REPLY, null, msgSource));
+      return res.status(200).json({ messages: newMessages, sessionId, isNewSession, noMinutes: true });
+    }
+  }
+
   const dataUrl = `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
   let reply = "Sorry, I couldn't look at that just now.";
   try {
@@ -429,6 +437,18 @@ async function sendMessage(req, res, supabase, userId) {
       const replyText = callNoteReply(text, result); // one voice: the same "I" that is on the call
       newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', replyText, noteCall.id, msgSource));
       return respond();
+    }
+  }
+
+  // No minutes: answer here, without touching the AI model (no model, memory or embedding cost at all).
+  // Not applied to phase two of a call request or to live voice turns, which belong to a call that was
+  // already allowed to start, and "end the call" / call notes were handled above. If the balance cannot be
+  // read (null), the message goes through rather than locking someone out over a hiccup.
+  if (!pending && msgSource === 'text') {
+    const left = await minutesLeft(supabase, userId);
+    if (left && left.remaining < 1) {
+      newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', NO_MINUTES_CHAT_REPLY, null, msgSource));
+      return respond({ noMinutes: true });
     }
   }
 

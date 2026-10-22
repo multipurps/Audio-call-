@@ -825,6 +825,7 @@ async function sendChatMessage(text, onReply, source = 'text', channel = null) {
 // Shows what the server answered: switches chat if the person already has one, starts
 // tracking a live call, keeps the line picker in step, and renders the replies.
 async function handleChatResponse(data, isCall, onReply) {
+  if (data.noMinutes) loadBalance().catch(() => {}); // the server said 0 minutes: the screens that check the balance must agree
   const switchedChat = data.sessionSwitched && data.sessionId && data.sessionId !== currentChatSessionId;
   if (data.sessionId) currentChatSessionId = data.sessionId;
   if (switchedChat && !isCall) {
