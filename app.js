@@ -3619,7 +3619,11 @@ $('dashNotifBtn').addEventListener('click', () => openSheet('sheet-notifications
 $('dashPeopleAll').addEventListener('click', () => showTab('contacts'));
 // Chat history is imported per person, so Import Chat first asks who it is for,
 // then opens that person's existing WhatsApp history sheet (which has the file picker).
+// Importing a chat is a Premium feature (enforced on the server; this only saves a wasted tap). Free
+// only when the balance has loaded and says so: until then the server decides.
+const importLocked = () => Boolean(homeBalance) && !homeBalance.premium;
 function openImportPicker() {
+  if (importLocked()) { showToast('Import chat is a Premium feature'); openPremium(); return; }
   if (!homeContacts.length) { showTab('contacts'); return; }
   const list = $('importPickList');
   list.textContent = '';
@@ -4254,10 +4258,28 @@ async function cmApi(action, { method = 'GET', query = {}, body } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(userError(data.error, `Something went wrong (HTTP ${resp.status}). Try again.`));
+  if (!resp.ok) {
+    const err = new Error(userError(data.error, `Something went wrong (HTTP ${resp.status}). Try again.`));
+    if (data.code === 'premium_required') err.premiumRequired = true;
+    throw err;
+  }
   return data;
 }
 const cmSay = (text) => { $('cmStatus').textContent = text || ''; };
+
+function applyImportLock() {
+  const locked = importLocked();
+  const label = $('cmFileLabel');
+  label.classList.toggle('cmLocked', locked);
+  label.firstChild.nodeValue = locked ? 'Import chat · Premium' : 'Import chat (.txt or .zip)';
+}
+// A locked picker opens Premium instead of the file chooser.
+$('cmFileLabel').addEventListener('click', (e) => {
+  if (!importLocked()) return;
+  e.preventDefault();
+  showToast('Import chat is a Premium feature');
+  openPremium();
+});
 
 function openContactMemory(contact) {
   cmContact = contact;
@@ -4267,6 +4289,7 @@ function openContactMemory(contact) {
   $('cmSetup').classList.add('hidden');
   $('cmFile').value = '';
   cmSay('');
+  applyImportLock();
   openSheet('sheet-contact-memory');
   cmRefresh();
 }
@@ -4452,7 +4475,10 @@ $('cmFile').addEventListener('change', async (e) => {
     cmSay('');
     cmShowSetup(info);
     await cmRefresh();
-  } catch (err) { cmSay(err.message); }
+  } catch (err) {
+    cmSay(err.message);
+    if (err.premiumRequired) openPremium();
+  }
   finally { cmBusy = false; e.target.value = ''; }
 });
 
@@ -4882,6 +4908,15 @@ function renderVoiceList(containerId, voices, provider, note) {
     card.querySelector('.voiceMeta').textContent = v.tone || '';
     card.querySelector('.playCircleBtn').addEventListener('click', (e) => { e.stopPropagation(); haptic(); playVoicePreview(provider, v.id, e.currentTarget); });
     card.addEventListener('click', () => { haptic(); voicePending = { type: 'agent', provider, agentVoiceId: v.id }; renderVoiceSettings(); });
+    if (provider === 'custom') {
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'voiceDelBtn';
+      del.textContent = 'Delete';
+      del.setAttribute('aria-label', `Delete ${v.name}`);
+      del.addEventListener('click', (e) => { e.stopPropagation(); deleteCustomVoice(v, del); });
+      card.appendChild(del);
+    }
     list.appendChild(card);
   }
   if (voices?.length) prefetchVoicePreviews(provider, voices);
@@ -4891,10 +4926,18 @@ function renderAgentVoices() {
   const custom = agentState.custom || {};
   const customNote = custom.error || '';
   renderVoiceList('agentVoiceListCustom', custom.voices, 'custom', customNote);
-  // One custom voice per person: with one in place, adding is replaced by deleting.
-  const hasClone = !!custom.voices?.length;
-  $('voiceAddSection').classList.toggle('hidden', hasClone);
-  $('voiceDeleteSection').classList.toggle('hidden', !hasClone);
+  // Slots: 1 for a free account, 5 for Premium (decided on the server; this only mirrors it).
+  const slots = agentState.slots || { used: custom.voices?.length || 0, max: 1, premium: false };
+  const full = !custom.error && slots.used >= slots.max;
+  $('voiceSlots').textContent = custom.error ? '' : `Custom voices: ${slots.used} of ${slots.max}`;
+  $('voiceAddSection').classList.toggle('hidden', full || !!custom.error);
+  $('voiceFullSection').classList.toggle('hidden', !full);
+  if (full) {
+    $('voiceFullText').textContent = slots.premium
+      ? `All ${slots.max} custom voice slots are in use. Delete one to add another.`
+      : 'Free accounts have 1 custom voice. Delete it, or get Premium for 5.';
+  }
+  $('voiceGetPremiumBtn').classList.toggle('hidden', !!slots.premium);
   renderVoiceList('agentVoiceListLive', agentState.live?.voices, 'live', '');
 }
 function readFileBase64(file) {
@@ -4917,13 +4960,21 @@ function confirmOwnVoice() {
   try { sessionStorage.setItem('voiceConsent', '1'); } catch { /* ignore */ }
   return true;
 }
-function nextVoiceName() { return 'My voice'; } // one custom voice per person
+function nextVoiceName() {
+  const taken = new Set((agentState?.custom?.voices || []).map((v) => v.name));
+  for (let n = 1; n <= 20; n += 1) { const name = n === 1 ? 'My voice' : `My voice ${n}`; if (!taken.has(name)) return name; }
+  return 'My voice';
+}
 const fmtClock = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
 
 // Clone from a recorded Blob or a picked File. `btn` is the button the person pressed.
 async function cloneVoiceFrom(blob, btn) {
   const status = $('cloneStatus');
-  if (agentState?.custom?.voices?.length) { status.textContent = 'You already have a custom voice. Delete it to add a new one.'; return; }
+  const slots = agentState?.slots;
+  if (slots && slots.used >= slots.max) {
+    status.textContent = slots.premium ? `All ${slots.max} custom voice slots are in use. Delete one to add another.` : 'Free accounts have 1 custom voice. Delete it, or get Premium for 5.';
+    return;
+  }
   const other = btn === $('recordVoiceBtn') ? $('uploadVoiceBtn') : $('recordVoiceBtn');
   setBtnLoading(btn, true, 'Cloning…');
   other.disabled = true;
@@ -4939,7 +4990,7 @@ async function cloneVoiceFrom(blob, btn) {
     const out = await resp.json().catch(() => ({}));
     if (!resp.ok) {
       status.textContent = out.detail ? `${out.error} (${out.detail})` : out.reason ? `${out.error} Reason: ${out.reason}` : (out.error || 'Could not clone your voice.'); // detail is admin-only; reason is the cleaned provider reason for a refused clip
-      if (resp.status === 409) await loadAgentState(); // they already have one: show it, with Delete
+      if (resp.status === 409) await loadAgentState(); // the slots are full: refresh the count and show Delete / Get Premium
       return;
     }
     await loadAgentState();
@@ -5019,33 +5070,34 @@ $('cloneFile').addEventListener('change', async () => {
   await cloneVoiceFrom(file, $('uploadVoiceBtn'));
 });
 
-// Delete the custom voice. The server removes it at the provider first; nothing changes here
-// until it says it is gone, so a failed delete leaves the voice in place and can be retried.
-$('deleteVoiceBtn').addEventListener('click', async () => {
-  const btn = $('deleteVoiceBtn');
+// Delete one custom voice. The server removes it at the provider first; nothing changes here until it
+// says it is gone, so a failed delete leaves the voice in place and can be retried.
+async function deleteCustomVoice(voice, btn) {
   const status = $('cloneStatus');
-  const clone = agentState?.custom?.voices?.[0];
-  if (!clone || btn.disabled) return;
-  if (!confirm('Delete your custom voice? This cannot be undone. If calls use it, they go back to your Standard voice.')) return;
+  if (!voice || btn.disabled) return;
+  if (!confirm(`Delete "${voice.name}"? This cannot be undone. If calls use it, they go back to your Standard voice.`)) return;
   $('liveVoiceAudio').pause();
   setBtnLoading(btn, true, 'Deleting…');
   status.textContent = '';
   try {
-    const resp = await authedFetch('/api/voice-clone?target=agent&action=delete', { method: 'DELETE' });
+    const resp = await authedFetch(`/api/voice-clone?target=agent&action=delete&voiceId=${encodeURIComponent(voice.id)}`, { method: 'DELETE' });
     const out = await resp.json().catch(() => ({}));
     if (!resp.ok) { status.textContent = out.error || 'Could not delete your voice. Try again.'; return; }
-    const key = `custom:${clone.id}`;
+    const key = `custom:${voice.id}`;
     voicePreviewUrls.delete(key);
     previewStoreDelete(key);
-    voicePending = { type: 'agent', provider: 'custom', agentVoiceId: null };
+    if (voicePending.type === 'agent' && voicePending.provider === 'custom' && voicePending.agentVoiceId === voice.id) {
+      voicePending = { type: 'agent', provider: 'custom', agentVoiceId: null };
+    }
     await loadAgentState();
-    status.textContent = 'Your voice was deleted. You can add a new one.';
+    status.textContent = 'Your voice was deleted.';
   } catch {
     status.textContent = 'Could not delete your voice. Check your connection and try again.';
   } finally {
     setBtnLoading(btn, false);
   }
-});
+}
+$('voiceGetPremiumBtn').addEventListener('click', () => openPremium());
 
 // The floating Apply button steps out of the way while the screen or a voice list scrolls, and returns when it stops.
 (function attachVoiceScroll() {

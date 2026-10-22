@@ -6,8 +6,12 @@ function fakeRes() {
   return { code: 0, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; }, setHeader() {} };
 }
 // user_agents is the only table the voice route touches now.
-function fakeSupabase({ agent = null } = {}) {
-  const db = { user_agents: agent ? [{ user_id: 'u1', ...agent }] : [] };
+function fakeSupabase({ agent = null, premium = false } = {}) {
+  // A free account has 1 custom voice slot, Premium has 5 (lib/plan.js).
+  const db = {
+    user_agents: agent ? [{ user_id: 'u1', ...agent }] : [],
+    user_usage: premium ? [{ user_id: 'u1', premium_until: new Date(Date.now() + 30 * 864e5).toISOString() }] : [],
+  };
   const writes = [];
   function from(table) {
     const filters = [];
@@ -400,4 +404,113 @@ test('clone: when both attempts are refused, the user gets one accurate message 
   assert.equal(posts, 2, 'exactly one retry, never a loop');
   assert.equal(res.body.code, 'bad_sample');
   assert.equal(res.body.reason, 'Sample too short');
+});
+
+// ---- custom voice slots: 1 for a free account, 5 for Premium ------------------------------------
+const delOne = (sb, voiceId, user = 'u1') => { const res = fakeRes(); return agentRoute({ method: 'DELETE', query: { action: 'delete', voiceId } }, res, sb, user, { inworld: 'key123' }).then(() => res); };
+const cloneCalls = (inworld) => inworld.calls.filter((c) => c.startsWith('POST /voices/v1/voices:clone')).length;
+const mineIds = (inworld, user = 'u1') => inworld.voices.filter((v) => v.tags?.includes(mineTag(user))).map((v) => v.voiceId).sort();
+
+test('slots: a free account can make one custom voice; the second is refused before anything is created', async () => {
+  const inworld = fakeInworld({ voices: [] });
+  const sb = fakeSupabase();
+  assert.equal((await post('clone', CLONE_BODY, sb)).code, 200);
+  const second = await post('clone', CLONE_BODY, sb);
+  assert.equal(second.code, 409);
+  assert.equal(second.body.code, 'premium_required');
+  assert.match(second.body.error, /Free accounts have 1 custom voice.*Premium for 5/);
+  assert.deepEqual(second.body.slots, { used: 1, max: 1, premium: false });
+  assert.equal(cloneCalls(inworld), 1, 'no second clone request ever reached the provider');
+});
+
+test('slots: Premium can make five custom voices and the sixth is refused', async () => {
+  const inworld = fakeInworld({ voices: [] });
+  const sb = fakeSupabase({ premium: true });
+  for (let i = 1; i <= 5; i += 1) assert.equal((await post('clone', CLONE_BODY, sb)).code, 200, `voice ${i}`);
+  const sixth = await post('clone', CLONE_BODY, sb);
+  assert.equal(sixth.code, 409);
+  assert.equal(sixth.body.code, 'slots_full');
+  assert.match(sixth.body.error, /All 5 custom voice slots are in use/);
+  assert.equal(mineIds(inworld).length, 5);
+  assert.equal(cloneCalls(inworld), 5);
+});
+
+test('slots: five racing premium clones can never leave the account over its limit', async () => {
+  const inworld = fakeInworld({ voices: ['ws__b', 'ws__c', 'ws__d', 'ws__e'].map((id) => voiceOf(id, 'u1')) });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const r = await realFetch(url, init);
+    if ((init.method || 'GET') === 'POST') inworld.voices.unshift(voiceOf('ws__a', 'u1')); // another request lands at once
+    return r;
+  };
+  const res = await post('clone', CLONE_BODY, fakeSupabase({ premium: true }));
+  assert.equal(res.code, 409, 'this request was the surplus');
+  assert.deepEqual(mineIds(inworld), ['ws__a', 'ws__b', 'ws__c', 'ws__d', 'ws__e'], 'exactly five remain');
+});
+
+test('slots: another account’s voices never count against, or appear for, this account', async () => {
+  const inworld = fakeInworld({ voices: [1, 2, 3, 4, 5].map((n) => voiceOf(`ws__o${n}`, 'someone-else')) });
+  assert.equal((await post('clone', CLONE_BODY, fakeSupabase())).code, 200);
+  assert.deepEqual(mineIds(inworld), ['ws__v1']);
+  assert.equal(mineIds(inworld, 'someone-else').length, 5);
+});
+
+test('slots: status reports used / max for the plan, and what was already made stays usable after Premium ends', async () => {
+  fakeInworld({ voices: ['ws__a', 'ws__b', 'ws__c'].map((id) => voiceOf(id, 'u1')) });
+  const premium = await get({ action: 'status' }, fakeSupabase({ premium: true }));
+  assert.deepEqual(premium.body.slots, { used: 3, max: 5, premium: true, known: true });
+  const lapsed = await get({ action: 'status' }, fakeSupabase());
+  assert.deepEqual(lapsed.body.slots, { used: 3, max: 1, premium: false, known: true });
+  // over the free limit now: nothing is deleted, existing voices can still be chosen, new ones cannot be added
+  const sb = fakeSupabase();
+  const choose = () => { const res = fakeRes(); return agentRoute({ method: 'PUT', query: { action: 'choose' }, body: { provider: 'custom', voiceId: 'ws__b' } }, res, sb, 'u1', { inworld: 'key123' }).then(() => res); };
+  assert.equal((await choose()).code, 200);
+  assert.equal((await post('clone', CLONE_BODY, sb)).code, 409);
+});
+
+test('slots: an expired Premium plan counts as free', async () => {
+  fakeInworld({ voices: [voiceOf('ws__a', 'u1')] });
+  const sb = fakeSupabase();
+  sb.db.user_usage = [{ user_id: 'u1', premium_until: new Date(Date.now() - 864e5).toISOString() }];
+  const res = await post('clone', CLONE_BODY, sb);
+  assert.equal(res.code, 409);
+  assert.equal(res.body.code, 'premium_required');
+});
+
+test('slots: when the plan cannot be read, the user is asked to retry and nothing is created or refused as "free"', async () => {
+  const inworld = fakeInworld({ voices: [] });
+  const sb = fakeSupabase({ premium: true });
+  const realFrom = sb.from;
+  sb.from = (t) => (t === 'user_usage'
+    ? { select() { return this; }, eq() { return this; }, maybeSingle: async () => ({ data: null, error: { message: 'connection reset by peer' } }) }
+    : realFrom(t));
+  const res = await post('clone', CLONE_BODY, sb);
+  assert.equal(res.code, 503);
+  assert.match(res.body.error, /couldn't check your plan/);
+  assert.equal(cloneCalls(inworld), 0);
+});
+
+test('delete one voice: only that voice goes, another chosen voice stays selected', async () => {
+  const inworld = fakeInworld({ voices: ['ws__a', 'ws__b', 'ws__c'].map((id) => voiceOf(id, 'u1')) });
+  const sb = fakeSupabase({ premium: true, agent: { active: true, provider: 'inworld', voice_id: 'ws__b' } });
+  assert.equal((await delOne(sb, 'ws__a')).code, 200);
+  assert.deepEqual(mineIds(inworld), ['ws__b', 'ws__c']);
+  assert.equal(sb.db.user_agents.length, 1, 'the voice in use was not the one deleted, so the setting stays');
+  assert.equal((await delOne(sb, 'ws__b')).code, 200);
+  assert.deepEqual(mineIds(inworld), ['ws__c']);
+  assert.equal(sb.db.user_agents.length, 0, 'deleting the voice in use switches calls off it');
+});
+
+test('delete one voice: a voice that is not on the account is refused and nothing is removed', async () => {
+  const inworld = fakeInworld({ voices: [voiceOf('ws__mine', 'u1'), voiceOf('ws__theirs', 'u2')] });
+  const res = await delOne(fakeSupabase(), 'ws__theirs');
+  assert.equal(res.code, 404);
+  assert.deepEqual(inworld.voices.map((v) => v.voiceId).sort(), ['ws__mine', 'ws__theirs']);
+  assert.ok(!inworld.calls.some((c) => c.startsWith('DELETE')));
+});
+
+test('delete with no voice named still removes all of the account’s own voices (older clients)', async () => {
+  const inworld = fakeInworld({ voices: ['ws__a', 'ws__b'].map((id) => voiceOf(id, 'u1')).concat(voiceOf('ws__x', 'u2')) });
+  assert.equal((await del(fakeSupabase({ premium: true }))).code, 200);
+  assert.deepEqual(inworld.voices.map((v) => v.voiceId), ['ws__x']);
 });

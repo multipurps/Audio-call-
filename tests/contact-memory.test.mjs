@@ -34,6 +34,9 @@ function world(seed = {}) {
       { id: 'cb', user_id: B, name: 'Somebody', phone_number: NUMBER },
     ],
     profiles: [{ user_id: A, name: 'Zee' }, { user_id: B, name: 'Bee' }],
+    // Importing a chat is a Premium feature; these flow tests run as premium users. The free-user
+    // behaviour is tested separately (tests/premium-limits.test.mjs).
+    user_usage: [A, B].map((user_id) => ({ user_id, premium_until: new Date(Date.now() + 30 * 864e5).toISOString() })),
     whatsapp_imports: [], contact_memories: [], whatsapp_import_chunks: [],
     ...seed,
   });
@@ -467,4 +470,59 @@ test('import secret guard: codes, PINs, bank and ID numbers are blocked; ordinar
     assert.equal(containsImportSecret(ok), false, ok);
     assert.equal(sanitizeContactMemory(ok), ok, ok);
   }
+});
+
+// ---- Import chat is a Premium feature -------------------------------------------------------------
+const IMPORT_STEPS = [
+  ['import-init', { contactId: 'ca', filename: 'chat.txt', size: 10 }],
+  ['import-process', { importId: 'x' }],
+  ['import-set-participants', { importId: 'x', contactParticipant: 'Marilyn', selfParticipant: 'Zee' }],
+  ['import-analyze', { importId: 'x', consent: true }],
+  ['import-index', { importId: 'x' }],
+];
+
+test('free user: every step of importing a chat is refused with premium_required, and nothing is stored', async () => {
+  const w = world({ user_usage: [] });
+  for (const [action, body] of IMPORT_STEPS) {
+    const res = await call(w, A, { action, body });
+    assert.equal(res.code, 403, action);
+    assert.equal(res.data.code, 'premium_required', action);
+    assert.match(res.data.error, /Premium/);
+  }
+  assert.equal(w.db.tables.whatsapp_imports.length, 0);
+  assert.equal(w.db.tables.contact_memories.length, 0);
+});
+
+test('free user: what was already imported can still be listed, reviewed, deleted and used on calls', async () => {
+  const w = world({ user_usage: [] });
+  assert.equal((await call(w, A, { action: 'import-list', method: 'GET', query: { contactId: 'ca' } })).code, 200);
+  assert.equal((await call(w, A, { action: 'cm-list', method: 'GET', query: { contactId: 'ca' } })).code, 200);
+  assert.equal((await call(w, A, { action: 'contact-context', method: 'GET', query: { contactId: 'ca' } })).code, 200);
+  assert.notEqual((await call(w, A, { action: 'import-delete', body: { importId: 'missing' } })).code, 403);
+  assert.notEqual((await call(w, A, { action: 'cm-delete', body: { id: 'missing' } })).code, 403);
+});
+
+test('an expired Premium plan is locked out of importing again', async () => {
+  const w = world({ user_usage: [{ user_id: A, premium_until: new Date(Date.now() - 1000).toISOString() }] });
+  const res = await call(w, A, { action: 'import-init', body: IMPORT_STEPS[0][1] });
+  assert.equal(res.code, 403);
+  assert.equal(res.data.code, 'premium_required');
+});
+
+test('when the plan cannot be read, importing is "try again", never "you are not Premium"', async () => {
+  const w = world();
+  const realFrom = w.supabase.from;
+  w.supabase.from = (t) => (t === 'user_usage'
+    ? { select() { return this; }, eq() { return this; }, maybeSingle: async () => ({ data: null, error: { message: 'timeout' } }) }
+    : realFrom(t));
+  const res = await call(w, A, { action: 'import-init', body: IMPORT_STEPS[0][1] });
+  assert.equal(res.code, 503);
+  assert.equal(res.data.code, undefined);
+});
+
+test('Premium is per account: one user having it does not unlock importing for another', async () => {
+  const w = world({ user_usage: [{ user_id: A, premium_until: new Date(Date.now() + 864e5).toISOString() }] });
+  assert.equal((await call(w, A, { action: 'import-init', body: IMPORT_STEPS[0][1] })).code, 200);
+  const other = await call(w, B, { action: 'import-init', body: { ...IMPORT_STEPS[0][1], contactId: 'cb' } });
+  assert.equal(other.code, 403);
 });

@@ -819,12 +819,9 @@
     <div class="pfTable" role="table">
       <div class="pfRow pfHead"><span>Feature</span><span>Free</span><span>Premium</span></div>
       <div class="pfRow"><span>Buy call time</span><span>Yes</span><span>Yes</span></div>
-      <div class="pfRow"><span>Standard caller personalities</span><span>Limited</span><span>All</span></div>
-      <div class="pfRow"><span>Custom caller personality</span><span>—</span><span>Yes</span></div>
-      <div class="pfRow"><span>Advanced Argument Mode</span><span>—</span><span>Yes</span></div>
+      <div class="pfRow"><span>Custom voices</span><span>1</span><span>5</span></div>
+      <div class="pfRow"><span>Import chat</span><span>—</span><span>Yes</span></div>
       <div class="pfRow"><span>Long-term memory</span><span>Basic</span><span>Extended</span></div>
-      <div class="pfRow"><span>Premium voice and emotion controls</span><span>—</span><span>Yes</span></div>
-      <div class="pfRow"><span>Call summaries</span><span>Basic</span><span>Advanced</span></div>
     </div>
   </div>
   <div class="planGrid" id="planList"></div>
@@ -1118,6 +1115,7 @@
       <div class="sectionLabel">Voice</div>
       <p class="hint" style="margin:0 0 12px;">A voice you create from a recording. Emysa speaks as you.</p>
       <div id="agentVoiceListCustom"></div>
+      <p class="hint voiceSlots" id="voiceSlots"></p>
       <div id="voiceAddSection">
         <div class="voiceAddHead"><span>+</span> Add New Voice</div>
         <p class="hint voiceNeeds" id="voiceNeeds">Best with <b>10 to 30 seconds</b> of you speaking clearly. 3 seconds is the minimum.</p>
@@ -1126,9 +1124,9 @@
           <button type="button" class="secondaryBtn" id="uploadVoiceBtn">Upload</button>
         </div>
       </div>
-      <div id="voiceDeleteSection" class="hidden">
-        <p class="hint" style="margin:14px 4px 10px;">You can have one custom voice. Delete it to create a new one.</p>
-        <button type="button" class="secondaryBtn dangerBtn" id="deleteVoiceBtn">Delete voice</button>
+      <div id="voiceFullSection" class="hidden">
+        <p class="hint" id="voiceFullText" style="margin:14px 4px 10px;"></p>
+        <button type="button" class="secondaryBtn" id="voiceGetPremiumBtn">Get Premium</button>
       </div>
       <input type="file" id="cloneFile" accept="audio/*,video/mp4,video/quicktime,video/webm,.mp3,.m4a,.aac,.wav,.wave,.caf,.aif,.aiff,.flac,.ogg,.oga,.opus,.webm,.mp4,.mov,.3gp,.amr" style="display:none;">
       <p class="hint voiceCloneStatus" id="cloneStatus"></p>

@@ -1313,3 +1313,15 @@ button.isLoadingIcon::before{position:absolute; top:50%; left:50%; width:16px; h
 .voiceNeeds b{color:var(--text); font-weight:600;}
 .voiceCloneStatus{margin:12px 4px 0;}
 .voiceCloneStatus:empty{display:none;}
+
+
+/* Custom voice slots */
+.voiceSlots { margin: 10px 4px 0; }
+.voiceCard .voiceDelBtn {
+  margin-left: 10px; padding: 6px 10px; border: 0; background: transparent;
+  color: var(--muted, #9a8f8a); font: inherit; font-size: 13px; cursor: pointer; border-radius: 8px;
+}
+.voiceCard .voiceDelBtn:active { opacity: .6; }
+.voiceCard .voiceDelBtn:disabled { opacity: .4; }
+/* Import chat locked for free accounts */
+.cmFileBtn.cmLocked { opacity: .7; }
