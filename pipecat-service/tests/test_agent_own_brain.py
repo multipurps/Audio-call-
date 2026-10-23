@@ -256,6 +256,11 @@ async def test_an_agent_call_stamps_the_answer_when_the_ai_joins():
     conv = object.__new__(CallConversation)
     conv._agent, conv._answered_at, conv.call_context = Agent(), None, Ctx()
     conv._wrapup, conv._wrapup_task, conv._stopped = None, None, False   # what a real conversation starts with
+    conv.call_active_source = None
+    assert conv.call_active is False
     assert await CallConversation.note_call_active(conv, "relay-signal") is True
     assert stamped == ["in_progress"]
     assert conv._answered_at is not None
+    # The end-of-call report picks "completed" only for an active call. This stayed unset, so a custom-voice
+    # call that talked was reported as failed ("Couldn't reach Emysa - the call failed to connect").
+    assert conv.call_active is True and conv.call_active_source == "relay-signal"

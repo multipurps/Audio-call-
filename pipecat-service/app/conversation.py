@@ -913,6 +913,10 @@ class CallConversation(_BaseConversation):
             first = self._answered_at is None
             if first:
                 self._answered_at = time.monotonic()
+            # `call_active` (which the end-of-call report reads to choose completed vs failed) comes from
+            # this. Left unset, every agent call that talked was reported "failed to connect".
+            if self.call_active_source is None:
+                self.call_active_source = source
             # The same answer stamp every other engine writes (queued/ringing -> in_progress, answered_at).
             # Minutes are charged from answered_at, so an agent call must stamp it too: without this a
             # custom-voice call is never marked answered, and ends with no talk time on its row.

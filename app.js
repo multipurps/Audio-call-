@@ -6,6 +6,8 @@ import { createPlayback } from './lib/appCallPlayback.js';
 import { describeMonitorMessage, describeMonitorClose, noAudioMessage, MONITOR_NO_AUDIO_MS } from './lib/monitorStatus.js';
 import { DEFAULT_MOOD, selectMood, toggleArgue, argueVisible, moodButtonLabel, moodPayload, moodChipVisible } from './lib/moodPicker.js';
 import { answeredCallPill, assistantCallPill, listenInPill, liveCallView, endedCallLabel, formatCallTimer, formatCallMinutes, TERMINAL_STATUSES } from './lib/callStatus.js';
+import { greetingForNow as pickGreeting } from './lib/greeting.js';
+import { isAppCall, callAgainPlatform, transcriptSpeakerLabel, callTalked } from './lib/callDetail.js';
 import { userError, friendlyAccountName } from './lib/userFacing.js';
 import * as Tutorial from './lib/tutorial.js';
 import { installOverlayStacking } from './lib/overlayStack.js';
@@ -428,11 +430,13 @@ let chatRevision = 0;
 let preCallTarget = null;
 let chatSending = false;
 
+// The empty chat's line: time-aware and different from visit to visit (lib/greeting.js).
 function greetingForNow(name) {
-  const h = new Date().getHours();
-  const time = h < 5 ? 'night' : h < 12 ? 'morning' : h < 17 ? 'afternoon' : h < 21 ? 'evening' : 'night';
-  const who = name ? `, ${name}` : '';
-  return `Good ${time}${who}, what can I help you with today?`;
+  let last = null;
+  try { last = localStorage.getItem('emysa.lastGreeting'); } catch {}
+  const line = pickGreeting(name, { last });
+  try { localStorage.setItem('emysa.lastGreeting', line); } catch {}
+  return line;
 }
 
 // index.html already pinged the sleeping backends the moment the page opened.
@@ -2777,7 +2781,8 @@ function callSummaryLine(c) {
     case 'in_progress': return `On the call with ${name}`;
     case 'rejected': return `${name} rejected the call`;
     case 'no_answer': return `Reached ${name}'s voicemail and hung up`;
-    case 'failed': return `Couldn't reach ${name} — the call failed to connect`;
+    // A call that talked did connect. Only one that never did "failed to connect".
+    case 'failed': return callTalked(c) ? `The call with ${name} ended unexpectedly` : `Couldn't reach ${name} — the call failed to connect`;
     case 'completed': return c.duration_seconds
       ? `Finished the call with ${name} (about ${Math.max(1, Math.round(c.duration_seconds / 60))} min)`
       : `Finished the call with ${name}`;
@@ -3127,6 +3132,8 @@ async function callAgainFromDetail() {
   const current = callDetailCurrent;
   if (!current || callAgainInFlight) return; // double-tap guard: never dial twice
   const c = current.call;
+  // A call with Emysa has no number to dial: it just opens the Emysa call (which checks minutes itself).
+  if (isAppCall(c)) { $('callDetailDialog').close(); openAssistantCallScreen(); return; }
   const name = current.name || c.to_number;
   const btn = $('callDetailAgainBtn');
   const live = ['queued', 'ringing', 'in_progress', 'in-progress'].includes(c.status);
@@ -3141,7 +3148,7 @@ async function callAgainFromDetail() {
   if (btn) btn.disabled = true;
   setCallAgainStatus('Placing call…', false);
   try {
-    const platform = c.platform === 'whatsapp' || c.platform === 'telegram' ? c.platform : 'phone';
+    const platform = callAgainPlatform(c);
     if (platform === 'phone') {
       const text = c.objective || c.instructions || c.script || `Call ${name} again.`;
       const target = c.contact_id ? { contactId: c.contact_id } : { toNumber: c.to_number };
@@ -3288,8 +3295,7 @@ function openCallDetail(c, name, isKnown) {
         const row = document.createElement('div');
         row.className = 'callDetailTurn';
         const speakerLabel = document.createElement('strong');
-        const isAi = turn?.speaker === 'ai' || turn?.speaker === 'assistant' || turn?.role === 'assistant';
-        speakerLabel.textContent = isAi ? 'Emysa:' : `${name || 'Caller'}:`;
+        speakerLabel.textContent = transcriptSpeakerLabel(c, turn, name);
         const textNode = document.createTextNode(turn?.content || turn?.text || '');
         row.append(speakerLabel, textNode);
         transcriptEl.appendChild(row);
