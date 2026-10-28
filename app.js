@@ -4940,7 +4940,6 @@ function renderAgentVoices() {
   // Slots: 1 for a free account, 5 for Premium (decided on the server; this only mirrors it).
   const slots = agentState.slots || { used: custom.voices?.length || 0, max: 1, premium: false };
   const full = !custom.error && slots.used >= slots.max;
-  $('voiceSlots').textContent = custom.error ? '' : `Custom voices: ${slots.used} of ${slots.max}`;
   $('voiceAddSection').classList.toggle('hidden', full || !!custom.error);
   $('voiceFullSection').classList.toggle('hidden', !full);
   if (full) {
@@ -4963,7 +4962,7 @@ function readFileBase64(file) {
 // One clip of 10 to 30 seconds is best (3 is the minimum, only the first 30 are used). The browser turns
 // whatever it gets into a short WAV (lib/voiceClip.js). No form: the voice is named automatically
 // and the "this is my own voice" confirmation is a single tap, asked once per session.
-$('voiceNeeds').innerHTML = `Best with <b>10 to ${CLIP_MAX_SECONDS} seconds</b> of you speaking clearly. ${CLIP_MIN_SECONDS} seconds is the minimum.`;
+$('voiceNeeds').innerHTML = `<b>10 to ${CLIP_MAX_SECONDS} seconds</b> of clear speech works best.`;
 
 function confirmOwnVoice() {
   try { if (sessionStorage.getItem('voiceConsent')) return true; } catch { /* ask every time */ }
@@ -4989,10 +4988,10 @@ async function cloneVoiceFrom(blob, btn) {
   const other = btn === $('recordVoiceBtn') ? $('uploadVoiceBtn') : $('recordVoiceBtn');
   setBtnLoading(btn, true, 'Cloning…');
   other.disabled = true;
-  status.textContent = 'Reading your clip…';
+  status.textContent = ''; // the button already says Cloning…
   try {
     const clip = await fileToWavBase64(blob);
-    status.textContent = clip.trimmed ? `Cloning from the first ${Math.round(clip.seconds)} seconds…` : 'Cloning your voice…';
+    if (clip.trimmed) status.textContent = `Using the first ${Math.round(clip.seconds)} seconds.`;
     const resp = await authedFetch('/api/voice-clone?target=agent&action=clone', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

@@ -8,6 +8,7 @@ paced back; an interruption drops queued agent audio; transcripts go to the call
 from __future__ import annotations
 
 import asyncio
+import re
 import logging
 import time
 from dataclasses import dataclass
@@ -38,6 +39,12 @@ CANCEL_ERROR_GRACE_SECS = 1.5
 # Grok hangs up by calling end_call: after the model's goodbye (the response that follows the call)
 # has finished. If that never completes, the call still ends after this long.
 END_CALL_RESPONSE_TIMEOUT_SECS = 8.0
+# The greeting is not interrupted by anything the caller's microphone picks up: call start-up noise and
+# the greeting's own echo used to be heard as the caller talking, which cancelled the greeting before a
+# word was played and produced a made-up first turn. Caller audio is held back until the greeting has
+# played out (or this long has passed, so a missing end-of-greeting signal can never leave the call deaf).
+GREETING_HOLD_MAX_SECS = 6.0
+GREETING_HOLD_TAIL_SECS = 0.35
 # Said once if the brain fails to write a reply, so the caller is not left in silence.
 BRAIN_FALLBACK_LINE = "Sorry, I lost my train of thought. Could you say that again?"
 
@@ -146,6 +153,7 @@ class GrokAgentConversation:
         voice_id: str | None,
         transcript: Any = None,
         provider: str = "grok",
+        language: str | None = None,
         brain: Any = None,
         on_end_call: Callable[[], None] | None = None,
     ) -> None:
@@ -173,7 +181,7 @@ class GrokAgentConversation:
             extra = {"model": model} if model else {}
             self._session_update = build_inworld_session(
                 instructions=prompt, voice_id=voice_id, rate=settings.bridge_sample_rate,
-                own_llm=self._brain is not None, **extra,
+                own_llm=self._brain is not None, language=language, **extra,
             )
         else:
             self._session_update = build_session_update(
@@ -200,6 +208,10 @@ class GrokAgentConversation:
         self._drop_audio = False    # after a barge-in, audio of the cut-off line is not played
         self._cancel_sent_at: float | None = None
         self._brain_failures = 0
+        # Caller audio is held while the greeting plays (own-brain calls only; see GREETING_HOLD_MAX_SECS).
+        self._hold_caller_audio = False
+        self._hold_deadline = 0.0
+        self._greeting_done_at: float | None = None
         self.call_active = False
         self.sender = PacedAudioSender(
             session_id=session_id,
@@ -228,6 +240,8 @@ class GrokAgentConversation:
         if self._greeting:
             if self._brain is not None:
                 self._history.append({"role": "assistant", "content": self._greeting})
+                self._hold_caller_audio = True
+                self._hold_deadline = time.monotonic() + GREETING_HOLD_MAX_SECS
                 await self._speak(self._greeting)
             else:
                 await self._client.send_greeting(self._greeting)
@@ -242,6 +256,8 @@ class GrokAgentConversation:
             if not self._warned_rate:
                 self._warned_rate = True
                 logger.warning("agent needs %s Hz caller audio, got %s; dropping", self._settings.bridge_sample_rate, rate)
+            return
+        if self._hold_caller_audio and not self._greeting_finished():
             return
         get_hub().publish(self._session_id, DIRECTION_CALLER, rate, frame.audio)
         await self._client.send_caller_audio(frame.audio)
@@ -341,6 +357,21 @@ class GrokAgentConversation:
             self._inflight = max(0, self._inflight - 1)
         if self._inflight == 0:
             self._idle.set()
+            if self._hold_caller_audio and self._greeting_done_at is None:
+                self._greeting_done_at = time.monotonic()  # generated; it may still be playing out
+
+    def _greeting_finished(self) -> bool:
+        """True once the caller's audio may flow: the greeting has played out, or the hold ran out."""
+        now = time.monotonic()
+        played = (
+            self._greeting_done_at is not None
+            and self.sender.pending_frames() == 0
+            and now - self._greeting_done_at >= GREETING_HOLD_TAIL_SECS
+        )
+        if played or now >= self._hold_deadline:
+            self._hold_caller_audio = False
+            return True
+        return False
 
     async def _wait_idle(self) -> None:
         try:
@@ -377,6 +408,9 @@ class GrokAgentConversation:
 
     async def _start_turn(self, text: str) -> None:
         """The caller finished a turn: Luna writes the reply."""
+        if len(re.sub(r"[\W_]+", "", text)) < 2:
+            logger.info("agent ignored an empty transcript session=%s text=%r", self._session_id, text)
+            return  # a breath or a click heard as a word is not a turn
         await self._cancel_turn()  # the previous reply (and its partial history) is settled first
         if self._turn_ended_at is not None:
             logger.info("agent stt ms=%d session=%s", int((time.monotonic() - self._turn_ended_at) * 1000), self._session_id)

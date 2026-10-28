@@ -162,6 +162,10 @@ class PacedAudioSender:
         if self._task is None:
             self._task = asyncio.create_task(self._run(), name="paced-audio-sender")
 
+    def pending_frames(self) -> int:
+        """Frames queued but not yet released: 0 once everything has been played out."""
+        return self._queue.qsize()
+
     async def enqueue(self, pcm: bytes, sample_rate: int, channels: int = 1) -> None:
         """Split `pcm` into fixed-size frames and queue them for release."""
         if self._stopped or not pcm:
@@ -892,6 +896,7 @@ class CallConversation(_BaseConversation):
             voice_id=link.voice_id,
             transcript=self.transcript,
             provider=link.provider,
+            language=self.call_context.language if self.call_context else None,
             # Custom voice: Inworld hears, takes turns and speaks; our own model (Luna) writes the replies.
             brain=LlmBrain.from_settings(self._settings) if link.provider == "inworld" else None,
             # Luna's [[END_CALL]] / Grok's end_call: hang up once the goodbye has played.

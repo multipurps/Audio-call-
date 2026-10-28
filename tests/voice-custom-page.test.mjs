@@ -7,11 +7,23 @@ const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 const pane = html.slice(html.indexOf('id="voicePaneCustom"'), html.indexOf('id="voicePaneLive"'));
 
-test('the Custom voice page is the clean layout: hint, Add New Voice, Record and Upload', () => {
+test('the Custom voice page is clean: one intro line and a create card with Record and Upload', () => {
   assert.match(pane, /A voice you create from a recording\. Emysa speaks as you\./);
-  assert.match(pane, /Add New Voice/);
+  assert.match(pane, /class="voiceCreateTitle">Create your voice</);
   assert.match(pane, /id="recordVoiceBtn"[^>]*>Record</);
   assert.match(pane, /id="uploadVoiceBtn"[^>]*>Upload</);
+  // no "+ Add New Voice" row, no redundant "Voice" label above the intro, no slot counter
+  assert.ok(!pane.includes('Add New Voice'));
+  assert.ok(!pane.includes('sectionLabel'));
+  assert.ok(!pane.includes('voiceSlots'));
+  assert.doesNotMatch(app, /Custom voices: /);
+  assert.doesNotMatch(app, /\$\('voiceSlots'\)/);
+});
+
+test('cloning shows one state, on the button, rather than the same words twice', () => {
+  assert.ok(!app.includes("'Reading your clip…'"));
+  assert.ok(!app.includes("'Cloning your voice…'"));
+  assert.match(app, /setBtnLoading\(btn, true, 'Cloning…'\);/);
 });
 
 test('the old clutter is gone: no name field, consent checkbox, native file picker or Clone button', () => {
@@ -23,10 +35,12 @@ test('the old clutter is gone: no name field, consent checkbox, native file pick
 });
 
 test('the page says how much audio is needed, and the numbers come from the clip rules', () => {
-  assert.match(pane, /id="voiceNeeds"[^>]*>[^<]*<b>10 to 30 seconds<\/b>/);
+  assert.match(html, /id="voiceNeeds"/);
   assert.equal(CLIP_MAX_SECONDS, 30);
   assert.equal(CLIP_MIN_SECONDS, 3);
-  assert.match(app, /Best with <b>10 to \$\{CLIP_MAX_SECONDS\} seconds<\/b>[^`]*\$\{CLIP_MIN_SECONDS\} seconds is the minimum/);
+  assert.match(app, /<b>10 to \$\{CLIP_MAX_SECONDS\} seconds<\/b> of clear speech works best/);
+  // the 3 second minimum is enforced where it matters, with a message, instead of sitting in the hint
+  assert.match(app, /Record at least \$\{CLIP_MIN_SECONDS\} seconds/);
 });
 
 test('recording shows a live timer against the clip-length cap and stops by itself', () => {
@@ -46,14 +60,12 @@ test('an empty Custom page shows no "no voices yet" sentence', () => {
 
 test('custom voice slots: adding is replaced by Delete / Get Premium only when the slots are full', () => {
   const add = pane.slice(pane.indexOf('id="voiceAddSection"'), pane.indexOf('id="voiceFullSection"'));
-  for (const piece of ['Add New Voice', 'id="recordVoiceBtn"', 'id="uploadVoiceBtn"', 'id="voiceNeeds"']) assert.ok(add.includes(piece), piece);
+  for (const piece of ['Create your voice', 'id="recordVoiceBtn"', 'id="uploadVoiceBtn"', 'id="voiceNeeds"']) assert.ok(add.includes(piece), piece);
   assert.match(pane, /id="voiceFullSection" class="hidden"[\s\S]*id="voiceGetPremiumBtn"/);
-  assert.ok(pane.includes('id="voiceSlots"'));
   // the screen mirrors the server's count; a free account is 1 voice, Premium 5 (decided on the server)
   assert.match(app, /const full = !custom\.error && slots\.used >= slots\.max;/);
   assert.match(app, /\$\('voiceAddSection'\)\.classList\.toggle\('hidden', full \|\| !!custom\.error\);/);
   assert.match(app, /Free accounts have 1 custom voice\. Delete it, or get Premium for 5\./);
-  assert.match(app, /Custom voices: \$\{slots\.used\} of \$\{slots\.max\}/);
   // a clone over the limit is refused in the app too, not only on the server
   assert.match(app, /if \(slots && slots\.used >= slots\.max\) \{/);
   // Premium users are not offered Premium

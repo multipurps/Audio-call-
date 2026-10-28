@@ -41,7 +41,8 @@ class FakeInworld:
 
 
 class FakeSender:
-    def __init__(self, **_): self.enqueued, self.interrupts = [], 0
+    def __init__(self, **_): self.enqueued, self.interrupts, self.pending = [], 0, 0
+    def pending_frames(self): return self.pending
     def start(self): ...
     async def enqueue(self, pcm, rate, channels=1): self.enqueued.append(pcm)
     async def interrupt(self): self.interrupts += 1; return 0
@@ -84,13 +85,13 @@ def rig(monkeypatch):
     return made
 
 
-def make_conv(brain, on_ended=None, greeting="Hi, Emysa here.", transcript=None):
+def make_conv(brain, on_ended=None, greeting="Hi, Emysa here.", transcript=None, language=None):
     settings = types.SimpleNamespace(bridge_sample_rate=16000, mock_mode=False, inworld_model=None,
                                      supabase_url=None, supabase_service_role_key=None)
     return gc.GrokAgentConversation(
         settings=settings, session_id="call-1", serializer=None, send_audio=None, send_control=None,
         on_ended=on_ended, prompt="THE INSTRUCTIONS", greeting=greeting, voice_id="ws__mine",
-        transcript=transcript, provider="inworld", brain=brain,
+        transcript=transcript, provider="inworld", language=language, brain=brain,
     )
 
 
@@ -264,3 +265,82 @@ async def test_an_agent_call_stamps_the_answer_when_the_ai_joins():
     # The end-of-call report picks "completed" only for an active call. This stayed unset, so a custom-voice
     # call that talked was reported as failed ("Couldn't reach Emysa - the call failed to connect").
     assert conv.call_active is True and conv.call_active_source == "relay-signal"
+
+
+FRAME = types.SimpleNamespace(sample_rate=16000, audio=b"mic")
+
+
+@pytest.mark.asyncio
+async def test_caller_audio_is_held_back_while_the_greeting_plays(rig, monkeypatch):
+    """Start-up noise and the greeting's own echo reached Inworld as 'the caller talking', which cancelled the
+    greeting before a word was heard and invented a first turn."""
+    monkeypatch.setattr(gc, "GREETING_HOLD_TAIL_SECS", 0.0)
+    conv = make_conv(FakeBrain([]))
+    await conv.start()
+    client = rig["client"]
+    await conv.push_audio(FRAME)
+    assert client.audio == []                       # held: the greeting has not even been generated yet
+    client.push("response_done")                    # Inworld finished generating the greeting
+    await settle()
+    conv.sender.pending = 40                        # ...but it is still playing out of the speaker
+    await conv.push_audio(FRAME)
+    assert client.audio == []
+    conv.sender.pending = 0                         # played out
+    await conv.push_audio(FRAME)
+    assert client.audio == [b"mic"]                 # the caller can now be heard
+    await conv.push_audio(FRAME)
+    assert client.audio == [b"mic", b"mic"]         # and it stays open
+    await conv.stop()
+
+
+@pytest.mark.asyncio
+async def test_the_hold_can_never_leave_the_call_deaf(rig, monkeypatch):
+    monkeypatch.setattr(gc, "GREETING_HOLD_MAX_SECS", 0.0)   # the end-of-greeting signal never arrives
+    conv = make_conv(FakeBrain([]))
+    await conv.start()
+    await conv.push_audio(FRAME)
+    assert rig["client"].audio == [b"mic"]
+    await conv.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_greeting_cut_off_by_noise_at_the_start_is_not_possible_but_real_barge_in_still_works(rig, monkeypatch):
+    monkeypatch.setattr(gc, "GREETING_HOLD_TAIL_SECS", 0.0)
+    brain = FakeBrain([["Okay, go ahead with that."]])
+    conv = make_conv(brain)
+    await conv.start()
+    client = rig["client"]
+    for _ in range(10):
+        await conv.push_audio(FRAME)                # start-up noise is dropped, so Inworld hears nothing
+    assert client.audio == [] and client.cancels == 0
+    client.push("response_done")
+    await settle()
+    client.push("user_transcript", text="Call my mum please")
+    await settle()
+    assert client.spoken[-1] == "Okay, go ahead with that."
+    await conv.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_blip_heard_as_a_word_is_not_a_turn(rig):
+    brain = FakeBrain([["Never said."]])
+    conv = make_conv(brain)
+    await conv.start()
+    client = rig["client"]
+    client.push("response_done")
+    for junk in (".", "  ", "-", "?", "a"):
+        client.push("user_transcript", text=junk)
+        await settle()
+    assert brain.histories == [] and client.spoken == ["Hi, Emysa here."]
+    client.push("user_transcript", text="Hi")       # a real, short word is still a turn
+    await settle()
+    assert client.spoken[-1] == "Never said."
+    await conv.stop()
+
+
+@pytest.mark.asyncio
+async def test_inworld_is_told_the_call_language(rig):
+    conv = make_conv(FakeBrain([]), language="en")
+    await conv.start()
+    assert rig["client"].session_update["audio"]["input"]["transcription"] == {"model": "inworld/inworld-stt-1", "language": "en"}
+    await conv.stop()

@@ -1112,14 +1112,12 @@
     </div>
 
     <div id="voicePaneCustom" class="hidden">
-      <div class="sectionLabel">Voice</div>
-      <p class="hint" style="margin:0 0 12px;">A voice you create from a recording. Emysa speaks as you.</p>
+      <p class="hint voiceIntro">A voice you create from a recording. Emysa speaks as you.</p>
       <div id="agentVoiceListCustom"></div>
-      <p class="hint voiceSlots" id="voiceSlots"></p>
-      <div id="voiceAddSection">
-        <div class="voiceAddHead"><span>+</span> Add New Voice</div>
-        <p class="hint voiceNeeds" id="voiceNeeds">Best with <b>10 to 30 seconds</b> of you speaking clearly. 3 seconds is the minimum.</p>
-        <div id="voiceCloneSection" style="display:flex; gap:10px;">
+      <div id="voiceAddSection" class="voiceCreate">
+        <div class="voiceCreateTitle">Create your voice</div>
+        <p class="hint voiceNeeds" id="voiceNeeds"></p>
+        <div id="voiceCloneSection" class="voiceCreateActions">
           <button type="button" class="secondaryBtn" id="recordVoiceBtn">Record</button>
           <button type="button" class="secondaryBtn" id="uploadVoiceBtn">Upload</button>
         </div>

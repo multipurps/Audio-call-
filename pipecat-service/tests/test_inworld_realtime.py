@@ -101,3 +101,12 @@ async def test_close_closes_the_socket_and_sending_after_close_fails():
     assert sock.closed is True
     with pytest.raises(RuntimeError):
         await client.send_caller_audio(b"\x00")
+
+
+def test_the_call_language_is_set_on_transcription_and_left_out_when_unknown():
+    from app.inworld_realtime import build_inworld_session
+    withlang = build_inworld_session(instructions="i", voice_id="v", language="pt")
+    assert withlang["audio"]["input"]["transcription"] == {"model": "inworld/inworld-stt-1", "language": "pt"}
+    # Without a language Inworld auto-detects, and noise comes back as words in some other language
+    assert "language" not in build_inworld_session(instructions="i", voice_id="v")["audio"]["input"]["transcription"]
+    assert "language" not in build_inworld_session(instructions="i", voice_id="v", language="")["audio"]["input"]["transcription"]

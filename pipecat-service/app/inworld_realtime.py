@@ -25,11 +25,18 @@ DEFAULT_STT = "inworld/inworld-stt-1"
 
 
 def build_inworld_session(*, instructions: str, voice_id: str | None, rate: int = 16000,
-                          model: str = DEFAULT_MODEL, own_llm: bool = False) -> dict[str, Any]:
+                          model: str = DEFAULT_MODEL, own_llm: bool = False,
+                          language: str | None = None) -> dict[str, Any]:
     """The session settings sent on connect: the app's instructions, the chosen voice, 16 kHz PCM.
 
     With `own_llm`, Inworld still hears the caller, takes turns and transcribes, but does not write
-    replies (create_response is off): our own model does, and the reply is sent back to be spoken."""
+    replies (create_response is off): our own model does, and the reply is sent back to be spoken.
+
+    `language` is the call language (a code such as "en"). Without it Inworld's speech-to-text detects
+    the language itself, and background noise or silence comes back as words in some other language."""
+    transcription: dict[str, Any] = {"model": DEFAULT_STT}
+    if language:
+        transcription["language"] = language
     return {
         "type": "realtime",
         "model": model,
@@ -38,7 +45,7 @@ def build_inworld_session(*, instructions: str, voice_id: str | None, rate: int 
         "audio": {
             "input": {
                 "format": {"type": "audio/pcm", "rate": rate},
-                "transcription": {"model": DEFAULT_STT},
+                "transcription": transcription,
                 "turn_detection": {
                     "type": "semantic_vad",
                     "eagerness": "medium",
