@@ -6,6 +6,7 @@ import { createPlayback } from './lib/appCallPlayback.js';
 import { describeMonitorMessage, describeMonitorClose, noAudioMessage, MONITOR_NO_AUDIO_MS } from './lib/monitorStatus.js';
 import { DEFAULT_MOOD, selectMood, toggleArgue, argueVisible, moodButtonLabel, moodPayload, moodChipVisible } from './lib/moodPicker.js';
 import { answeredCallPill, assistantCallPill, listenInPill, liveCallView, endedCallLabel, formatCallTimer, formatCallMinutes, TERMINAL_STATUSES } from './lib/callStatus.js';
+import { mountCreatorEmbed } from './lib/tiktokEmbed.js';
 import { greetingForNow as pickGreeting } from './lib/greeting.js';
 import { isAppCall, callAgainPlatform, transcriptSpeakerLabel, callTalked } from './lib/callDetail.js';
 import { userError, friendlyAccountName } from './lib/userFacing.js';
@@ -4016,6 +4017,13 @@ document.querySelectorAll('[data-close-sheet]').forEach((btn) => btn.addEventLis
 
 $('termsBtn').addEventListener('click', () => openSheet('sheet-terms'));
 $('privacyBtn').addEventListener('click', () => openSheet('sheet-privacy'));
+// TikTok: videos and tutorials from the account, embedded here. TikTok's script is only fetched when this is opened.
+function openTikTok() {
+  openSheet('sheet-tiktok');
+  mountCreatorEmbed($('tiktokEmbedBox'));
+}
+$('socialTikTok').addEventListener('click', openTikTok);
+$('socialTikTok').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTikTok(); } });
 $('helpFaqBtn').addEventListener('click', () => openSheet('sheet-help'));
 $('dataControlsBtn').addEventListener('click', () => openSheet('sheet-data'));
 $('dataToPrivacyLink').addEventListener('click', () => openSheet('sheet-privacy'));
@@ -4761,7 +4769,7 @@ $('deleteAccountBtn').addEventListener('click', async () => {
 });
 
 // ---------- theme ----------
-const THEMES = { dark: '#0b0b0b', brave: '#090c0c', cream: '#f3e8d3', white: '#ffffff' };
+const THEMES = { dark: '#0b0b0b', cream: '#f4ead6', white: '#ffffff' };
 function applyTheme(name) {
   if (!THEMES[name]) name = 'dark';
   document.documentElement.setAttribute('data-theme', name);

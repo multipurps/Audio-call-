@@ -120,14 +120,14 @@ test('the local ringback tone plays only when the provider reports ringing', () 
 // ---- Emysa transcript bubble ---------------------------------------------------------------------
 
 test('Emysa transcript bubble uses the single Emysa blue token and is distinct from the other side', () => {
-  assert.equal((css.match(/--emysa-blue:/g) || []).length, 2, 'defined once per theme (dark + brave)');
+  assert.equal((css.match(/--emysa-blue:/g) || []).length, 1, 'defined once, in the dark default the others inherit');
   assert.match(css, /\.transcriptLine\.ai \.transcriptBubble\{[^}]*background:var\(--emysa-blue\)/);
   assert.match(css, /\.transcriptLine\.ai \.transcriptBubble\{[^}]*color:var\(--on-emysa-blue\)/);
   // The other side keeps its own look, and the blue is not hard-coded anywhere else.
   assert.match(css, /\.transcriptLine\.user \.transcriptBubble\{background:var\(--accent\)/);
   assert.match(css, /\.transcriptLine\.contact \.transcriptBubble\{background:rgba/);
   const hex = css.match(/#0a6fe6/gi) || [];
-  assert.equal(hex.length, 2, 'the blue value lives only in the two theme token definitions');
+  assert.equal(hex.length, 1, 'the blue value lives only in the one token definition (the light themes inherit it)');
   assert.doesNotMatch(app, /#0a6fe6|emysa-blue/); // no styling in JS: both render paths just set the .ai class
 });
 

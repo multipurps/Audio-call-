@@ -37,18 +37,49 @@ test('payment and premium results use the success sheet instead of a fading toas
   assert.match(app, /successSheet\(`\$\{formatMinutes\(data\.remaining - before\)\} added to your balance\.`\)/);
 });
 
-test('all four themes exist: tokens, picker swatches and the browser theme colour', () => {
-  assert.match(app, /const THEMES = \{ dark: '#0b0b0b', brave: '#090c0c', cream: '#f3e8d3', white: '#ffffff' \};/);
-  for (const t of ['dark', 'brave', 'cream', 'white']) assert.match(html, new RegExp(`class="themeSwatch[^"]*" data-theme="${t}"`), t);
-  const block = (name) => css.slice(css.indexOf(`[data-theme="${name}"]{`), css.indexOf('}', css.indexOf(`[data-theme="${name}"]{`)));
-  const need = ['--accent', '--on-accent', '--text', '--muted', '--fg-rgb', '--coffee', '--coffee-light', '--coffee-light-rgb', '--panel', '--surface-1', '--surface-2', '--surface-3', '--line', '--dim', '--icon-color', '--glass-bg', '--glass-border', '--sheet-close', '--banner-bg', '--hero-fade', '--status-strip'];
-  for (const t of ['cream', 'white']) for (const token of need) assert.ok(block(t).includes(`${token}:`), `${t} defines ${token}`);
+// The theme's tokens: the shared light block (when it applies) plus the theme's own block.
+const themeTokens = (name) => {
+  const take = (open) => { const i = css.indexOf(open); return i < 0 ? '' : css.slice(i, css.indexOf('}', i)); };
+  return take(`\n[data-theme="${name}"]{`) + take('\n[data-theme="cream"], [data-theme="white"]{');
+};
+const tok = (name, token) => (themeTokens(name).match(new RegExp(`${token}:\\s*(#[0-9a-fA-F]{6})`)) || [])[1];
+const lum = (hex) => {
+  const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+};
+const contrast = (a, b) => { const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
+
+test('three themes exist: tokens, picker swatches and the browser theme colour', () => {
+  assert.match(app, /const THEMES = \{ dark: '#0b0b0b', cream: '#f4ead6', white: '#ffffff' \};/);
+  for (const t of ['dark', 'cream', 'white']) assert.match(html, new RegExp(`class="themeSwatch[^"]*" data-theme="${t}"`), t);
+  // the red Brave theme is gone, everywhere
+  assert.doesNotMatch(html, /data-theme="brave"/);
+  assert.doesNotMatch(css, /data-theme="brave"/);
+  assert.doesNotMatch(app, /brave/i);
+  assert.doesNotMatch(readFileSync(new URL('../admin/admin.js', import.meta.url), 'utf8'), /brave/i);
+  const need = ['--accent', '--on-accent', '--text', '--muted', '--fg-rgb', '--coffee', '--coffee-light', '--coffee-light-rgb', '--panel', '--surface-1', '--surface-2', '--surface-3', '--line', '--dim', '--icon-color', '--glass-bg', '--glass-border', '--sheet-close', '--banner-bg', '--status-strip'];
+  for (const t of ['cream', 'white']) for (const token of need) assert.ok(themeTokens(t).includes(`${token}:`), `${t} defines ${token}`);
 });
 
-test('the light themes keep primary buttons dark with light text, and the sheet reads the theme tokens', () => {
-  const white = css.slice(css.indexOf('[data-theme="white"]{'));
-  assert.match(white, /--accent:#141414;/);
-  assert.match(white, /--on-accent:#ffffff;/);
+test('the light themes are cream and white with no black, and stay readable', () => {
+  for (const t of ['cream', 'white']) {
+    const block = themeTokens(t);
+    // no black or near-black ink, fill or surface in a light theme (the status strip behind the clock is the one exception)
+    for (const hex of block.match(/#[0-9a-fA-F]{6}\b/g)) {
+      if (hex.toLowerCase() === '#0b0b0b') continue; // --status-strip
+      assert.ok(lum(hex) > 0.03, `${t} has a black or near-black value ${hex}`); // the old espresso #2b211b is 0.017; cocoa #4a3a2b is 0.045
+    }
+    const text = tok(t, '--text'), accent = tok(t, '--accent'), onAccent = tok(t, '--on-accent'), page = tok(t, '--coffee');
+    assert.ok(contrast(text, page) >= 7, `${t}: text on the page is ${contrast(text, page).toFixed(1)}:1`);
+    assert.ok(contrast(onAccent, accent) >= 4.5, `${t}: button text on the accent is ${contrast(onAccent, accent).toFixed(1)}:1`);
+    assert.ok(contrast(accent, page) >= 4.5, `${t}: accent text on the page is ${contrast(accent, page).toFixed(1)}:1`);
+  }
+  // Cream is a cream page with white cards; White is a white page with cream cards
+  assert.equal(tok('cream', '--coffee'), '#f4ead6');
+  assert.equal(tok('cream', '--coffee-light'), '#fffdf8');
+  assert.equal(tok('white', '--coffee'), '#ffffff');
+  assert.equal(tok('white', '--coffee-light'), '#f7f0e2');
+  // the sheet and its primary button read the theme tokens
   assert.match(css, /\.stSheet\{[^}]*background:var\(--sheet-bg\)/);
   assert.match(css, /\.stBtn\.primary\{background:var\(--accent\); color:var\(--on-accent\);\}/);
 });

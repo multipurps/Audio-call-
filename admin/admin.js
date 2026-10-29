@@ -128,7 +128,7 @@ async function enterAdmin() {
 }
 
 // ---------- panel shell ----------
-document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') === 'brave' ? 'brave' : 'dark');
+document.documentElement.setAttribute('data-theme', 'dark');
 const isPWA = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
 const fitHeight = () => { if (isPWA && window.screen.height) document.body.style.height = `${window.screen.height}px`; };
 fitHeight(); window.addEventListener('resize', fitHeight);

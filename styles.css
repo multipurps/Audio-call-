@@ -1,4 +1,4 @@
-/* Four themes. Dark = default (:root). Brave = crimson / peach / teal. Cream and White are light. */
+/* Three themes. Dark = default (:root). Cream = cream with white cards. White = white with cream cards. */
 /* The call screen is designed dark (glow artwork, light-on-dark controls), so it stays dark in every theme. */
 :root, [data-theme="cream"] #callScreen, [data-theme="white"] #callScreen{
   --safe-top: env(safe-area-inset-top, 0px);
@@ -27,82 +27,46 @@
   --sheet-bg: var(--surface-2);
   --sheet-close: var(--surface-3);
   --banner-bg: rgba(11,11,11,.94);
-  --hero-fade: rgba(0,0,0,.6);
   --status-strip: transparent;
 }
-[data-theme="brave"]{
-  --emysa-blue:#0a6fe6;
-  --on-emysa-blue:#ffffff;
-  --accent:#fcd9b0;
-  --accent-grad: var(--accent);
-  --on-accent:#3a0a14;
-  --text:#f6e3cc;
-  --muted:#8fa29d;
-  --fg-rgb:246,227,204;
-  --coffee:#090c0c;
-  --coffee-light:#131c1b;
-  --coffee-light-rgb:19,28,27;
-  --panel:#172524;
-  --surface-1:#111a19;
-  --surface-2:#1a2a29;
-  --surface-3:#264240;
-  --crimson:#b3213b;
-  --line: rgba(252,217,176,0.1);
-  --dim: rgba(246,227,204,0.62);
-  --icon-color:#fcd9b0;
-  --glass-bg: rgba(252,217,176,0.06);
-  --glass-border: rgba(252,217,176,0.12);
-}
-/* Cream and White: the two light themes. Primary buttons are dark ink with light text. */
-[data-theme="cream"]{
+/* Cream and White: the two light themes. No black in either: the ink is cocoa and the accent is caramel,
+   on cream and white surfaces. Cream is a cream page with white cards; White is a white page with cream cards. */
+[data-theme="cream"], [data-theme="white"]{
   color-scheme:light;
-  --accent:#2b211b;
+  --accent:#80603c;
   --accent-grad: var(--accent);
-  --on-accent:#f6ecd9;
-  --text:#2b211b;
-  --muted:#8c7c6c;
-  --fg-rgb:43,33,27;
-  --coffee:#f3e8d3;
-  --coffee-light:#eadcc2;
-  --coffee-light-rgb:234,220,194;
-  --panel:#fbf4e6;
-  --surface-1:#f9f1e1;
-  --surface-2:#fffaf0;
-  --surface-3:#efe2c9;
-  --line: rgba(43,33,27,0.12);
-  --dim: rgba(43,33,27,0.62);
-  --icon-color:#2b211b;
-  --glass-bg: rgba(43,33,27,0.05);
-  --glass-border: rgba(43,33,27,0.12);
-  --sheet-close:#fffaf0;
-  --banner-bg: rgba(255,250,240,.96);
-  --hero-fade: rgba(243,232,211,.85);
+  --on-accent:#fffaf0;
+  --text:#4a3a2b;
+  --muted:#94836f;
+  --fg-rgb:74,58,43;
+  --line: rgba(74,58,43,0.12);
+  --dim: rgba(74,58,43,0.64);
+  --icon-color:#4a3a2b;
+  --glass-border: rgba(74,58,43,0.11);
+  --sheet-close:#ffffff;
   --status-strip:#0b0b0b;
+}
+[data-theme="cream"]{
+  --coffee:#f4ead6;
+  --coffee-light:#fffdf8;
+  --coffee-light-rgb:255,253,248;
+  --panel:#fffdf8;
+  --surface-1:#faf3e4;
+  --surface-2:#ffffff;
+  --surface-3:#efe3cb;
+  --glass-bg: rgba(255,255,255,0.66);
+  --banner-bg: rgba(255,253,248,.96);
 }
 [data-theme="white"]{
-  color-scheme:light;
-  --accent:#141414;
-  --accent-grad: var(--accent);
-  --on-accent:#ffffff;
-  --text:#141414;
-  --muted:#707070;
-  --fg-rgb:20,20,20;
   --coffee:#ffffff;
-  --coffee-light:#f4f4f2;
-  --coffee-light-rgb:244,244,242;
-  --panel:#f7f7f5;
-  --surface-1:#f7f7f5;
+  --coffee-light:#f7f0e2;
+  --coffee-light-rgb:247,240,226;
+  --panel:#f9f3e6;
+  --surface-1:#faf5ea;
   --surface-2:#ffffff;
-  --surface-3:#ececea;
-  --line: rgba(20,20,20,0.1);
-  --dim: rgba(20,20,20,0.6);
-  --icon-color:#141414;
-  --glass-bg: rgba(20,20,20,0.04);
-  --glass-border: rgba(20,20,20,0.1);
-  --sheet-close:#ffffff;
+  --surface-3:#efe5d0;
+  --glass-bg: rgba(214,190,146,0.17);
   --banner-bg: rgba(255,255,255,.96);
-  --hero-fade: rgba(255,255,255,.85);
-  --status-strip:#0b0b0b;
 }
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; margin:0; padding:0; -webkit-text-size-adjust:100%; touch-action:manipulation; scrollbar-width:none;}
 *::-webkit-scrollbar{display:none; width:0; height:0;}
@@ -370,7 +334,7 @@ h1.pageTitle{font-size:22px; font-weight:700; letter-spacing:-0.01em; padding-to
 
 /* ---------- profile ---------- */
 .themeRow{display:flex; gap:10px; margin-bottom:16px;}
-.themeSwatch{flex:1; height:56px; border-radius:14px; border:2px solid transparent; cursor:pointer;}
+.themeSwatch{flex:1; height:56px; border-radius:14px; border:2px solid transparent; cursor:pointer; box-shadow:inset 0 0 0 1px var(--line);}
 .themeSwatch.active{border-color:var(--text);}
 .recordBtn{width:100%; background:var(--panel); border:1px solid var(--line); color:var(--text); padding:14px; border-radius:14px; font-weight:600; text-align:center;}
 .recordBtn.recording{background:rgba(220,80,80,0.25); color:#ff8b8b;}
@@ -996,7 +960,7 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .swipeWrap.open > .swipeFront{transform:translateX(-92px);}
 .swipeWrap.dragging > .swipeFront{transition:none;}
 .swipeWrap.removing{opacity:0; transition:opacity .2s ease;}
-.recentCount{font-size:12px; color:var(--crimson,var(--muted)); font-weight:700; margin-left:6px;}
+.recentCount{font-size:12px; color:var(--muted); font-weight:700; margin-left:6px;}
 
 .swipeFront{-webkit-user-select:none; user-select:none; -webkit-touch-callout:none;}
 
@@ -1057,9 +1021,11 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 #screen-home{overflow:hidden; padding-bottom:calc(92px + env(safe-area-inset-bottom, 0px));}
 #screen-home.active{display:grid; grid-template-rows:minmax(300px, 1fr) auto auto auto;}
 .dashHero{position:relative; overflow:hidden; display:flex; flex-direction:column; min-height:0; margin:0 -18px; padding:0 18px 18px; border-radius:0 0 32px 32px; background:var(--glass-bg);}
-.dashHero::before{content:""; position:absolute; inset:0 0 auto 0; height:190px; z-index:1; pointer-events:none; background:linear-gradient(to bottom, var(--hero-fade), transparent);}
 .dashHero > .dashHeader{position:relative; z-index:2; flex:none;}
-.dashHero .dashIconBtn{background:rgba(var(--coffee-light-rgb),0.55); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);}
+/* The hero is a dark video in every theme, so its header is light ink straight on the picture: no haze, no blur. */
+.dashHero .dashName{color:#fff6ee; text-shadow:0 1px 14px rgba(0,0,0,.55);}
+.dashHero .dashTag{color:rgba(255,246,238,.84); text-shadow:0 1px 10px rgba(0,0,0,.6);}
+.dashHero .dashIconBtn{color:#fff6ee; background:rgba(0,0,0,.34); border-color:rgba(255,246,238,.2);}
 .dashHeroMedia{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0;}
 .dashHeroMedia[hidden]{display:none;}
 .dashHero .dashBalance{position:relative; z-index:2; margin-top:auto; background:rgba(var(--coffee-light-rgb),0.78); backdrop-filter:blur(18px) saturate(160%); -webkit-backdrop-filter:blur(18px) saturate(160%); box-shadow:0 10px 30px rgba(0,0,0,.35);}
@@ -1456,3 +1422,11 @@ button.isLoadingIcon::before{position:absolute; top:50%; left:50%; width:16px; h
 /* iPhone draws the status bar text white over the app, so on the light themes it sits on a dark strip. */
 body::before{content:""; position:absolute; top:0; left:0; right:0; height:var(--safe-top); background:var(--status-strip); z-index:9999; pointer-events:none;}
 [data-theme="cream"] .authBgOverlay, [data-theme="white"] .authBgOverlay{background:linear-gradient(180deg, rgba(var(--coffee-light-rgb),0.2) 0%, rgba(var(--coffee-light-rgb),0.45) 60%, rgba(var(--coffee-light-rgb),0.7) 100%);}
+
+/* TikTok */
+.profileCard .cSub{font-size:12.5px; color:var(--dim); margin-top:2px;}
+.tiktokHint{margin:2px 2px 14px;}
+.tiktokEmbedBox{min-height:120px; display:flex; justify-content:center; margin-bottom:18px;}
+.tiktokEmbedBox blockquote{margin:0 auto;}
+.tiktokEmbedBox blockquote section a{color:var(--accent); font-weight:600; text-decoration:none;}
+.tiktokOpen{display:block; width:100%; text-align:center; text-decoration:none;}
