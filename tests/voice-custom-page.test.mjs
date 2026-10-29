@@ -76,7 +76,7 @@ test('custom voice slots: adding is replaced by Delete / Get Premium only when t
 
 test('Delete is per voice: it asks first, tells the server which voice, and only changes the screen once the server says it is gone', () => {
   const handler = app.slice(app.indexOf('async function deleteCustomVoice'), app.indexOf("$('voiceGetPremiumBtn').addEventListener"));
-  assert.match(handler, /confirm\(`Delete "\$\{voice\.name\}"\?/);
+  assert.match(handler, /confirmSheet\(\{ title: `Delete \\u201c\$\{voice\.name\}\\u201d\?`/);
   assert.match(handler, /authedFetch\(`\/api\/voice-clone\?target=agent&action=delete&voiceId=\$\{encodeURIComponent\(voice\.id\)\}`, \{ method: 'DELETE' \}\)/);
   // a refusal returns before the list is reloaded or any local state is cleared
   assert.ok(handler.indexOf('if (!resp.ok)') < handler.indexOf('voicePending ='));

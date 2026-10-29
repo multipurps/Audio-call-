@@ -27,8 +27,12 @@ test('the removed rows are gone from the table', () => {
 test('Import chat is locked for a free account: the entry point and the file picker open Premium, and a server refusal does too', () => {
   assert.match(app, /const importLocked = \(\) => Boolean\(homeBalance\) && !homeBalance\.premium;/);
   const picker = app.slice(app.indexOf('function openImportPicker()'), app.indexOf('function openImportPicker()') + 300);
-  assert.match(picker, /if \(importLocked\(\)\) \{[^}]*openPremium\(\); return; \}/);
-  assert.match(app, /\$\('cmFileLabel'\)\.addEventListener\('click', \(e\) => \{\s*if \(!importLocked\(\)\) return;\s*e\.preventDefault\(\);/);
+  assert.match(picker, /if \(importLocked\(\)\) \{ premiumFeatureSheet\('Import chat'\); return; \}/);
+  assert.match(app, /\$\('cmFileLabel'\)\.addEventListener\('click', \(e\) => \{\s*if \(!importLocked\(\)\) return;\s*e\.preventDefault\(\);\s*premiumFeatureSheet\('Import chat'\);/);
+  // the sheet says it is a Premium feature and its main button opens Premium
+  const sheetFn = app.slice(app.indexOf('async function premiumFeatureSheet'), app.indexOf('async function premiumFeatureSheet') + 400);
+  assert.match(sheetFn, /confirmLabel: 'Get Premium'/);
+  assert.match(sheetFn, /\)\) openPremium\(\);/);
   assert.match(app, /if \(data\.code === 'premium_required'\) err\.premiumRequired = true;/);
   assert.match(app, /if \(err\.premiumRequired\) openPremium\(\);/);
   assert.match(app, /locked \? 'Import chat · Premium' : 'Import chat \(\.txt or \.zip\)'/);

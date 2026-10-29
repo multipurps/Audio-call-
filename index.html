@@ -31,7 +31,7 @@
 </script>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-10-18.1">
+<link rel="stylesheet" href="styles.css?v=2026-10-23.1">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -149,7 +149,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-10-21.1').catch(function (err) {
+        import('./app.js?v=2026-10-23.1').catch(function (err) {
           showBootError('Something went wrong. Check your connection and try again.', 'Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -1253,6 +1253,8 @@
       <div class="themeRow">
         <div class="themeSwatch active" data-theme="dark" style="background:#0b0b0b;"></div>
         <div class="themeSwatch" data-theme="brave" style="background:linear-gradient(180deg,#090c0c 0 55%,#fcd9b0 55% 80%,#b3213b 80%);"></div>
+        <div class="themeSwatch" data-theme="cream" style="background:linear-gradient(180deg,#f3e8d3 0 60%,#2b211b 60% 80%,#fffaf0 80%);"></div>
+        <div class="themeSwatch" data-theme="white" style="background:linear-gradient(180deg,#ffffff 0 60%,#141414 60% 80%,#ececea 80%);"></div>
       </div>
     </div>
     <div class="sectionLabel">App Icon</div>

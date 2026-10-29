@@ -1,5 +1,6 @@
-/* Two themes only. Dark = default (:root). Brave = crimson / peach / teal. */
-:root{
+/* Four themes. Dark = default (:root). Brave = crimson / peach / teal. Cream and White are light. */
+/* The call screen is designed dark (glow artwork, light-on-dark controls), so it stays dark in every theme. */
+:root, [data-theme="cream"] #callScreen, [data-theme="white"] #callScreen{
   --safe-top: env(safe-area-inset-top, 0px);
   --accent:#f5dcd6;
   --accent-grad: var(--accent);
@@ -22,6 +23,12 @@
   /* Emysa's own voice (live-call transcript). One token pair, used in one rule. */
   --emysa-blue:#0a6fe6;
   --on-emysa-blue:#ffffff;
+  /* the status sheet (lib/statusSheet.js) */
+  --sheet-bg: var(--surface-2);
+  --sheet-close: var(--surface-3);
+  --banner-bg: rgba(11,11,11,.94);
+  --hero-fade: rgba(0,0,0,.6);
+  --status-strip: transparent;
 }
 [data-theme="brave"]{
   --emysa-blue:#0a6fe6;
@@ -45,6 +52,57 @@
   --icon-color:#fcd9b0;
   --glass-bg: rgba(252,217,176,0.06);
   --glass-border: rgba(252,217,176,0.12);
+}
+/* Cream and White: the two light themes. Primary buttons are dark ink with light text. */
+[data-theme="cream"]{
+  color-scheme:light;
+  --accent:#2b211b;
+  --accent-grad: var(--accent);
+  --on-accent:#f6ecd9;
+  --text:#2b211b;
+  --muted:#8c7c6c;
+  --fg-rgb:43,33,27;
+  --coffee:#f3e8d3;
+  --coffee-light:#eadcc2;
+  --coffee-light-rgb:234,220,194;
+  --panel:#fbf4e6;
+  --surface-1:#f9f1e1;
+  --surface-2:#fffaf0;
+  --surface-3:#efe2c9;
+  --line: rgba(43,33,27,0.12);
+  --dim: rgba(43,33,27,0.62);
+  --icon-color:#2b211b;
+  --glass-bg: rgba(43,33,27,0.05);
+  --glass-border: rgba(43,33,27,0.12);
+  --sheet-close:#fffaf0;
+  --banner-bg: rgba(255,250,240,.96);
+  --hero-fade: rgba(243,232,211,.85);
+  --status-strip:#0b0b0b;
+}
+[data-theme="white"]{
+  color-scheme:light;
+  --accent:#141414;
+  --accent-grad: var(--accent);
+  --on-accent:#ffffff;
+  --text:#141414;
+  --muted:#707070;
+  --fg-rgb:20,20,20;
+  --coffee:#ffffff;
+  --coffee-light:#f4f4f2;
+  --coffee-light-rgb:244,244,242;
+  --panel:#f7f7f5;
+  --surface-1:#f7f7f5;
+  --surface-2:#ffffff;
+  --surface-3:#ececea;
+  --line: rgba(20,20,20,0.1);
+  --dim: rgba(20,20,20,0.6);
+  --icon-color:#141414;
+  --glass-bg: rgba(20,20,20,0.04);
+  --glass-border: rgba(20,20,20,0.1);
+  --sheet-close:#ffffff;
+  --banner-bg: rgba(255,255,255,.96);
+  --hero-fade: rgba(255,255,255,.85);
+  --status-strip:#0b0b0b;
 }
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; margin:0; padding:0; -webkit-text-size-adjust:100%; touch-action:manipulation; scrollbar-width:none;}
 *::-webkit-scrollbar{display:none; width:0; height:0;}
@@ -999,7 +1057,7 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 #screen-home{overflow:hidden; padding-bottom:calc(92px + env(safe-area-inset-bottom, 0px));}
 #screen-home.active{display:grid; grid-template-rows:minmax(300px, 1fr) auto auto auto;}
 .dashHero{position:relative; overflow:hidden; display:flex; flex-direction:column; min-height:0; margin:0 -18px; padding:0 18px 18px; border-radius:0 0 32px 32px; background:var(--glass-bg);}
-.dashHero::before{content:""; position:absolute; inset:0 0 auto 0; height:190px; z-index:1; pointer-events:none; background:linear-gradient(to bottom, rgba(0,0,0,.6), rgba(0,0,0,0));}
+.dashHero::before{content:""; position:absolute; inset:0 0 auto 0; height:190px; z-index:1; pointer-events:none; background:linear-gradient(to bottom, var(--hero-fade), transparent);}
 .dashHero > .dashHeader{position:relative; z-index:2; flex:none;}
 .dashHero .dashIconBtn{background:rgba(var(--coffee-light-rgb),0.55); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);}
 .dashHeroMedia{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0;}
@@ -1107,7 +1165,7 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 .iosRowGlyph svg.phoneIc{width:32px; height:32px;}
 
 /* Cookie consent: sits above the login/home screens, below sheets so the Privacy Policy can open over it. */
-.cookieBanner{position:absolute; left:0; right:0; bottom:0; z-index:120; padding:18px 18px calc(18px + env(safe-area-inset-bottom, 0px)); background:rgba(11,11,11,.94); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); border-top:1px solid var(--glass-border); border-radius:22px 22px 0 0; color:var(--text);}
+.cookieBanner{position:absolute; left:0; right:0; bottom:0; z-index:120; padding:18px 18px calc(18px + env(safe-area-inset-bottom, 0px)); background:var(--banner-bg); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); border-top:1px solid var(--glass-border); border-radius:22px 22px 0 0; color:var(--text);}
 .cookieBanner.hidden{display:none;}
 .cookieBanner p{font-size:14px; line-height:1.5; margin:0 0 14px;}
 .cookieLink{display:inline; padding:0; background:none; border:0; color:var(--accent); font:inherit; text-decoration:underline; cursor:pointer;}
@@ -1329,3 +1387,72 @@ button.isLoadingIcon::before{position:absolute; top:50%; left:50%; width:16px; h
 .voiceCard .voiceDelBtn:disabled { opacity: .4; }
 /* Import chat locked for free accounts */
 .cmFileBtn.cmLocked { opacity: .7; }
+
+/* ---------- status sheet (lib/statusSheet.js): one animated popup for results, questions and short text ---------- */
+.stRoot{
+  position:absolute; inset:0; z-index:1100; display:flex; align-items:flex-end; justify-content:center; padding:0 12px 14px;
+  --st-a-l1:.22; --st-a-l2:.4; --st-a-l3:.66;
+}
+.stBackdrop{position:absolute; inset:0; background:rgba(6,6,6,.45); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); opacity:0; transition:opacity .3s ease;}
+.stRoot.in .stBackdrop{opacity:1;}
+.stRoot.closing .stBackdrop{opacity:0; transition-duration:.24s;}
+.stSheet{
+  position:relative; width:100%; max-width:440px; box-sizing:border-box; padding:74px 22px 22px; text-align:center;
+  background:var(--sheet-bg); color:var(--text); border-radius:38px; box-shadow:0 -12px 60px rgba(0,0,0,.28);
+  transform:translateY(112%); transition:transform .55s cubic-bezier(.16,1.08,.3,1); touch-action:none; max-height:calc(100% - 40px); overflow:visible;
+}
+.stSheet:focus{outline:none;}
+.stRoot.in .stSheet{transform:translateY(0);}
+.stRoot.closing .stSheet{transform:translateY(112%); transition:transform .26s cubic-bezier(.5,0,.9,.4);}
+.stClose{
+  position:absolute; top:-27px; left:50%; width:54px; height:54px; margin-left:-27px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center; background:var(--sheet-close); color:var(--text);
+  box-shadow:0 6px 22px rgba(0,0,0,.26); border:1px solid var(--glass-border);
+}
+.stClose svg{width:22px; height:22px;}
+.stRoot.in .stClose{animation:stPopIn .45s .2s cubic-bezier(.2,1.4,.4,1) both;}
+.stBadge{width:150px; height:150px; margin:-2px auto 14px;}
+.stBadgeSvg{width:100%; height:100%; overflow:visible;}
+.stLayer{transform-box:fill-box; transform-origin:center;}
+.stRoot.in .stBadge{animation:stBadgePop .75s .16s cubic-bezier(.2,1.25,.35,1) both;}
+.stRoot.in .stLayer.l1{animation:stSpinA 28s linear infinite;}
+.stRoot.in .stLayer.l2{animation:stSpinB 20s linear infinite;}
+.stRoot.in .stLayer.l3{animation:stBreath 3.4s ease-in-out infinite;}
+.stIcon .stRing, .stIcon .stCheck, .stIcon .stStem, .stIcon .stBar{stroke-dasharray:100; stroke-dashoffset:0;}
+.stRoot.in .stIcon .stRing{animation:stDraw .55s .42s ease-out both;}
+.stRoot.in .stIcon .stCheck{animation:stDraw .4s .8s ease-out both;}
+.stRoot.in .stIcon .stStem, .stRoot.in .stIcon .stBar{animation:stDraw .35s .5s ease-out both;}
+.stIcon .stDot{transform-box:fill-box; transform-origin:center;}
+.stRoot.in .stIcon-info .stDot{animation:stDrop .6s .45s cubic-bezier(.3,1.6,.5,1) both;}
+.stRoot.in .stIcon-error, .stRoot.in .stIcon-warning{animation:stWiggle .6s .6s ease-in-out both;}
+.stTitle{font-size:29px; line-height:1.15; font-weight:700; letter-spacing:-.01em; color:var(--text); margin:0 0 10px;}
+.stText{font-size:17px; line-height:1.45; color:var(--muted); margin:0 6px 4px; overflow-wrap:break-word; max-height:min(34vh, 280px); overflow-y:auto; touch-action:pan-y; -webkit-overflow-scrolling:touch;}
+.stText[hidden]{display:none;}
+.stInput{max-height:min(30vh, 220px); touch-action:pan-y; width:100%; box-sizing:border-box; margin-top:14px; padding:14px 16px; border-radius:18px; background:var(--glass-bg); border:1px solid var(--glass-border); color:var(--text); font:16px/1.4 inherit; font-family:inherit; resize:none; text-align:left; outline:none;}
+.stInput:focus{border-color:var(--text);}
+.stActions{display:flex; flex-direction:column; gap:10px; margin-top:26px;}
+.stBtn{width:100%; min-height:58px; border-radius:999px; font-size:17px; font-weight:650; letter-spacing:.005em; transition:transform .12s ease, opacity .12s ease;}
+.stBtn:active{transform:scale(.98);}
+.stBtn.primary{background:var(--accent); color:var(--on-accent);}
+.stBtn.primary.danger{background:#d63c36; color:#fff;}
+.stBtn.ghost{min-height:50px; background:transparent; color:var(--text); border:1px solid var(--glass-border);}
+.stRoot.in .stTitle{animation:stRise .45s .3s ease-out both;}
+.stRoot.in .stText, .stRoot.in .stInput{animation:stRise .45s .36s ease-out both;}
+.stRoot.in .stActions{animation:stRise .45s .42s ease-out both;}
+@keyframes stPopIn{from{opacity:0; transform:scale(.4);} to{opacity:1; transform:scale(1);}}
+@keyframes stBadgePop{0%{opacity:0; transform:scale(.25) rotate(-28deg);} 60%{opacity:1; transform:scale(1.1) rotate(5deg);} 100%{opacity:1; transform:scale(1) rotate(0);}}
+@keyframes stSpinA{to{transform:rotate(360deg);}}
+@keyframes stSpinB{to{transform:rotate(-360deg);}}
+@keyframes stBreath{0%,100%{transform:scale(1);} 50%{transform:scale(1.07);}}
+@keyframes stDraw{from{stroke-dashoffset:100;} to{stroke-dashoffset:0;}}
+@keyframes stDrop{0%{opacity:0; transform:translateY(-26px) scale(.4);} 100%{opacity:1; transform:translateY(0) scale(1);}}
+@keyframes stWiggle{0%,100%{transform:translate(100px,100px) rotate(0);} 25%{transform:translate(100px,100px) rotate(-9deg);} 50%{transform:translate(100px,100px) rotate(8deg);} 75%{transform:translate(100px,100px) rotate(-4deg);}}
+@keyframes stRise{from{opacity:0; transform:translateY(12px);} to{opacity:1; transform:translateY(0);}}
+@media (prefers-reduced-motion: reduce){
+  .stBackdrop, .stSheet{transition:none;}
+  .stRoot *{animation:none !important;}
+}
+
+/* iPhone draws the status bar text white over the app, so on the light themes it sits on a dark strip. */
+body::before{content:""; position:absolute; top:0; left:0; right:0; height:var(--safe-top); background:var(--status-strip); z-index:9999; pointer-events:none;}
+[data-theme="cream"] .authBgOverlay, [data-theme="white"] .authBgOverlay{background:linear-gradient(180deg, rgba(var(--coffee-light-rgb),0.2) 0%, rgba(var(--coffee-light-rgb),0.45) 60%, rgba(var(--coffee-light-rgb),0.7) 100%);}

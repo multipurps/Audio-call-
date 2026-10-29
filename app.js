@@ -10,6 +10,7 @@ import { greetingForNow as pickGreeting } from './lib/greeting.js';
 import { isAppCall, callAgainPlatform, transcriptSpeakerLabel, callTalked } from './lib/callDetail.js';
 import { userError, friendlyAccountName } from './lib/userFacing.js';
 import * as Tutorial from './lib/tutorial.js';
+import { confirmSheet, promptSheet, successSheet, errorSheet, closeAllSheets } from './lib/statusSheet.js';
 import { installOverlayStacking } from './lib/overlayStack.js';
 import { fileToWavBase64, looksLikeAudio, CLIP_MIN_SECONDS, CLIP_MAX_SECONDS } from './lib/voiceClip.js';
 import { pickFirstCallChannel, firstCallPrompt, firstCallExplainer } from './lib/firstCall.js';
@@ -389,6 +390,7 @@ supabase.auth.onAuthStateChange((_event, session) => {
     homeChatInitializedFor = null;
     tutorialAutoFor = null;
     Tutorial.stop();
+    closeAllSheets();
     stopMessagePolling();
     $('authBoot').style.display = 'none';
     $('pendingBox').style.display = 'none';
@@ -1431,7 +1433,7 @@ async function submitAppCallBrief(callId, attempt = 0) {
       body: JSON.stringify({ callId }),
     });
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) { showToast(userError(data?.error, 'Could not prepare the call from your briefing')); return; }
+    if (!resp.ok) { errorSheet(userError(data?.error, 'Could not prepare the call from your briefing'), 'Couldn\u2019t prepare the call'); return; }
     if (data.status === 'nothing-to-do' && attempt < 2) { setTimeout(() => submitAppCallBrief(callId, attempt + 1), 2500); return; }
     if (data.status === 'prepared' && data.sessionId) {
       showToast(`Call to ${data.contactName || 'your contact'} is ready. Review it and tap Call Now`);
@@ -1440,7 +1442,7 @@ async function submitAppCallBrief(callId, attempt = 0) {
       showToast(data.contactName ? `I could not tell which contact "${data.contactName}" is. Tell me who to call` : 'Tell me who to call');
     }
   } catch {
-    showToast('Could not prepare the call from your briefing');
+    errorSheet('Could not prepare the call from your briefing.', 'Couldn\u2019t prepare the call');
   }
 }
 
@@ -1768,7 +1770,7 @@ function renderContactRow(c) {
   del.setAttribute('aria-label', `Remove ${c.name}`);
   del.onclick = async (e) => {
     e.stopPropagation();
-    if (!confirm(`Remove ${c.name} from contacts?`)) return;
+    if (!(await confirmSheet({ title: 'Remove contact?', message: `${c.name} will be removed from your contacts.`, confirmLabel: 'Remove', destructive: true }))) return;
     del.disabled = true;
     try {
       await callApi('/api/contacts', { id: c.id }, 'DELETE');
@@ -3403,7 +3405,7 @@ $('recentChatMenu').querySelector('[data-action="delete"]').addEventListener('cl
   if (!recentChatMenuTargetId) return;
   const id = recentChatMenuTargetId;
   closeRecentChatMenu();
-  if (!confirm('Delete this chat? This can\'t be undone.')) return;
+  if (!(await confirmSheet({ title: 'Delete this chat?', message: 'This can\u2019t be undone.', confirmLabel: 'Delete', destructive: true }))) return;
   await authedFetch('/api/assistant?action=deleteSession', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: id }) });
   loadRecentChats();
 });
@@ -3433,7 +3435,7 @@ $('recentSelectDelete').addEventListener('click', async () => {
   const picked = [...recentSelected].map((k) => recentGroups.get(k)).filter(Boolean);
   if (!picked.length) return;
   const people = picked.length;
-  if (!confirm(`Delete ${people} chat${people === 1 ? '' : 's'}? This can't be undone.`)) return;
+  if (!(await confirmSheet({ title: `Delete ${people} chat${people === 1 ? '' : 's'}?`, message: 'This can\u2019t be undone.', confirmLabel: 'Delete', destructive: true }))) return;
   const btn = $('recentSelectDelete');
   btn.disabled = true;
   const ids = picked.flatMap((g) => g.map((x) => x.id));
@@ -3451,7 +3453,7 @@ $('recentSelectDelete').addEventListener('click', async () => {
     showToast(`${people} chat${people === 1 ? '' : 's'} deleted`);
     setRecentSelecting(false);
   } catch {
-    showToast('Could not delete. Try again.');
+    errorSheet('Try again in a moment.', 'Couldn\u2019t delete');
     btn.disabled = false;
   }
 });
@@ -3629,8 +3631,11 @@ $('dashPeopleAll').addEventListener('click', () => showTab('contacts'));
 // Importing a chat is a Premium feature (enforced on the server; this only saves a wasted tap). Free
 // only when the balance has loaded and says so: until then the server decides.
 const importLocked = () => Boolean(homeBalance) && !homeBalance.premium;
+async function premiumFeatureSheet(feature) {
+  if (await confirmSheet({ title: 'Premium feature', message: `${feature} is a Premium feature.`, confirmLabel: 'Get Premium', cancelLabel: 'Not now' })) openPremium();
+}
 function openImportPicker() {
-  if (importLocked()) { showToast('Import chat is a Premium feature'); openPremium(); return; }
+  if (importLocked()) { premiumFeatureSheet('Import chat'); return; }
   if (!homeContacts.length) { showTab('contacts'); return; }
   const list = $('importPickList');
   list.textContent = '';
@@ -3842,11 +3847,11 @@ async function verifyPayment() {
   homeBalance = { ...(homeBalance || {}), ...data, payments: true };
   renderBalance();
   if (data.planActivated) {
-    showToast('Premium is on');
+    successSheet('Premium is on.');
     closePremium();
     closeAddTime();
   } else if (before != null && data.remaining > before) {
-    showToast(`${formatMinutes(data.remaining - before)} added`);
+    successSheet(`${formatMinutes(data.remaining - before)} added to your balance.`);
     closeAddTime();
   }
   if (!data.pending) localStorage.removeItem(PAY_FLAG);
@@ -4288,8 +4293,7 @@ function applyImportLock() {
 $('cmFileLabel').addEventListener('click', (e) => {
   if (!importLocked()) return;
   e.preventDefault();
-  showToast('Import chat is a Premium feature');
-  openPremium();
+  premiumFeatureSheet('Import chat');
 });
 
 function openContactMemory(contact) {
@@ -4414,7 +4418,7 @@ function cmEdit(card, m) {
 }
 
 async function cmDelete(m) {
-  if (!confirm('Delete this memory?')) return;
+  if (!(await confirmSheet({ title: 'Delete this memory?', message: 'This can\u2019t be undone.', confirmLabel: 'Delete', destructive: true }))) return;
   try { await cmApi('cm-delete', { method: 'DELETE', body: { id: m.id } }); await cmRefresh(); }
   catch (err) { cmSay(err.message); }
 }
@@ -4429,8 +4433,9 @@ function cmRenderImports(imports) {
     const state = imp.status === 'analyzed' ? 'analysed' : imp.status === 'analyzing' ? 'partly analysed' : imp.status;
     label.textContent = `${imp.original_filename} · ${imp.message_count || 0} messages · ${state}`;
     row.append(label, cmButton('Remove', 'cmLinkBtn', async () => {
-      if (!confirm('Remove this import and its stored chat file?')) return;
-      const withMemories = confirm('Also delete the memories found in it? OK deletes them, Cancel keeps them.');
+      if (!(await confirmSheet({ title: 'Remove this import?', message: 'Its stored chat file will be deleted.', confirmLabel: 'Remove', destructive: true }))) return;
+      // Closing the sheet any other way than "Delete memories" keeps them.
+      const withMemories = await confirmSheet({ title: 'Delete its memories too?', message: 'The memories found in this import can be deleted along with it, or kept.', confirmLabel: 'Delete memories', cancelLabel: 'Keep memories', destructive: true });
       try { await cmApi('import-delete', { method: 'DELETE', body: { importId: imp.id, deleteMemories: withMemories } }); cmSetupHide(); await cmRefresh(); }
       catch (err) { cmSay(err.message); }
     }));
@@ -4593,7 +4598,7 @@ async function loadMemories() {
     editBtn.setAttribute('aria-label', 'Edit memory');
     editBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" width="15" height="15"><path d="M4 20h4l10.5-10.5a2 2 0 0 0 0-2.83l-1.17-1.17a2 2 0 0 0-2.83 0L4 16v4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
     editBtn.addEventListener('click', async () => {
-      const updated = prompt('Edit memory:', m.content || '');
+      const updated = await promptSheet({ title: 'Edit memory', value: m.content || '', confirmLabel: 'Save' });
       if (!updated || !updated.trim() || updated.trim() === m.content) return;
       const r = await authedFetch('/api/memories', {
         method: 'PATCH',
@@ -4656,7 +4661,7 @@ $('memoryAddForm')?.addEventListener('submit', async (e) => {
 });
 
 $('memoriesClearAllBtn')?.addEventListener('click', async () => {
-  if (!confirm('Clear all saved memories? This cannot be undone.')) return;
+  if (!(await confirmSheet({ title: 'Clear all memories?', message: 'This cannot be undone.', confirmLabel: 'Clear all', destructive: true }))) return;
   const btn = $('memoriesClearAllBtn');
   setBtnLoading(btn, true);
   try {
@@ -4750,13 +4755,13 @@ function mailtoSupport(subject, body) {
   window.location.href = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body + email)}`;
 }
 $('exportDataBtn').addEventListener('click', () => mailtoSupport('Data export request', 'Please send me a copy of the personal data associated with my account.'));
-$('deleteAccountBtn').addEventListener('click', () => {
-  if (!confirm('This permanently deletes your account and all associated data. Continue?')) return;
+$('deleteAccountBtn').addEventListener('click', async () => {
+  if (!(await confirmSheet({ title: 'Delete your account?', message: 'This permanently deletes your account and all associated data.', confirmLabel: 'Continue', destructive: true }))) return;
   mailtoSupport('Delete my account', 'Please permanently delete my account and all associated data.');
 });
 
 // ---------- theme ----------
-const THEMES = { dark: '#0b0b0b', brave: '#090c0c' };
+const THEMES = { dark: '#0b0b0b', brave: '#090c0c', cream: '#f3e8d3', white: '#ffffff' };
 function applyTheme(name) {
   if (!THEMES[name]) name = 'dark';
   document.documentElement.setAttribute('data-theme', name);
@@ -4964,9 +4969,9 @@ function readFileBase64(file) {
 // and the "this is my own voice" confirmation is a single tap, asked once per session.
 $('voiceNeeds').innerHTML = `<b>10 to ${CLIP_MAX_SECONDS} seconds</b> of clear speech works best.`;
 
-function confirmOwnVoice() {
+async function confirmOwnVoice() {
   try { if (sessionStorage.getItem('voiceConsent')) return true; } catch { /* ask every time */ }
-  if (!confirm('Only add your own voice, or one you have the right to use. Continue?')) return false;
+  if (!(await confirmSheet({ title: 'Only your own voice', message: 'Only add your own voice, or one you have the right to use.', confirmLabel: 'I agree' }))) return false;
   try { sessionStorage.setItem('voiceConsent', '1'); } catch { /* ignore */ }
   return true;
 }
@@ -5025,7 +5030,7 @@ $('recordVoiceBtn').addEventListener('click', async () => {
   const btn = $('recordVoiceBtn');
   const status = $('cloneStatus');
   if (voiceRec) { stopVoiceRecording(); return; }
-  if (btn.disabled || !confirmOwnVoice()) return;
+  if (btn.disabled || !(await confirmOwnVoice())) return;
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
     status.textContent = 'Recording is not available here. Use Upload instead.';
     return;
@@ -5066,8 +5071,8 @@ $('recordVoiceBtn').addEventListener('click', async () => {
   rec.tick = setInterval(paint, 250);
 });
 
-$('uploadVoiceBtn').addEventListener('click', () => {
-  if ($('uploadVoiceBtn').disabled || !confirmOwnVoice()) return;
+$('uploadVoiceBtn').addEventListener('click', async () => {
+  if ($('uploadVoiceBtn').disabled || !(await confirmOwnVoice())) return;
   $('cloneStatus').textContent = '';
   $('cloneFile').click();
 });
@@ -5085,7 +5090,7 @@ $('cloneFile').addEventListener('change', async () => {
 async function deleteCustomVoice(voice, btn) {
   const status = $('cloneStatus');
   if (!voice || btn.disabled) return;
-  if (!confirm(`Delete "${voice.name}"? This cannot be undone. If calls use it, they go back to your Standard voice.`)) return;
+  if (!(await confirmSheet({ title: `Delete \u201c${voice.name}\u201d?`, message: 'This cannot be undone. If calls use it, they go back to your Standard voice.', confirmLabel: 'Delete', destructive: true }))) return;
   $('liveVoiceAudio').pause();
   setBtnLoading(btn, true, 'Deleting…');
   status.textContent = '';
@@ -5669,7 +5674,7 @@ $('lineSetupBack').addEventListener('click', () => {
 });
 $('lineRemoveLink').addEventListener('click', async () => {
   const rented = lineState.line?.mode === 'rent';
-  if (!confirm(rented ? 'Release your rented number? You will lose it.' : 'Remove your verified number?')) return;
+  if (!(await confirmSheet({ title: rented ? 'Release your rented number?' : 'Remove your verified number?', message: rented ? 'You will lose it.' : '', confirmLabel: rented ? 'Release' : 'Remove', destructive: true }))) return;
   try { await lineApi('line-remove', { method: 'POST', body: {} }); await loadLineState(); showLineSetup(); }
   catch (err) { hint('lineNumHint', err.message); }
 });
@@ -5745,7 +5750,7 @@ $('rentSearchBtn').addEventListener('click', async () => {
       const btn = document.createElement('button');
       btn.className = 'secondaryBtn'; btn.type = 'button'; btn.textContent = 'Rent';
       btn.addEventListener('click', async () => {
-        if (!confirm(`Rent ${n.phoneNumber} for $${price} / month?`)) return;
+        if (!(await confirmSheet({ title: `Rent ${n.phoneNumber}?`, message: `$${price} / month.`, confirmLabel: 'Rent' }))) return;
         btn.disabled = true;
         try { await lineApi('line-rent-buy', { method: 'POST', body: { phoneNumber: n.phoneNumber } }); lineStepDone(); }
         catch (err) { hint('rentHint', err.message); btn.disabled = false; }
