@@ -5411,9 +5411,23 @@ $('telegramVerifyBtn').addEventListener('click', async () => {
 
 let whatsappPollTimer = null;
 
+// Every link-status poll goes through to a relay on Render. A poll every few seconds with no end keeps a
+// sleeping relay awake for as long as a screen is left open, so each one stops after LINK_POLL_MAX_MS and
+// stays quiet while the app is in the background. (Signal and phone verification already had caps.)
+const LINK_POLL_MAX_MS = 150_000;
+
 function watchWhatsappStatus() {
   clearInterval(whatsappPollTimer);
+  const startedAt = Date.now();
   whatsappPollTimer = setInterval(async () => {
+    if (Date.now() - startedAt > LINK_POLL_MAX_MS) {
+      clearInterval(whatsappPollTimer);
+      whatsappLinking = false;
+      $('whatsappQrWrap').classList.add('hidden');
+      $('whatsappLoginError').textContent = 'The link expired. Tap Connect to get a new one.';
+      return;
+    }
+    if (document.hidden) return;
     const r = await authedFetch('/api/social-calling?action=whatsapp-status');
     const d = await r.json();
     if (d.qr) $('whatsappQrImg').src = d.qr;
@@ -5887,7 +5901,16 @@ $('waNumSubmit').addEventListener('click', async () => {
     showSetupPanel('panelWaCode');
     stopLinePolls();
     waFailStreak = 0;
-    lineWaTimer = setInterval(() => checkWaLinked(), 3000);
+    const waStartedAt = Date.now();
+    lineWaTimer = setInterval(() => {
+      if (Date.now() - waStartedAt > LINK_POLL_MAX_MS) {
+        // Stop polling; coming back to the app (focus / visibility, below) or the check button still asks once.
+        clearInterval(lineWaTimer); lineWaTimer = null;
+        hint('waCodeHint', 'Still waiting. After you enter the code in WhatsApp, tap "I\'ve linked it".');
+        return;
+      }
+      if (!document.hidden) checkWaLinked();
+    }, 3000);
     waVisibilityHandler = () => { if (!document.hidden) checkWaLinked(); };
     document.addEventListener('visibilitychange', waVisibilityHandler);
     window.addEventListener('focus', waVisibilityHandler);

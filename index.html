@@ -31,7 +31,7 @@
 </script>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-10-23.1">
+<link rel="stylesheet" href="styles.css?v=2026-10-29.1">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -48,7 +48,10 @@
         var last = 0;
         window.__warmBackends = function () {
           var now = Date.now();
-          if (now - last < 4 * 60 * 1000) return; // at most once per 4 minutes
+          // The free-tier services only fall asleep after ~15 idle minutes, so pinging again sooner than that
+          // does nothing except keep them awake. There is no timer here: it runs when the app opens, and when
+          // the app comes back to the foreground at least 15 minutes after the last ping.
+          if (now - last < 15 * 60 * 1000) return;
           last = now;
           URLS.forEach(function (u) {
             try { fetch(u, { mode: 'no-cors', cache: 'no-store', keepalive: true }).catch(function () {}); } catch (e) {}
@@ -149,7 +152,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-10-23.1').catch(function (err) {
+        import('./app.js?v=2026-10-29.1').catch(function (err) {
           showBootError('Something went wrong. Check your connection and try again.', 'Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }

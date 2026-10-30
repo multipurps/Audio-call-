@@ -10,7 +10,7 @@ test('the backends are pinged invisibly the instant the page opens (before app.j
   assert.match(head, /audio-call-assistant\.onrender\.com\/healthz/);
   assert.match(head, /wacalls-relay\.onrender\.com/);
   assert.match(head, /audio-call-relay\.onrender\.com/);
-  assert.match(head, /4 \* 60 \* 1000/);
+  assert.match(head, /15 \* 60 \* 1000/);
   assert.match(head, /window\.__warmBackends\(\);/);
   // Invisible: the ping code must never touch the DOM.
   const script = head.slice(head.indexOf('window.__warmBackends = function'));
