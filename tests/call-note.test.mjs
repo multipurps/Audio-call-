@@ -52,5 +52,7 @@ import { readFileSync } from 'node:fs';
 test('in-app voice path pins the Settings language for STT and replies', () => {
   const src = readFileSync(new URL('../api/assistant.js', import.meta.url), 'utf8');
   assert.match(src, /language,\s*\n\s*bytes: audioBytes/);
-  assert.match(src, /LANGUAGE: always reply in \$\{userLanguage\}/);
+  // The system prompt (language rule included) now lives in lib/appBrain.js, shared by chat and Anam.
+  const brain = readFileSync(new URL('../lib/appBrain.js', import.meta.url), 'utf8');
+  assert.match(brain, /LANGUAGE: always reply in \$\{userLanguage\}/);
 });
