@@ -24,6 +24,7 @@ import { buildSystemPrompt } from '../lib/appBrain.js';
 import { xmaxTokenRoute } from '../lib/xmaxToken.js';
 import { anamSessionRoute } from '../lib/anamSession.js';
 import { anamAvatarsRoute, anamAvatarSelectRoute, anamAvatarCreateRoute, anamAvatarDeleteRoute } from '../lib/anamAvatars.js';
+import { anamVoiceRoute, anamLlmRoute } from '../lib/anamLink.js';
 import { sendCallNote, callNoteReply } from '../lib/callNote.js';
 import { availableChannels } from '../lib/phoneLines.js';
 import { createCallRecord, markCallPlaced, markCallFailed, findDuplicateActiveCall } from '../lib/callSession.js';
@@ -50,6 +51,7 @@ import { readVapid } from '../lib/vapid.js';
 // decommissioned, and no path may silently fall back to it.
 export default async function handler(req, res) {
   const supabase = getServiceClient();
+  if (req.query?.action === 'anam-llm') return anamLlmRoute(req, res, supabase);
   const userId = await getAuthedUserId(req, supabase);
   if (!userId) return res.status(401).json({ error: 'Not signed in' });
 
@@ -57,6 +59,7 @@ export default async function handler(req, res) {
   switch (action) {
     case 'xmax-token': return xmaxTokenRoute(req, res, supabase, userId);
     case 'anam-avatars': return anamAvatarsRoute(req, res, supabase, userId);
+    case 'anam-voice': return anamVoiceRoute(req, res, supabase, userId);
     case 'anam-avatar': return anamAvatarSelectRoute(req, res, supabase, userId);
     case 'anam-avatar-create': return anamAvatarCreateRoute(req, res, supabase, userId);
     case 'anam-avatar-delete': return anamAvatarDeleteRoute(req, res, supabase, userId);

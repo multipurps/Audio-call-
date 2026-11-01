@@ -49,9 +49,12 @@ test('route: GET refused; POST uses the person\'s own key and avatar and returns
   const ok = fakeRes();
   await anamSessionRoute({ method: 'POST', body: { brief: 'Say hello', contactName: 'Tunde' } }, ok, supabaseNoRow, 'u1', {
     env: {}, getKey: async () => KEY, getAvatar: async () => ({ id: 'av1', name: 'Me' }), fetchImpl: okFetch(calls),
+    getLlmId: async () => 'llm-1', getVoiceId: async () => 'voice-1',
   });
   assert.equal(ok.code, 200);
   assert.equal(ok.body.sessionToken, TOKEN);
   assert.equal(JSON.stringify(ok.body).includes(KEY), false);
   assert.match(JSON.parse(calls[0].init.body).personaConfig.systemPrompt, /Say hello/);
+  assert.equal(JSON.parse(calls[0].init.body).personaConfig.llmId, 'llm-1');
+  assert.equal(JSON.parse(calls[0].init.body).personaConfig.voiceId, 'voice-1');
 });

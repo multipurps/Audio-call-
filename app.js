@@ -3700,6 +3700,7 @@ const MEDIA_SLOTS = {
   swap: { col: 'live_swap_url', file: 'live-swap', tile: 'picSwap', img: 'picSwapImg', empty: 'picSwapEmpty', rm: 'picSwapRemove', sImg: 'slotSwapImg', sIc: 'slotSwapIc', sClear: 'slotSwapClear', sPick: 'slotSwapPick', sFile: 'slotSwapFile', name: 'Live Swap picture' },
 };
 const mediaUrls = { avatar: null, swap: null };
+let anamImageUrl = null; // the image Anam generated for your avatar: the video call tab background
 const MEDIA_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'gif'];
 
 function renderHomeMedia() {
@@ -3717,7 +3718,7 @@ function renderHomeMedia() {
   }
   // The video call card's background is the avatar picture.
   const bg = $('videoCardBg');
-  if (mediaUrls.avatar) { bg.src = mediaUrls.avatar; bg.hidden = false; } else { bg.removeAttribute('src'); bg.hidden = true; }
+  if (anamImageUrl) { bg.src = anamImageUrl; bg.hidden = false; } else { bg.removeAttribute('src'); bg.hidden = true; }
 }
 
 async function loadHomeMedia() {
@@ -3728,6 +3729,15 @@ async function loadHomeMedia() {
     mediaUrls.swap = data?.live_swap_url || null;
   } catch { /* columns not created yet: pictures just stay empty */ }
   renderHomeMedia();
+  refreshAnamImage();
+}
+// Silent: only sets the video call card background from the person's selected Anam avatar.
+async function refreshAnamImage() {
+  try {
+    const r = await anamAvatarApi('anam-avatars');
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) { anamImageUrl = d.imageUrl || null; renderHomeMedia(); }
+  } catch (_) { /* offline: keep the current background */ }
 }
 
 const mediaStatus = (t) => { $('avatarSlotStatus').textContent = t; };
@@ -3813,6 +3823,7 @@ function showAnamAvatars(list, selectedId) {
     sel.appendChild(o);
   }
   sel.hidden = !list.length;
+  if (!list.length) { anamImageUrl = null; renderHomeMedia(); }
   $('anamAvatarHint').textContent = list.length
     ? 'Your video calls use the avatar selected here.'
     : 'Upload your video call avatar picture above. We create your Anam avatar from it, named after your name.';
@@ -3823,6 +3834,8 @@ async function loadAnamAvatars() {
     const d = await r.json().catch(() => ({}));
     if (!r.ok) { mediaStatus(d.error || 'Could not load your avatars.'); return; }
     showAnamAvatars(d.avatars || [], d.selectedId || null);
+    anamImageUrl = d.imageUrl || null;
+    renderHomeMedia();
   } catch (_) { mediaStatus('Could not reach the server. Try again.'); }
 }
 async function createAnamAvatar() {
@@ -5260,6 +5273,12 @@ async function cloneVoiceFrom(blob, btn) {
   try {
     const clip = await fileToWavBase64(blob);
     if (clip.trimmed) status.textContent = `Using the first ${Math.round(clip.seconds)} seconds.`;
+    // Anam gets its own clone of the same recording, separate from the Inworld voice.
+    const anamClone = authedFetch('/api/assistant?action=anam-voice', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sample: { type: 'audio/wav', data: clip.base64 } }),
+    }).then(async (r) => { const d = await r.json().catch(() => ({})); return r.ok ? null : (d.error || 'Anam could not clone your voice.'); })
+      .catch(() => 'Could not reach the server for the Anam voice.');
     const resp = await authedFetch('/api/voice-clone?target=agent&action=clone', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -5273,7 +5292,8 @@ async function cloneVoiceFrom(blob, btn) {
     }
     await loadAgentState();
     if (out.voiceId) { voicePending = { type: 'agent', provider: 'custom', agentVoiceId: out.voiceId }; renderVoiceSettings(); }
-    status.textContent = 'Your voice is ready. Tap Apply Changes to use it.';
+    const anamErr = await anamClone;
+    status.textContent = anamErr ? `Your voice is ready. Anam: ${anamErr}` : 'Your voice is ready. Tap Apply Changes to use it. Your Anam avatar uses it too.';
   } catch (err) {
     status.textContent = err.message || 'Could not clone your voice.';
   } finally {

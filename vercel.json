@@ -22,6 +22,10 @@
   },
   "routes": [
     {
+      "src": "/anam-llm(/v1/chat/completions)?",
+      "dest": "/api/assistant?action=anam-llm"
+    },
+    {
       "src": "/api/bachs-webhook",
       "dest": "/api/referrals?action=webhook"
     },

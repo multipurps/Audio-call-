@@ -138,7 +138,7 @@ test('create: a failed Anam create keeps the old avatar and says why', async () 
 
 test('list shows only this person’s avatars, never another user’s', async () => {
   const res = fakeRes();
-  await anamAvatarsRoute({ method: 'GET' }, res, fakeDb(seed()), ME);
+  await anamAvatarsRoute({ method: 'GET' }, res, fakeDb(seed()), ME, { env: {}, fetchImpl: async () => { throw new Error('no network in tests'); } });
   assert.deepEqual(res.body.avatars.map((a) => a.name).sort(), ['Ariana Silver', 'Ariana twins']);
   assert.equal(JSON.stringify(res.body).includes('Someone else'), false);
   assert.equal(res.body.selectedId, OLD_ID);
