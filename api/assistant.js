@@ -21,6 +21,7 @@ import { resolvePersonSession } from '../lib/personSession.js';
 import { endCallRow, isEndCallRequest, LIVE_CALL_STATUSES } from '../lib/callHangup.js';
 import { OBJECTIVE_BOUNDARY_RULES, sanitizeObjective } from '../lib/callContextGuard.js';
 import { buildSystemPrompt } from '../lib/appBrain.js';
+import { xmaxTokenRoute } from '../lib/xmaxToken.js';
 import { sendCallNote, callNoteReply } from '../lib/callNote.js';
 import { availableChannels } from '../lib/phoneLines.js';
 import { createCallRecord, markCallPlaced, markCallFailed, findDuplicateActiveCall } from '../lib/callSession.js';
@@ -52,6 +53,7 @@ export default async function handler(req, res) {
 
   const action = req.query?.action || req.body?.action;
   switch (action) {
+    case 'xmax-token': return xmaxTokenRoute(req, res, supabase, userId);
     case 'sessions': return listSessions(req, res, supabase, userId);
     case 'archiveSession': return archiveSession(req, res, supabase, userId);
     case 'messages': return listMessages(req, res, supabase, userId);
