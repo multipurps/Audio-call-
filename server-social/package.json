@@ -12,7 +12,7 @@
     "express": "^4.19.2",
     "telegram": "^2.22.2",
     "big-integer": "^1.6.52",
-    "@queenanya/baileys": "github:QueenAnya/Bail",
+    "@queenanya/baileys": "9.10.1",
     "qrcode": "^1.5.4"
   },
   "optionalDependencies": {
