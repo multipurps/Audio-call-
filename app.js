@@ -2057,7 +2057,6 @@ document.querySelectorAll('[data-method]').forEach((btn) => btn.addEventListener
     if (!mode) return;
   }
   contactPickMode = null;
-  if (mode === 'avatar') { openVideoCall({ contactName: contact.name }); return; }
   beginPreCall(target, btn.dataset.method, mode);
 }));
 // ---- Video call screen (phase 1): the Anam avatar speaks on the call; your camera is the PiP

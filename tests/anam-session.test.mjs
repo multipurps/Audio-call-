@@ -25,7 +25,7 @@ test('mint sends the key as a Bearer header and returns only the session token',
 
 test('mint refuses without a key or an avatar id', async () => {
   await assert.rejects(() => mintAnamSessionToken({ apiKey: '', avatarId: 'a', fetchImpl: okFetch([]) }), (e) => e.status === 400);
-  await assert.rejects(() => mintAnamSessionToken({ apiKey: KEY, avatarId: '', fetchImpl: okFetch([]) }), (e) => e.status === 500);
+  await assert.rejects(() => mintAnamSessionToken({ apiKey: KEY, avatarId: '', fetchImpl: okFetch([]) }), (e) => e.status === 400);
 });
 
 test('mint maps an Anam error to its status', async () => {
