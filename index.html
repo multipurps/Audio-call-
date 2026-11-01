@@ -31,7 +31,7 @@
 </script>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-10-29.1">
+<link rel="stylesheet" href="styles.css?v=2026-11-01.1">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -67,6 +67,8 @@
      To swap an icon, replace the contents of its <symbol> and keep the id. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
   <symbol id="ic-clock" viewBox="0 0 24 24"><path opacity="0.5" d="M3.46447 20.5355C4.92893 22 7.28595 22 12 22C16.714 22 19.0711 22 20.5355 20.5355C22 19.0711 22 16.714 22 12C22 7.28595 22 4.92893 20.5355 3.46447C19.0711 2 16.714 2 12 2C7.28595 2 4.92893 2 3.46447 3.46447C2 4.92893 2 7.28595 2 12C2 16.714 2 19.0711 3.46447 20.5355Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M12 7.25C12.4142 7.25 12.75 7.58579 12.75 8V11.6893L15.0303 13.9697C15.3232 14.2626 15.3232 14.7374 15.0303 15.0303C14.7374 15.3232 14.2626 15.3232 13.9697 15.0303L11.4697 12.5303C11.329 12.3897 11.25 12.1989 11.25 12V8C11.25 7.58579 11.5858 7.25 12 7.25Z" fill="currentColor"/></symbol>
+  <symbol id="ic-avatar" viewBox="0 0 16 16"><path fill="currentColor" d="m 8 1 c -1.65625 0 -3 1.34375 -3 3 s 1.34375 3 3 3 s 3 -1.34375 3 -3 s -1.34375 -3 -3 -3 z m -1.5 7 c -2.492188 0 -4.5 2.007812 -4.5 4.5 v 0.5 c 0 1.109375 0.890625 2 2 2 h 8 c 1.109375 0 2 -0.890625 2 -2 v -0.5 c 0 -2.492188 -2.007812 -4.5 -4.5 -4.5 z m 0 0"/></symbol>
+  <symbol id="ic-video" viewBox="0 0 48 48"><path fill="currentColor" d="M8,12h22c2.2,0,4,1.8,4,4v16c0,2.2-1.8,4-4,4H8c-2.2,0-4-1.8-4-4V16C4,13.8,5.8,12,8,12z"/><polygon fill="currentColor" opacity="0.7" points="44,35 34,29 34,19 44,13"/></symbol>
   <symbol id="ic-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
   <symbol id="ic-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   <symbol id="ic-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
@@ -152,7 +154,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-10-29.1').catch(function (err) {
+        import('./app.js?v=2026-11-01.1').catch(function (err) {
           showBootError('Something went wrong. Check your connection and try again.', 'Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -391,8 +393,7 @@
   <div id="screens">
 
     <div class="screen active" id="screen-home">
-      <section class="dashHero" aria-label="Balance">
-        <img class="dashHeroMedia" id="dashHeroMedia" alt="" hidden fetchpriority="high" decoding="async">
+      <section class="dashTop" aria-label="Credits">
         <header class="dashHeader">
           <div class="dashBrand">
             <img class="dashLogo" src="icon-192.png" alt="">
@@ -405,14 +406,54 @@
         </header>
         <div class="dashCard dashBalance">
           <span class="dashBalanceIcon"><svg class="ic"><use href="#ic-clock"/></svg></span>
-          <button type="button" class="dashBalanceBody" id="dashBalanceBtn" aria-label="Balance and add time">
-            <span class="dashLabel">Balance</span>
+          <button type="button" class="dashBalanceBody" id="dashBalanceBtn" aria-label="Credits and add credits">
+            <span class="dashLabel">Credits</span>
             <span class="dashMinutes"><span id="dashMinutes">–</span><svg class="ic dashChev"><use href="#ic-chevron"/></svg></span>
             <span class="dashSub" id="dashBalanceSub">remaining</span>
           </button>
-          <button type="button" class="dashAddBtn" id="dashAddTime"><svg class="ic"><use href="#ic-plus"/></svg>Add time</button>
+          <button type="button" class="dashAddBtn" id="dashAddTime"><svg class="ic"><use href="#ic-plus"/></svg>Add credits</button>
         </div>
         <button type="button" class="premiumCard dashUpgrade hidden" id="dashUpgrade"><span class="premiumCardText"><strong id="dashUpgradeTitle">Upgrade to Premium</strong><span id="dashUpgradeSub">Your credits never expire</span></span><svg class="ic"><use href="#ic-chevron"/></svg></button>
+      </section>
+
+      <section class="callCards" aria-label="Start a call">
+        <div class="callCard" id="videoCallCard">
+          <img class="callCardBg" id="videoCardBg" alt="" hidden decoding="async">
+          <div class="callCardShade"></div>
+          <div class="callCardBody">
+            <div class="callCardKicker">Video call</div>
+            <div class="callCardTitle">Call as your AI avatar</div>
+            <button type="button" class="callCardBtn" id="videoCallStart"><svg class="ic"><use href="#ic-video"/></svg>Start call</button>
+          </div>
+        </div>
+        <div class="callCard" id="audioCallCard">
+          <img class="callCardBg" id="dashHeroMedia" alt="" hidden fetchpriority="high" decoding="async">
+          <div class="callCardShade"></div>
+          <div class="callCardBody">
+            <div class="callCardKicker">Audio call</div>
+            <div class="callCardTitle">Talk to Emysa live</div>
+            <button type="button" class="callCardBtn" id="audioCallStart"><svg class="ic"><use href="#ic-phone"/></svg>Start call</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="picRow" aria-label="Your pictures">
+        <div class="picCol">
+          <div class="picTile" id="picAvatar" role="button" tabindex="0" aria-label="Avatar picture">
+            <img class="picImg" id="picAvatarImg" alt="" hidden>
+            <div class="picEmpty" id="picAvatarEmpty"><svg class="ic"><use href="#ic-avatar"/></svg><span>Add picture</span></div>
+            <button type="button" class="picRemove hidden" id="picAvatarRemove" aria-label="Remove avatar picture"><svg class="ic"><use href="#ic-close"/></svg></button>
+          </div>
+          <div class="picLabel">Avatar</div>
+        </div>
+        <div class="picCol">
+          <div class="picTile" id="picSwap" role="button" tabindex="0" aria-label="Live Swap picture">
+            <img class="picImg" id="picSwapImg" alt="" hidden>
+            <div class="picEmpty" id="picSwapEmpty"><svg class="ic"><use href="#ic-avatar"/></svg><span>Add picture</span></div>
+            <button type="button" class="picRemove hidden" id="picSwapRemove" aria-label="Remove Live Swap picture"><svg class="ic"><use href="#ic-close"/></svg></button>
+          </div>
+          <div class="picLabel">Live Swap</div>
+        </div>
       </section>
 
       <h2 class="dashHeading">What can Emysa do?</h2>
@@ -582,6 +623,11 @@
       <div class="profileCard linkCard" id="callSettingsBtn">
         <div class="cIcon"><svg class="phoneIc" viewBox="0 0 24 24"><use href="#ic-phone"/></svg></div>
         <div class="cBody"><div class="cValue">Call Settings</div></div>
+        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="profileCard linkCard" id="avatarSettingsBtn">
+        <div class="cIcon"><svg viewBox="0 0 16 16"><use href="#ic-avatar"/></svg></div>
+        <div class="cBody"><div class="cValue">Avatar</div><div class="cLabel">Pictures for video calls and Live Swap</div></div>
         <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
       </div>
       <div class="profileCard linkCard" id="permissionsBtn">
@@ -770,11 +816,11 @@
 
 </div>
 
-<!-- ---------- Add time (full page) ---------- -->
+<!-- ---------- Add credits (full page) ---------- -->
 <div class="addTimeScreen hidden" id="addTimeScreen" role="dialog" aria-modal="true" aria-labelledby="addTimeTitle">
   <button type="button" class="addTimeClose" id="addTimeClose" aria-label="Close"><svg class="ic"><use href="#ic-close"/></svg></button>
   <div class="addTimeLogo"><img src="icon-192.png" alt=""></div>
-  <h2 class="addTimeTitle" id="addTimeTitle">Add time</h2>
+  <h2 class="addTimeTitle" id="addTimeTitle">Add credits</h2>
   <p class="addTimeLead" id="addTimeLead">Top up to keep Emysa making calls for you.</p>
   <button type="button" class="premiumCard addTimeUpgrade hidden" id="addTimeUpgrade"><span class="premiumCardText"><strong id="addTimeUpgradeTitle">Upgrade to Premium</strong><span id="addTimeUpgradeSub">Your credits never expire</span></span><svg class="ic"><use href="#ic-chevron"/></svg></button>
   <div class="addTimeCenter">
@@ -1293,7 +1339,7 @@
       </div>
       <div class="statBox">
         <div class="statValue" id="referralMinutes">0</div>
-        <div class="statLabel">Bonus minutes earned</div>
+        <div class="statLabel">Bonus credits earned</div>
       </div>
     </div>
   </div>
@@ -1392,6 +1438,36 @@
     </form>
     <div class="authHint" id="memoryAddStatus"></div>
     <div id="memoriesList"></div>
+  </div>
+</div>
+
+<div class="sheetScreen hidden" id="sheet-avatar">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">Avatar</div>
+  </div>
+  <div class="sheetBody">
+    <div class="sectionLabel">Avatar picture</div>
+    <div class="avatarSlot">
+      <div class="avatarSlotPic" id="slotAvatarPic"><img id="slotAvatarImg" alt="" hidden><svg class="ic" id="slotAvatarIc"><use href="#ic-avatar"/></svg></div>
+      <div class="avatarSlotBody">
+        <div class="cValue">Video call avatar</div>
+        <div class="cLabel">A clear, front-facing photo. Your video calls start from this picture.</div>
+        <div class="avatarSlotBtns"><button type="button" class="avatarSlotBtn" id="slotAvatarPick">Upload picture</button><button type="button" class="avatarSlotBtn ghost hidden" id="slotAvatarClear">Remove</button></div>
+      </div>
+      <input type="file" id="slotAvatarFile" accept="image/*" hidden>
+    </div>
+    <div class="sectionLabel">Live Swap picture</div>
+    <div class="avatarSlot">
+      <div class="avatarSlotPic" id="slotSwapPic"><img id="slotSwapImg" alt="" hidden><svg class="ic" id="slotSwapIc"><use href="#ic-avatar"/></svg></div>
+      <div class="avatarSlotBody">
+        <div class="cValue">Live Swap face</div>
+        <div class="cLabel">The face used when you swap yourself live on a call.</div>
+        <div class="avatarSlotBtns"><button type="button" class="avatarSlotBtn" id="slotSwapPick">Upload picture</button><button type="button" class="avatarSlotBtn ghost hidden" id="slotSwapClear">Remove</button></div>
+      </div>
+      <input type="file" id="slotSwapFile" accept="image/*" hidden>
+    </div>
+    <p class="hint" id="avatarSlotStatus" aria-live="polite"></p>
   </div>
 </div>
 

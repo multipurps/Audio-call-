@@ -3475,7 +3475,7 @@ let homeLoadedAt = 0;
 
 function formatMinutes(n) {
   const m = Math.max(0, Math.floor(Number(n) || 0));
-  return `${m} minute${m === 1 ? '' : 's'}`;
+  return `${m} credit${m === 1 ? '' : 's'}`;
 }
 function relTimeShort(iso) {
   const ms = Date.now() - new Date(iso).getTime();
@@ -3502,7 +3502,7 @@ async function loadBalance() {
   renderBalance();
 }
 
-// Out of call minutes: never show a call screen. Go straight to Add time.
+// Out of credits: never show a call screen. Go straight to Add credits.
 const needsTopUp = () => Boolean(homeBalance && homeBalance.remaining < 1);
 function sendToAddTime() {
   openAddTime();
@@ -3604,7 +3604,123 @@ function loadHome(force = false) {
   loadBalance();
   loadHomePeople();
   loadHomeHero();
+  loadHomeMedia();
 }
+
+// ---------- Home: video + audio call cards, Avatar and Live Swap pictures ----------
+// Two pictures per person live on their profile row: the video-call avatar and the Live Swap face. They are
+// uploaded in Profile > Avatar and shown on Home. The Anam / Live Swap providers are connected separately; this
+// only stores and shows the pictures.
+const MEDIA_SLOTS = {
+  avatar: { col: 'video_avatar_url', file: 'video-avatar', tile: 'picAvatar', img: 'picAvatarImg', empty: 'picAvatarEmpty', rm: 'picAvatarRemove', sImg: 'slotAvatarImg', sIc: 'slotAvatarIc', sClear: 'slotAvatarClear', sPick: 'slotAvatarPick', sFile: 'slotAvatarFile', name: 'Avatar picture' },
+  swap: { col: 'live_swap_url', file: 'live-swap', tile: 'picSwap', img: 'picSwapImg', empty: 'picSwapEmpty', rm: 'picSwapRemove', sImg: 'slotSwapImg', sIc: 'slotSwapIc', sClear: 'slotSwapClear', sPick: 'slotSwapPick', sFile: 'slotSwapFile', name: 'Live Swap picture' },
+};
+const mediaUrls = { avatar: null, swap: null };
+const MEDIA_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'gif'];
+
+function renderHomeMedia() {
+  for (const [key, m] of Object.entries(MEDIA_SLOTS)) {
+    const url = mediaUrls[key];
+    const img = $(m.img);
+    if (url) { img.src = url; img.hidden = false; } else { img.removeAttribute('src'); img.hidden = true; }
+    $(m.empty).classList.toggle('hidden', Boolean(url));
+    $(m.rm).classList.toggle('hidden', !url);
+    const sImg = $(m.sImg);
+    if (url) { sImg.src = url; sImg.hidden = false; } else { sImg.removeAttribute('src'); sImg.hidden = true; }
+    $(m.sIc).style.display = url ? 'none' : '';
+    $(m.sClear).classList.toggle('hidden', !url);
+    $(m.sPick).textContent = url ? 'Replace picture' : 'Upload picture';
+  }
+  // The video call card's background is the avatar picture.
+  const bg = $('videoCardBg');
+  if (mediaUrls.avatar) { bg.src = mediaUrls.avatar; bg.hidden = false; } else { bg.removeAttribute('src'); bg.hidden = true; }
+}
+
+async function loadHomeMedia() {
+  if (!currentUser) return;
+  try {
+    const { data } = await supabase.from('profiles').select('video_avatar_url, live_swap_url').eq('user_id', currentUser.id).maybeSingle();
+    mediaUrls.avatar = data?.video_avatar_url || null;
+    mediaUrls.swap = data?.live_swap_url || null;
+  } catch { /* columns not created yet: pictures just stay empty */ }
+  renderHomeMedia();
+}
+
+const mediaStatus = (t) => { $('avatarSlotStatus').textContent = t; };
+
+async function uploadMedia(key, file) {
+  const m = MEDIA_SLOTS[key];
+  if (!file || !currentUser) return;
+  if (!file.type.startsWith('image/')) { mediaStatus('Please choose an image file.'); return; }
+  if (file.size > 8 * 1024 * 1024) { mediaStatus('Image is too large (max 8MB).'); return; }
+  mediaStatus('Uploading...');
+  $(m.sPick).disabled = true;
+  try {
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+    const path = `${currentUser.id}/${m.file}.${ext}`;
+    const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
+    if (upErr) throw upErr;
+    const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
+    const url = `${pub.publicUrl}?v=${Date.now()}`;
+    const { error: dbErr } = await supabase.from('profiles').upsert({ user_id: currentUser.id, [m.col]: url }, { onConflict: 'user_id' });
+    if (dbErr) throw dbErr;
+    // A different file type than last time would leave the old file behind: clear it (best effort).
+    supabase.storage.from('avatars').remove(MEDIA_EXTS.filter((e) => e !== ext).map((e) => `${currentUser.id}/${m.file}.${e}`)).catch(() => {});
+    mediaUrls[key] = url;
+    renderHomeMedia();
+    mediaStatus(`${m.name} saved.`);
+  } catch (err) {
+    console.error('media upload failed:', err);
+    const reason = (err?.message || '').toLowerCase();
+    if (reason.includes('column') || reason.includes('schema cache')) mediaStatus('Avatar pictures are not set up yet: run sql/045_video_avatars.sql in Supabase, then try again.');
+    else if (reason.includes('bucket not found')) mediaStatus('Storage is not set up yet (avatars bucket missing): run sql/006_avatars.sql, then try again.');
+    else if (reason.includes('row-level security') || reason.includes('policy') || reason.includes('permission')) mediaStatus('Not allowed to upload (storage policy). Check sql/006_avatars.sql has been applied.');
+    else mediaStatus(err?.message ? `Could not upload: ${err.message}` : 'Could not upload the picture. Try a smaller image.');
+  } finally {
+    $(m.sPick).disabled = false;
+  }
+}
+
+async function removeMedia(key) {
+  const m = MEDIA_SLOTS[key];
+  if (!currentUser || !mediaUrls[key]) return;
+  if (!window.confirm(`Remove your ${m.name.toLowerCase()}?`)) return;
+  try {
+    const { error } = await supabase.from('profiles').upsert({ user_id: currentUser.id, [m.col]: null }, { onConflict: 'user_id' });
+    if (error) throw error;
+    supabase.storage.from('avatars').remove(MEDIA_EXTS.map((e) => `${currentUser.id}/${m.file}.${e}`)).catch(() => {});
+    mediaUrls[key] = null;
+    renderHomeMedia();
+    mediaStatus(`${m.name} removed.`);
+  } catch (err) {
+    console.error('media remove failed:', err);
+    mediaStatus('Could not remove the picture. Try again.');
+  }
+}
+
+for (const [key, m] of Object.entries(MEDIA_SLOTS)) {
+  $(m.sPick).addEventListener('click', () => $(m.sFile).click());
+  $(m.sFile).addEventListener('change', (e) => { const f = e.target.files?.[0]; e.target.value = ''; uploadMedia(key, f); });
+  $(m.sClear).addEventListener('click', () => removeMedia(key));
+  $(m.rm).addEventListener('click', (e) => { e.stopPropagation(); removeMedia(key); });
+  const openSlot = () => { mediaStatus(''); openSheet('sheet-avatar'); };
+  $(m.tile).addEventListener('click', openSlot);
+  $(m.tile).addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSlot(); } });
+}
+$('avatarSettingsBtn').addEventListener('click', () => { mediaStatus(''); loadHomeMedia(); openSheet('sheet-avatar'); });
+
+// Video call: the AI avatar provider needs a brief before it can call, so Start call opens a new chat.
+$('videoCallStart').addEventListener('click', () => {
+  if (needsTopUp()) { sendToAddTime(); return; }
+  openChatWith('I want to start a video call. Here is the brief: ');
+});
+// Audio call: the live in-app call with Emysa. The AudioContext is resumed inside the tap so iOS allows audio.
+$('audioCallStart').addEventListener('click', () => {
+  const ctx = getAssistantAudioCtx();
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  if ('audioSession' in navigator) { try { navigator.audioSession.type = 'play-and-record'; } catch {} }
+  openAssistantCallScreen();
+});
 
 // Quick actions. Each one opens something that already exists: no new backend.
 // Scheduling, follow-ups and questions start a fresh chat with a starter line.
@@ -3673,13 +3789,9 @@ const payPending = () => {
 
 let addTimeQty = 1;
 
-// "5 hours" / "5 call hours"; odd lengths fall back to minutes.
+// One credit is one minute of call time, so a 30 minute pack is shown as "30 credits".
 function callTimeLabels(minutes) {
-  if (minutes % 60 === 0) {
-    const h = minutes / 60;
-    return { big: `${h} ${h === 1 ? 'hour' : 'hours'}`, buy: `${h} call ${h === 1 ? 'hour' : 'hours'}` };
-  }
-  return { big: `${minutes} minutes`, buy: `${minutes} call minutes` };
+  return { big: `${minutes} credits`, buy: `${minutes} credits` };
 }
 function formatPlainPrice(amount, currency) {
   const whole = Number.isInteger(Number(amount));
@@ -3693,7 +3805,7 @@ function renderAddTime() {
   const packs = homeBalance?.packs;
   const ready = Boolean(homeBalance?.payments && Array.isArray(packs) && packs.length);
   const out = homeBalance && homeBalance.remaining < 1;
-  $('addTimeLead').textContent = out ? "You're out of call time.\nTop up to keep Emysa making calls for you." : 'Top up to keep Emysa making calls for you.';
+  $('addTimeLead').textContent = out ? "You're out of credits.\nTop up to keep Emysa making calls for you." : 'Top up to keep Emysa making calls for you.';
   if (!ready) {
     $('addTimeQty').textContent = '';
     $('addTimeMinus').disabled = true;

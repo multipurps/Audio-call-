@@ -22,7 +22,7 @@ test('bottom nav is Home / Chat / Recent / Profile and every tab has a screen', 
 });
 
 test('Home keeps the agreed pieces and none of the removed ones', () => {
-  for (const keep of ['Emysa', 'Your calls. Your people. Your voice.', 'Balance', 'Add time', 'What can Emysa do?', 'Call someone', 'Schedule a call', 'Follow up for me', 'Ask / find something', 'Import Chat', 'Recent']) {
+  for (const keep of ['Emysa', 'Your calls. Your people. Your voice.', 'Credits', 'Add credits', 'Video call', 'Audio call', 'Call as your AI avatar', 'Avatar', 'Live Swap', 'What can Emysa do?', 'Call someone', 'Schedule a call', 'Follow up for me', 'Ask / find something', 'Import Chat', 'Recent']) {
     assert.ok(home.includes(keep), keep);
   }
   assert.deepEqual([...home.matchAll(/data-action="([a-z]+)"/g)].map((m) => m[1]), ['call', 'schedule', 'followup', 'ask', 'import']);
@@ -89,4 +89,17 @@ test('WhatsApp history UI: entry point per contact, chat text only ever set with
   for (const id of ['cmFile', 'cmConsent', 'cmAnalyze', 'cmList', 'cmPreviewText']) assert.ok(ids.has(id), id);
   // nothing is analysed without the consent box
   assert.ok(block.includes("Tick the box to let the chat text be analysed."));
+});
+
+test('Home: video card uses the avatar picture, audio card keeps the GIF, no GIF hero, credits wording, Avatar settings', () => {
+  assert.ok(!home.includes('class="dashHero"') && !home.includes('dashHeroMedia" alt="" hidden fetchpriority="high" decoding="async">\n        <header'));
+  const audio = home.slice(home.indexOf('id="audioCallCard"'), home.indexOf('aria-label="Your pictures"'));
+  assert.ok(audio.includes('id="dashHeroMedia"'), 'the GIF is the audio card background');
+  const video = home.slice(home.indexOf('id="videoCallCard"'), home.indexOf('id="audioCallCard"'));
+  assert.ok(video.includes('id="videoCardBg"') && !video.includes('dashHeroMedia'));
+  assert.ok(app.includes("openChatWith('I want to start a video call."), 'video Start call opens the chat for the brief');
+  assert.ok(app.includes("`${m} credit${m === 1 ? '' : 's'}`") && !/\$\{m\} minute/.test(app));
+  assert.ok(html.includes('id="sheet-avatar"') && html.includes('id="avatarSettingsBtn"'));
+  assert.ok(html.includes('<symbol id="ic-avatar" viewBox="0 0 16 16">') && html.includes('d="m 8 1 c -1.65625 0 -3 1.34375 -3 3'));
+  assert.ok(app.includes("video_avatar_url") && app.includes("live_swap_url"));
 });

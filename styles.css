@@ -1019,7 +1019,7 @@ dialog button:focus, dialog button:focus-visible, .callChannelMenu button:focus-
 
 .dashCard{background:var(--glass-bg); border:1px solid var(--glass-border); border-radius:24px;}
 #screen-home{overflow:hidden; padding-bottom:calc(92px + env(safe-area-inset-bottom, 0px));}
-#screen-home.active{display:grid; grid-template-rows:minmax(300px, 1fr) auto auto auto;}
+#screen-home.active{display:block; overflow-y:auto; -webkit-overflow-scrolling:touch;}
 .dashHero{position:relative; overflow:hidden; display:flex; flex-direction:column; min-height:0; margin:0 -18px; padding:0 18px 18px; border-radius:0 0 32px 32px; background:var(--glass-bg);}
 .dashHero > .dashHeader{position:relative; z-index:2; flex:none;}
 /* The hero is a dark video in every theme, so its header is light ink straight on the picture: no haze, no blur. */
@@ -1430,3 +1430,41 @@ body::before{content:""; position:absolute; top:0; left:0; right:0; height:var(-
 .tiktokEmbedBox blockquote{margin:0 auto;}
 .tiktokEmbedBox blockquote section a{color:var(--accent); font-weight:600; text-decoration:none;}
 .tiktokOpen{display:block; width:100%; text-align:center; text-decoration:none;}
+
+/* ---- Home: credits, video + audio call cards, avatar pictures ---- */
+.dashTop{display:flex; flex-direction:column; gap:12px; padding-bottom:2px;}
+.dashTop .dashUpgrade{margin-top:0;}
+.callCards{display:grid; gap:12px; margin-top:14px;}
+.callCard{position:relative; overflow:hidden; display:flex; align-items:flex-end; min-height:210px; border-radius:28px; background:var(--glass-bg); border:1px solid var(--glass-border);}
+.callCardBg{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0;}
+.callCardBg[hidden]{display:none;}
+.callCardShade{position:absolute; inset:0; z-index:1; background:linear-gradient(to top, rgba(0,0,0,.74) 0%, rgba(0,0,0,.28) 48%, rgba(0,0,0,.04) 100%);}
+.callCardBody{position:relative; z-index:2; padding:18px; width:100%;}
+.callCardKicker{font-size:12px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:rgba(255,246,238,.82); text-shadow:0 1px 8px rgba(0,0,0,.5);}
+.callCardTitle{margin:4px 0 14px; font-size:27px; font-weight:700; letter-spacing:-0.02em; line-height:1.1; color:#fff6ee; text-shadow:0 1px 14px rgba(0,0,0,.55);}
+.callCardBtn{display:inline-flex; align-items:center; gap:9px; padding:13px 22px; border-radius:999px; background:#fff; color:#141414; font-size:16px; font-weight:650;}
+.callCardBtn .ic{width:22px; height:22px; color:#141414;}
+.callCardBtn:active{opacity:.75;}
+.picRow{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:14px;}
+.picTile{position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center; aspect-ratio:3 / 4; border-radius:26px; background:var(--glass-bg); border:1px solid var(--glass-border); cursor:pointer;}
+.picImg{position:absolute; inset:0; width:100%; height:100%; object-fit:cover;}
+.picImg[hidden]{display:none;}
+.picEmpty{display:flex; flex-direction:column; align-items:center; gap:10px; color:var(--dim); font-size:14px; font-weight:600;}
+.picEmpty .ic{width:38px; height:38px; color:var(--accent);}
+.picEmpty.hidden{display:none;}
+.picRemove{position:absolute; top:10px; right:10px; z-index:2; width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.6); color:#fff6ee; border:1px solid rgba(255,246,238,.22);}
+.picRemove .ic{width:20px; height:20px;}
+.picRemove.hidden{display:none;}
+.picLabel{margin-top:8px; text-align:center; font-size:17px; font-weight:600;}
+.avatarSlot{display:flex; gap:14px; align-items:flex-start; padding:14px; border-radius:22px; background:var(--glass-bg); border:1px solid var(--glass-border);}
+.avatarSlotPic{position:relative; overflow:hidden; flex:none; width:92px; aspect-ratio:3 / 4; border-radius:16px; display:flex; align-items:center; justify-content:center; background:rgba(var(--fg-rgb),0.06); border:1px solid var(--glass-border);}
+.avatarSlotPic img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover;}
+.avatarSlotPic img[hidden]{display:none;}
+.avatarSlotPic .ic{width:34px; height:34px; color:var(--accent);}
+.avatarSlotBody{flex:1; min-width:0;}
+.avatarSlotBody .cLabel{margin-top:2px;}
+.avatarSlotBtns{display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;}
+.avatarSlotBtn{padding:10px 16px; border-radius:999px; font-size:14px; font-weight:650; background:var(--accent); color:var(--on-accent);}
+.avatarSlotBtn.ghost{background:transparent; color:var(--text); border:1px solid var(--glass-border);}
+.avatarSlotBtn.hidden{display:none;}
+.avatarSlotBtn:disabled{opacity:.5;}
