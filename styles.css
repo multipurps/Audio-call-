@@ -1468,3 +1468,6 @@ body::before{content:""; position:absolute; top:0; left:0; right:0; height:var(-
 .avatarSlotBtn.ghost{background:transparent; color:var(--text); border:1px solid var(--glass-border);}
 .avatarSlotBtn.hidden{display:none;}
 .avatarSlotBtn:disabled{opacity:.5;}
+
+.preCallIcWrap{display:inline-flex; vertical-align:-3px; margin-right:2px;}
+.preCallIcWrap .phoneIc,.preCallIcWrap .preCallIc{width:18px; height:18px;}

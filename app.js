@@ -113,7 +113,10 @@ async function authedFetch(url, options = {}) {
 // Home / Chat / Recent / Profile are the bottom tabs. Contacts is a screen
 // reached from Home (People > See all, More, Call someone) and from Profile; it
 // keeps Home highlighted in the nav since it is a child of Home.
+// Which Start call card sent the user to Contacts: null (plain contacts), 'audio' or 'video'.
+let contactPickMode = null;
 function showTab(name) {
+  if (name !== 'contacts') contactPickMode = null;
   const navTab = name === 'contacts' ? 'home' : name;
   document.querySelectorAll('.tabBtn').forEach((b) => {
     const on = b.dataset.tab === navTab;
@@ -1889,24 +1892,40 @@ function clearPreCallContext() {
   $('briefInput').placeholder = 'Message';
   $('channelBadge').classList.remove('visible');
 }
-function showPreCallContext(target, channel) {
-  preCallTarget = { ...target, channel };
+// Video call icon (same artwork as the Video call card) shown in the chat's call bar for video calls.
+const VIDEO_CALL_ICON = '<svg class="preCallIc" width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#ffecd4" stroke="#000" stroke-width="1.4" d="M8,12h22c2.2,0,4,1.8,4,4v16c0,2.2-1.8,4-4,4H8c-2.2,0-4-1.8-4-4V16C4,13.8,5.8,12,8,12z"/><polygon fill="#ffd9a8" stroke="#000" stroke-width="1.4" points="44,35 34,29 34,19 44,13"/></svg>';
+function showPreCallContext(target, channel, mode = 'audio') {
+  preCallTarget = { ...target, channel, mode };
   setCallChannel(channel, { focus: false });
-  $('preCallLabel').textContent = `${target.name || target.toNumber} · ${channel === 'phone' ? 'Phone' : CHANNEL_META[channel].label}`;
-  $('preCallHint').textContent = channel === 'phone'
-    ? 'What should Emysa say? Send your instructions to get a summary before calling.'
-    : 'What should Emysa say? Sending your instructions starts this contact’s call.';
+  const via = channel === 'phone' ? 'Phone' : CHANNEL_META[channel].label;
+  const label = $('preCallLabel');
+  label.textContent = '';
+  const icon = document.createElement('span');
+  icon.className = 'preCallIcWrap';
+  // Video calls get the video icon, audio calls keep the phone icon.
+  icon.innerHTML = mode === 'audio' ? PHONE_ICON : VIDEO_CALL_ICON;
+  label.append(icon, document.createTextNode(` ${target.name || target.toNumber} · ${mode === 'live' ? 'Live video · ' : mode === 'avatar' ? 'Avatar video · ' : ''}${via}`));
+  $('preCallHint').textContent = mode === 'avatar'
+    ? 'What should your avatar say? Send the brief to start the video call.'
+    : mode === 'live'
+      ? 'Send a note to start the live video call.'
+      : channel === 'phone'
+        ? 'What should Emysa say? Send your instructions to get a summary before calling.'
+        : 'What should Emysa say? Sending your instructions starts this contact’s call.';
   $('preCallContext').classList.remove('hidden', 'ready');
   $('briefInput').placeholder = 'Call instructions…';
 }
-function beginPreCall(target, channel) {
-  // One conversation per person is enforced server-side now (peer_key,
-  // resolvePersonSession) — it folds whatever chat this call started from
-  // into that person's canonical session and tells the client to switch
-  // (sendChatMessage's sessionSwitched handling), matched by phone number
-  // rather than this client's guess at contact_id/label. No need to
-  // pre-emptively switch chats here anymore.
-  showPreCallContext(target, channel);
+// A person already in Recent keeps their one chat: open it instead of starting another.
+async function findRecentSessionForContact(contactId) {
+  if (!contactId) return null;
+  await loadRecentChats();
+  return recentChatSessions.find((x) => x.contact_id === contactId) || null;
+}
+async function beginPreCall(target, channel, mode = 'audio') {
+  const existing = await findRecentSessionForContact(target.contactId);
+  if (existing) await openChatSession(existing.id);
+  else startNewChat(); // not in Recent yet: the first message creates their chat
+  showPreCallContext(target, channel, mode);
   showTab('chat');
   $('briefInput').focus();
 }
@@ -2026,12 +2045,30 @@ function positionActionSheet(dialog, anchorEl) {
   dialog.style.top = `${top}px`;
   dialog.style.left = `${left}px`;
 }
-document.querySelectorAll('[data-method]').forEach((btn) => btn.addEventListener('click', () => {
+document.querySelectorAll('[data-method]').forEach((btn) => btn.addEventListener('click', async () => {
   if (!contactCallTarget) return;
   const contact = contactCallTarget;
   $('contactCallDialog').close();
-  beginPreCall({ contactId: contact.id, toNumber: contact.phone_number, name: contact.name, kind: 'contact' }, btn.dataset.method);
+  const target = { contactId: contact.id, toNumber: contact.phone_number, name: contact.name, kind: 'contact' };
+  let mode = 'audio';
+  if (contactPickMode === 'video') {
+    // Video: ask live or avatar. Avatar needs a brief, so it opens the chat.
+    mode = await chooseVideoCallType();
+    if (!mode) return;
+  }
+  contactPickMode = null;
+  beginPreCall(target, btn.dataset.method, mode);
 }));
+function chooseVideoCallType() {
+  return new Promise((resolve) => {
+    const dialog = $('videoTypeDialog');
+    let choice = null;
+    const done = () => { dialog.removeEventListener('close', done); resolve(choice); };
+    dialog.addEventListener('close', done);
+    dialog.querySelectorAll('[data-video-type]').forEach((b) => { b.onclick = () => { choice = b.dataset.videoType; dialog.close(); }; });
+    dialog.showModal();
+  });
+}
 document.querySelectorAll('[data-dismiss]').forEach((btn) => btn.addEventListener('click', () => $(btn.dataset.dismiss).close()));
 document.querySelectorAll('.callDialog').forEach((dialog) => dialog.addEventListener('click', (event) => {
   const rect = dialog.getBoundingClientRect();
@@ -3709,17 +3746,17 @@ for (const [key, m] of Object.entries(MEDIA_SLOTS)) {
 }
 $('avatarSettingsBtn').addEventListener('click', () => { mediaStatus(''); loadHomeMedia(); openSheet('sheet-avatar'); });
 
-// Video call: the AI avatar provider needs a brief before it can call, so Start call opens a new chat.
+// Start call (video / audio): open Contacts first, the same as Call someone. Picking a person then
+// picks the line (Phone / WhatsApp / Telegram); video also asks Live or Avatar. Nothing is called until then.
 $('videoCallStart').addEventListener('click', () => {
   if (needsTopUp()) { sendToAddTime(); return; }
-  openChatWith('I want to start a video call. Here is the brief: ');
+  showTab('contacts');
+  contactPickMode = 'video';
 });
-// Audio call: the live in-app call with Emysa. The AudioContext is resumed inside the tap so iOS allows audio.
 $('audioCallStart').addEventListener('click', () => {
-  const ctx = getAssistantAudioCtx();
-  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-  if ('audioSession' in navigator) { try { navigator.audioSession.type = 'play-and-record'; } catch {} }
-  openAssistantCallScreen();
+  if (needsTopUp()) { sendToAddTime(); return; }
+  showTab('contacts');
+  contactPickMode = 'audio';
 });
 
 // Quick actions. Each one opens something that already exists: no new backend.

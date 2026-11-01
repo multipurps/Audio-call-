@@ -97,7 +97,7 @@ test('Home: video card uses the avatar picture, audio card keeps the GIF, no GIF
   assert.ok(audio.includes('id="dashHeroMedia"'), 'the GIF is the audio card background');
   const video = home.slice(home.indexOf('id="videoCallCard"'), home.indexOf('id="audioCallCard"'));
   assert.ok(video.includes('id="videoCardBg"') && !video.includes('dashHeroMedia'));
-  assert.ok(app.includes("openChatWith('I want to start a video call."), 'video Start call opens the chat for the brief');
+  assert.ok(app.includes("contactPickMode = 'video'") && app.includes("contactPickMode = 'audio'"), 'Start call opens Contacts first, then the line, then the chat');
   assert.ok(app.includes("`${m} credit${m === 1 ? '' : 's'}`") && !/\$\{m\} minute/.test(app));
   assert.ok(html.includes('id="sheet-avatar"') && html.includes('id="avatarSettingsBtn"'));
   assert.ok(html.includes('<symbol id="ic-avatar" viewBox="0 0 16 16">') && html.includes('d="m 8 1 c -1.65625 0 -3 1.34375 -3 3'));
