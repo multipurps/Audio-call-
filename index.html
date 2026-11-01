@@ -1483,6 +1483,28 @@
       </div>
       <input type="file" id="slotSwapFile" accept="image/*" hidden>
     </div>
+    <div class="sectionLabel">Your Anam avatar</div>
+    <div class="avatarSlot avatarKeyBlock">
+      <div class="avatarSlotBody">
+        <div class="cValue">Anam API key</div>
+        <div class="cLabel" id="anamKeyStatus">Not set</div>
+        <input class="plainInput" id="anamKeyInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" placeholder="Paste your Anam API key">
+        <div class="avatarSlotBtns"><button type="button" class="avatarSlotBtn" id="anamKeySave">Save Anam key</button></div>
+        <div class="cValue" style="margin-top:10px">Avatar</div>
+        <select class="plainInput" id="anamAvatarSelect" disabled><option value="">Save your key, then load your avatars</option></select>
+        <div class="avatarSlotBtns"><button type="button" class="avatarSlotBtn ghost" id="anamAvatarLoad">Load my avatars</button></div>
+      </div>
+    </div>
+    <div class="sectionLabel">Xmax key (Live Swap)</div>
+    <div class="avatarSlot avatarKeyBlock">
+      <div class="avatarSlotBody">
+        <div class="cValue">Xmax API key</div>
+        <div class="cLabel" id="xmaxKeyStatus">Not set</div>
+        <input class="plainInput" id="xmaxKeyInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" placeholder="Paste your Xmax API key">
+        <div class="avatarSlotBtns"><button type="button" class="avatarSlotBtn" id="xmaxKeySave">Save Xmax key</button></div>
+      </div>
+    </div>
+    <p class="hint" id="keysStatus" aria-live="polite"></p>
     <p class="hint" id="avatarSlotStatus" aria-live="polite"></p>
   </div>
 </div>

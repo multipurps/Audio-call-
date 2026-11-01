@@ -50,18 +50,17 @@ test('route: GET is refused and a missing key says so', async () => {
   const res2 = fakeRes();
   await xmaxTokenRoute({ method: 'POST', body: { op: 'mint' } }, res2, supabaseNoRow, 'u1', { env: {} });
   assert.equal(res2.code, 400);
-  assert.match(res2.body.error, /not set yet/);
+  assert.match(res2.body.error, /Save your Xmax API key/);
 });
 
 test('route: mint returns only the temporary key; revoke rejects a non-temporary key', async () => {
-  const env = { XMAX_API_KEY: PERM };
   const calls = [];
   const res = fakeRes();
-  await xmaxTokenRoute({ method: 'POST', body: { op: 'mint' } }, res, supabaseNoRow, 'u1', { env, fetchImpl: okFetch(calls) });
+  await xmaxTokenRoute({ method: 'POST', body: { op: 'mint' } }, res, supabaseNoRow, 'u1', { getKey: async () => PERM, fetchImpl: okFetch(calls) });
   assert.equal(res.code, 200);
   assert.equal(res.body.temporaryApiKey, TK);
   assert.equal(JSON.stringify(res.body).includes(PERM), false);
   const bad = fakeRes();
-  await xmaxTokenRoute({ method: 'POST', body: { op: 'revoke', temporaryApiKey: PERM } }, bad, supabaseNoRow, 'u1', { env, fetchImpl: okFetch([]) });
+  await xmaxTokenRoute({ method: 'POST', body: { op: 'revoke', temporaryApiKey: PERM } }, bad, supabaseNoRow, 'u1', { getKey: async () => PERM, fetchImpl: okFetch([]) });
   assert.equal(bad.code, 400);
 });

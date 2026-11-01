@@ -3793,6 +3793,76 @@ for (const [key, m] of Object.entries(MEDIA_SLOTS)) {
 }
 $('avatarSettingsBtn').addEventListener('click', () => { mediaStatus(''); loadHomeMedia(); openSheet('sheet-avatar'); });
 
+// ---- Your keys and your Anam avatar (Settings > Avatar). Like live-call: each person saves their
+// own key; it is stored encrypted on the server and never shown again. The avatar list comes from
+// your own Anam account, and the one you pick is used for your video calls.
+async function refreshKeysStatus() {
+  try {
+    const r = await authedFetch('/api/assistant?action=keys');
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return;
+    $('anamKeyStatus').textContent = d.anam ? 'Saved' : 'Not set';
+    $('xmaxKeyStatus').textContent = d.xmax ? 'Saved' : 'Not set';
+    const sel = $('anamAvatarSelect');
+    if (d.avatarId && sel && !sel.dataset.loaded) {
+      sel.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.value = d.avatarId; opt.textContent = d.avatarName || d.avatarId;
+      sel.appendChild(opt);
+      sel.disabled = false;
+    }
+  } catch (_) { /* offline: leave the labels as they are */ }
+}
+async function saveKey(provider, inputId, statusId) {
+  const value = $(inputId).value.trim();
+  if (!value) { $('keysStatus').textContent = 'Paste the key first.'; return; }
+  $('keysStatus').textContent = 'Saving…';
+  try {
+    const r = await authedFetch('/api/assistant?action=keys', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, key: value }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { $('keysStatus').textContent = d.error || 'Could not save the key.'; return; }
+    $(inputId).value = '';
+    $(statusId).textContent = 'Saved';
+    $('keysStatus').textContent = 'Key saved.';
+  } catch (_) { $('keysStatus').textContent = 'Could not reach the server. Try again.'; }
+}
+async function loadAnamAvatars() {
+  $('keysStatus').textContent = 'Loading your avatars…';
+  try {
+    const r = await authedFetch('/api/assistant?action=anam-avatars');
+    const d = await r.json().catch(() => ({}));
+    const sel = $('anamAvatarSelect');
+    if (!r.ok) { $('keysStatus').textContent = d.error || 'Could not load avatars.'; return; }
+    sel.innerHTML = '';
+    if (!d.avatars || !d.avatars.length) {
+      const opt = document.createElement('option'); opt.value = ''; opt.textContent = 'No avatars on this Anam account'; sel.appendChild(opt);
+      sel.disabled = true; $('keysStatus').textContent = 'Your Anam account has no avatars yet.'; return;
+    }
+    for (const a of d.avatars) {
+      const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name; sel.appendChild(opt);
+    }
+    sel.dataset.loaded = '1';
+    sel.disabled = false;
+    $('keysStatus').textContent = 'Pick the avatar to use.';
+  } catch (_) { $('keysStatus').textContent = 'Could not reach the server. Try again.'; }
+}
+$('anamKeySave')?.addEventListener('click', () => saveKey('anam', 'anamKeyInput', 'anamKeyStatus'));
+$('xmaxKeySave')?.addEventListener('click', () => saveKey('xmax', 'xmaxKeyInput', 'xmaxKeyStatus'));
+$('anamAvatarLoad')?.addEventListener('click', loadAnamAvatars);
+$('anamAvatarSelect')?.addEventListener('change', async (e) => {
+  const id = e.target.value;
+  if (!id) return;
+  const name = e.target.selectedOptions[0]?.textContent || '';
+  const r = await authedFetch('/api/assistant?action=anam-avatar', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, name }),
+  });
+  const d = await r.json().catch(() => ({}));
+  $('keysStatus').textContent = r.ok ? `Avatar set to ${name}.` : (d.error || 'Could not save the avatar.');
+});
+$('avatarSettingsBtn').addEventListener('click', () => { refreshKeysStatus(); });
+
 // Start call (video / audio): open Contacts first, the same as Call someone. Picking a person then
 // picks the line (Phone / WhatsApp / Telegram); video also asks Live or Avatar. Nothing is called until then.
 $('videoCallStart').addEventListener('click', () => {

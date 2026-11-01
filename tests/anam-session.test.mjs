@@ -41,14 +41,15 @@ test('the avatar prompt carries the brief and the honesty rule', () => {
   assert.match(buildAvatarPrompt(), /has not given a brief/);
 });
 
-test('route: GET refused; POST reads the key from the server and returns a token only', async () => {
+test('route: GET refused; POST uses the person\'s own key and avatar and returns a token only', async () => {
   const res = fakeRes();
   await anamSessionRoute({ method: 'GET' }, res, supabaseNoRow, 'u1', { env: {} });
   assert.equal(res.code, 405);
   const calls = [];
-  const env = { ANAM_API_KEY: KEY, ANAM_AVATAR_ID: 'av1' };
   const ok = fakeRes();
-  await anamSessionRoute({ method: 'POST', body: { brief: 'Say hello', contactName: 'Tunde' } }, ok, supabaseNoRow, 'u1', { env, fetchImpl: okFetch(calls) });
+  await anamSessionRoute({ method: 'POST', body: { brief: 'Say hello', contactName: 'Tunde' } }, ok, supabaseNoRow, 'u1', {
+    env: {}, getKey: async () => KEY, getAvatar: async () => ({ id: 'av1', name: 'Me' }), fetchImpl: okFetch(calls),
+  });
   assert.equal(ok.code, 200);
   assert.equal(ok.body.sessionToken, TOKEN);
   assert.equal(JSON.stringify(ok.body).includes(KEY), false);
