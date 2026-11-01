@@ -50,7 +50,7 @@ test('route: GET is refused and a missing key says so', async () => {
   const res2 = fakeRes();
   await xmaxTokenRoute({ method: 'POST', body: { op: 'mint' } }, res2, supabaseNoRow, 'u1', { env: {} });
   assert.equal(res2.code, 400);
-  assert.match(res2.body.error, /Save your Xmax API key/);
+  assert.match(res2.body.error, /XMAX_API_KEY is not set on the server/);
 });
 
 test('route: mint returns only the temporary key; revoke rejects a non-temporary key', async () => {

@@ -23,7 +23,7 @@ import { OBJECTIVE_BOUNDARY_RULES, sanitizeObjective } from '../lib/callContextG
 import { buildSystemPrompt } from '../lib/appBrain.js';
 import { xmaxTokenRoute } from '../lib/xmaxToken.js';
 import { anamSessionRoute } from '../lib/anamSession.js';
-import { userKeysRoute, anamAvatarsRoute, anamAvatarSaveRoute } from '../lib/userKeys.js';
+import { anamAvatarsRoute, anamAvatarSaveRoute } from '../lib/userKeys.js';
 import { sendCallNote, callNoteReply } from '../lib/callNote.js';
 import { availableChannels } from '../lib/phoneLines.js';
 import { createCallRecord, markCallPlaced, markCallFailed, findDuplicateActiveCall } from '../lib/callSession.js';
@@ -56,7 +56,6 @@ export default async function handler(req, res) {
   const action = req.query?.action || req.body?.action;
   switch (action) {
     case 'xmax-token': return xmaxTokenRoute(req, res, supabase, userId);
-    case 'keys': return userKeysRoute(req, res, supabase, userId);
     case 'anam-avatars': return anamAvatarsRoute(req, res, supabase, userId);
     case 'anam-avatar': return anamAvatarSaveRoute(req, res, supabase, userId);
     case 'anam-session': return anamSessionRoute(req, res, supabase, userId);
