@@ -1486,9 +1486,8 @@
     <div class="sectionLabel">Your Anam avatar</div>
     <div class="avatarSlot avatarKeyBlock">
       <div class="avatarSlotBody">
-        <div class="cLabel">Pick the avatar from your Anam account. Your video calls use it.</div>
-        <select class="plainInput" id="anamAvatarSelect" disabled><option value="">Load your avatars first</option></select>
-        <div class="avatarSlotBtns"><button type="button" class="avatarSlotBtn ghost" id="anamAvatarLoad">Load my avatars</button></div>
+        <div class="cLabel" id="anamAvatarHint">Upload your video call avatar picture above. We create your Anam avatar from it, named after your name.</div>
+        <select class="plainInput" id="anamAvatarSelect" hidden></select>
       </div>
     </div>
     <p class="hint" id="avatarSlotStatus" aria-live="polite"></p>

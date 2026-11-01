@@ -23,7 +23,7 @@ import { OBJECTIVE_BOUNDARY_RULES, sanitizeObjective } from '../lib/callContextG
 import { buildSystemPrompt } from '../lib/appBrain.js';
 import { xmaxTokenRoute } from '../lib/xmaxToken.js';
 import { anamSessionRoute } from '../lib/anamSession.js';
-import { anamAvatarsRoute, anamAvatarSaveRoute } from '../lib/userKeys.js';
+import { anamAvatarsRoute, anamAvatarSelectRoute, anamAvatarCreateRoute, anamAvatarDeleteRoute } from '../lib/anamAvatars.js';
 import { sendCallNote, callNoteReply } from '../lib/callNote.js';
 import { availableChannels } from '../lib/phoneLines.js';
 import { createCallRecord, markCallPlaced, markCallFailed, findDuplicateActiveCall } from '../lib/callSession.js';
@@ -57,7 +57,9 @@ export default async function handler(req, res) {
   switch (action) {
     case 'xmax-token': return xmaxTokenRoute(req, res, supabase, userId);
     case 'anam-avatars': return anamAvatarsRoute(req, res, supabase, userId);
-    case 'anam-avatar': return anamAvatarSaveRoute(req, res, supabase, userId);
+    case 'anam-avatar': return anamAvatarSelectRoute(req, res, supabase, userId);
+    case 'anam-avatar-create': return anamAvatarCreateRoute(req, res, supabase, userId);
+    case 'anam-avatar-delete': return anamAvatarDeleteRoute(req, res, supabase, userId);
     case 'anam-session': return anamSessionRoute(req, res, supabase, userId);
     case 'sessions': return listSessions(req, res, supabase, userId);
     case 'archiveSession': return archiveSession(req, res, supabase, userId);

@@ -3753,6 +3753,7 @@ async function uploadMedia(key, file) {
     mediaUrls[key] = url;
     renderHomeMedia();
     mediaStatus(`${m.name} saved.`);
+    if (key === 'avatar') await createAnamAvatar();
   } catch (err) {
     console.error('media upload failed:', err);
     const reason = (err?.message || '').toLowerCase();
@@ -3769,6 +3770,9 @@ async function removeMedia(key) {
   const m = MEDIA_SLOTS[key];
   if (!currentUser || !mediaUrls[key]) return;
   if (!window.confirm(`Remove your ${m.name.toLowerCase()}?`)) return;
+  if (key === 'avatar') {
+    try { mediaStatus('Deleting your Anam avatar…'); await deleteAnamAvatar(); } catch (err) { mediaStatus(err.message); return; }
+  }
   try {
     const { error } = await supabase.from('profiles').upsert({ user_id: currentUser.id, [m.col]: null }, { onConflict: 'user_id' });
     if (error) throw error;
@@ -3791,56 +3795,60 @@ for (const [key, m] of Object.entries(MEDIA_SLOTS)) {
   $(m.tile).addEventListener('click', openSlot);
   $(m.tile).addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSlot(); } });
 }
-$('avatarSettingsBtn').addEventListener('click', () => { mediaStatus(''); loadHomeMedia(); loadSavedAnamAvatar(); openSheet('sheet-avatar'); });
+$('avatarSettingsBtn').addEventListener('click', () => { mediaStatus(''); loadHomeMedia(); loadAnamAvatars(); openSheet('sheet-avatar'); });
 
-// ---- Your Anam avatar (Settings > Avatar). API keys live on the server only. The app lists the
-// avatars on your Anam account through the server, and saves only the one you pick.
-function setAvatarPick(id, name) {
+// ---- Your Anam avatar. It is created from your Video call avatar picture, named after your Profile name.
+// You can only use your own avatars. Removing the picture deletes it at Anam.
+const anamAvatarApi = (action, method = 'GET', body) => authedFetch(`/api/assistant?action=${action}`, {
+  method,
+  headers: body ? { 'Content-Type': 'application/json' } : undefined,
+  body: body ? JSON.stringify(body) : undefined,
+});
+function showAnamAvatars(list, selectedId) {
   const sel = $('anamAvatarSelect');
   sel.innerHTML = '';
-  const opt = document.createElement('option');
-  opt.value = id; opt.textContent = name || id;
-  sel.appendChild(opt);
-  sel.disabled = false;
-}
-async function loadSavedAnamAvatar() {
-  try {
-    const r = await authedFetch('/api/assistant?action=anam-avatar');
-    const d = await r.json().catch(() => ({}));
-    if (r.ok && d.avatar?.id) setAvatarPick(d.avatar.id, d.avatar.name);
-  } catch (_) { /* offline: keep the placeholder */ }
+  for (const a of list) {
+    const o = document.createElement('option'); o.value = a.id; o.textContent = a.name;
+    if (a.id === selectedId) o.selected = true;
+    sel.appendChild(o);
+  }
+  sel.hidden = !list.length;
+  $('anamAvatarHint').textContent = list.length
+    ? 'Your video calls use the avatar selected here.'
+    : 'Upload your video call avatar picture above. We create your Anam avatar from it, named after your name.';
 }
 async function loadAnamAvatars() {
-  mediaStatus('Loading your avatars…');
   try {
-    const r = await authedFetch('/api/assistant?action=anam-avatars');
+    const r = await anamAvatarApi('anam-avatars');
     const d = await r.json().catch(() => ({}));
-    const sel = $('anamAvatarSelect');
-    if (!r.ok) { mediaStatus(d.error || 'Could not load avatars.'); return; }
-    sel.innerHTML = '';
-    if (!d.avatars || !d.avatars.length) {
-      const opt = document.createElement('option'); opt.value = ''; opt.textContent = 'No avatars on this Anam account'; sel.appendChild(opt);
-      sel.disabled = true; mediaStatus('Your Anam account has no avatars yet.'); return;
-    }
-    for (const a of d.avatars) {
-      const opt = document.createElement('option'); opt.value = a.id; opt.textContent = a.name; sel.appendChild(opt);
-    }
-    sel.disabled = false;
-    await loadSavedAnamAvatar();
-    mediaStatus('Pick the avatar to use.');
+    if (!r.ok) { mediaStatus(d.error || 'Could not load your avatars.'); return; }
+    showAnamAvatars(d.avatars || [], d.selectedId || null);
   } catch (_) { mediaStatus('Could not reach the server. Try again.'); }
 }
-$('anamAvatarLoad')?.addEventListener('click', loadAnamAvatars);
+async function createAnamAvatar() {
+  mediaStatus('Creating your Anam avatar…');
+  try {
+    const r = await anamAvatarApi('anam-avatar-create', 'POST', {});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { mediaStatus(d.error || 'Could not create your Anam avatar.'); return; }
+    await loadAnamAvatars();
+    mediaStatus('Your Anam avatar is ready.');
+  } catch (_) { mediaStatus('Could not reach the server. Try again.'); }
+}
+async function deleteAnamAvatar() {
+  const r = await anamAvatarApi('anam-avatar-delete', 'POST', {});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || 'Could not delete your Anam avatar.');
+  showAnamAvatars([], null);
+}
 $('anamAvatarSelect')?.addEventListener('change', async (e) => {
   const id = e.target.value;
   if (!id) return;
   const name = e.target.selectedOptions[0]?.textContent || '';
   try {
-    const r = await authedFetch('/api/assistant?action=anam-avatar', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, name }),
-    });
+    const r = await anamAvatarApi('anam-avatar', 'POST', { id });
     const d = await r.json().catch(() => ({}));
-    mediaStatus(r.ok ? `Avatar set to ${name}.` : (d.error || 'Could not save the avatar.'));
+    mediaStatus(r.ok ? `Your video calls will use ${name}.` : (d.error || 'Could not save the avatar. Try again.'));
   } catch (_) { mediaStatus('Could not reach the server. Try again.'); }
 });
 
