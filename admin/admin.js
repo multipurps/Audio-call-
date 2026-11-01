@@ -1,6 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { loadAiBehavior } from './aiBehavior.js?v=2026-10-13.1';
-import { loadTrainerCall, stopTrainerCall } from './trainerCall.js?v=2026-10-16.2';
+import { sheet, confirmSheet, promptSheet, successSheet, errorSheet } from '../lib/statusSheet.js';
+import { relTime, statusOf, channelName, dur, pctLabel, trendDir, chartGeometry, compact, hueOf, initialOf } from './ui.js?v=2026-10-31.1';
+import { loadAiBehavior } from './aiBehavior.js?v=2026-10-31.1';
+import { loadTrainerCall, stopTrainerCall } from './trainerCall.js?v=2026-10-31.1';
 
 const SUPABASE_URL = 'https://gucblbvfzuraaozswfwd.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1Y2JsYnZmenVyYWFvenN3ZndkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0NzQ0ODQsImV4cCI6MjA5MTA1MDQ4NH0.OCsEC_FfOJmoL5sQWP8zYnw9SmWuy4xggfcpIIxQw-c';
@@ -128,7 +130,9 @@ async function enterAdmin() {
 }
 
 // ---------- panel shell ----------
-document.documentElement.setAttribute('data-theme', 'dark');
+// The admin follows the theme chosen in the app (dark, cream or white); dark when none was chosen.
+try { const t = localStorage.getItem('theme'); document.documentElement.setAttribute('data-theme', t === 'cream' || t === 'white' ? t : 'dark'); }
+catch { document.documentElement.setAttribute('data-theme', 'dark'); }
 const isPWA = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
 const fitHeight = () => { if (isPWA && window.screen.height) document.body.style.height = `${window.screen.height}px`; };
 fitHeight(); window.addEventListener('resize', fitHeight);
@@ -162,13 +166,17 @@ function openSection(name) {
   document.querySelectorAll('#aDrawer .nav[data-s]').forEach((el) => el.classList.toggle('on', el.dataset.s === name));
   $('aTitle').textContent = TITLES[name];
   $('aChips').style.display = name === 'overview' || name === 'usage' ? '' : 'none';
+  closeDetail();
   loaders[name]();
+  syncLive();
 }
 function initPanel(users) {
   usersCache = users;
   $('menuBtn').onclick = () => $('adminApp').classList.add('open');
   $('aScrim').onclick = () => $('adminApp').classList.remove('open');
-  $('refreshBtn').onclick = () => loaders[current]();
+  $('refreshBtn').onclick = () => { loaders[current](); refreshLive(); };
+  $('dBack').onclick = closeDetail;
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { refreshLive(); } syncLive(); });
   document.querySelectorAll('#aDrawer .nav[data-s]').forEach((el) => { el.onclick = () => openSection(el.dataset.s); });
   document.querySelectorAll('#aChips button').forEach((el) => {
     el.onclick = () => {
@@ -184,26 +192,124 @@ function initPanel(users) {
 }
 const emailOf = (id) => usersCache.find((u) => u.id === id)?.email || id.slice(0, 8);
 
-// ---------- overview: revenue + analysis ----------
-async function loadOverview() {
+// ---------- overview: everything here is real, read from your database ----------
+const ICON = {
+  up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>',
+  down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l6 6 4-4 8 8"/><path d="M15 17h6v-6"/></svg>',
+  chev: '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>',
+};
+const kpi = (tone, label, value, trend) => `<div class="kpi ${tone}"><div class="top"><span>${label}</span><span class="ic">${ICON[trendDir(trend)]}</span></div><div class="bot"><span class="val">${value}</span><span class="dl">${pctLabel(trend)}</span></div></div>`;
+const skeleton = (n = 4) => Array.from({ length: n }, () => '<div class="skel"></div>').join('');
+const shortDay = (d) => new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+let ov = null, chartTab = 'calls';
+const TABS = [['calls', 'Calls'], ['minutes', 'Minutes'], ['users', 'Active users'], ['revenue', 'Revenue']];
+const SERIES_KEY = { calls: 'calls', minutes: 'minutes', users: 'activeUsers', revenue: 'revenue' };
+
+function lineChart(o) {
+  const vals = o.series.map((x) => x[SERIES_KEY[chartTab]]);
+  if (!vals.some((v) => v > 0)) return `<div class="empty">No ${TABS.find((t) => t[0] === chartTab)[1].toLowerCase()} in the last ${o.days} days yet.</div>`;
+  const W = 320, H = 150, g = chartGeometry(vals, W, H, 12);
+  const fmt = (v) => (chartTab === 'revenue' ? money(v, o.currency) : num(v));
+  const top = g.markers.reduce((m, i) => (vals[i] > vals[m] ? i : m), g.markers[0]);
+  const idx = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * (o.series.length - 1)));
+  return `<div class="lineBox"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${chartTab} per day">
+      <defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--accent);stop-opacity:.22"/><stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/></linearGradient></defs>
+      <path class="area" d="${g.area}" fill="url(#ag)"/><path class="ln" d="${g.line}"/>
+      ${g.markers.map((i) => `<line class="stem" x1="${g.pts[i][0].toFixed(1)}" x2="${g.pts[i][0].toFixed(1)}" y1="${g.pts[i][1].toFixed(1)}" y2="${H - 12}"/><circle class="mk" cx="${g.pts[i][0].toFixed(1)}" cy="${g.pts[i][1].toFixed(1)}" r="3.6"/>`).join('')}
+    </svg><div class="tip ${g.pts[top][0] / W > 0.72 ? 'r' : g.pts[top][0] / W < 0.28 ? 'l' : ''}" style="left:${(g.pts[top][0] / W) * 100}%;top:calc(${(g.pts[top][1] / H) * 100}% + 30px)">${fmt(vals[top])} · ${shortDay(o.series[top].d)}</div></div>
+    <div class="xlab">${idx.map((i) => `<span>${shortDay(o.series[i].d)}</span>`).join('')}</div>`;
+}
+
+function channelsPanel(o) {
+  if (!o.channels.length) return '<div class="empty">No calls in this range yet.</div>';
+  const rows = o.channels.slice(0, 6);
+  const max = Math.max(...rows.map((r) => r.calls), 1);
+  return `<div class="barRow">${rows.map((r, i) => `<div class="barCol${i === 0 ? ' hi' : ''}">${i === 0 ? `<span class="tip">${compact(r.calls)}</span>` : ''}<i style="height:${Math.max(8, (r.calls / max) * 100)}%"></i></div>`).join('')}</div>
+    <div class="barLab">${rows.map((r) => `<span>${esc(channelName(r.platform))}</span>`).join('')}</div>`;
+}
+
+function drawOverview() {
+  const o = ov, el = $('sec-overview');
+  const hasRates = o.ratePerMin > 0, profit = o.revenue - o.cost;
+  el.innerHTML = `
+    ${myRole === 'owner' ? `<div class="liveBar"><span class="livePill"><span class="liveDot" id="liveDot"></span><span id="liveLabel">Live</span></span><span id="liveStamp"></span></div>
+    <div class="panel" id="liveCard"><div class="liveBig"><b id="liveActive">–</b><span>calls happening now</span></div><div class="liveSub" id="liveSub"></div></div>` : ''}
+    <div class="kpiGrid">
+      ${kpi('blue', 'Calls', num(o.calls), o.trends.calls)}
+      ${kpi('dark', 'Minutes used', num(o.minutesUsed), o.trends.minutes)}
+      ${kpi('dark', 'New users', num(o.newUsers), o.trends.newUsers)}
+      ${kpi('blue', 'Active users', num(o.activeUsers), o.trends.activeUsers)}
+    </div>
+    <div class="panel"><div class="ptabs" id="ptabs">${TABS.map(([k, l]) => `<button data-t="${k}" class="${k === chartTab ? 'on' : ''}">${l}</button>`).join('')}</div><div id="chartHost">${lineChart(o)}</div></div>
+    <div class="panel"><h3>Calls by channel</h3>${channelsPanel(o)}</div>
+    <div class="grp">
+      <div class="gr"><span class="k">Revenue</span><span class="v">${money(o.revenue, o.currency)} <small>${pctLabel(o.trends.revenue)}</small></span></div>
+      <div class="gr"><span class="k">Est. profit</span><span class="v">${hasRates ? `<span class="${profit < 0 ? 'aNeg' : 'aPos'}">${money(profit, o.currency)}</span>` : 'set provider rates in Costs'}</span></div>
+      <div class="gr"><span class="k">Minutes sold</span><span class="v">${num(o.minutesSold)} · ${o.payingUsers} paying</span></div>
+      <div class="gr"><span class="k">Avg per call</span><span class="v">${o.calls ? `${num(o.minutesUsed / o.calls)}m` : '—'}</span></div>
+      <div class="gr"><span class="k">All-time revenue</span><span class="v">${money(o.allTimeRevenue, o.currency)}</span></div>
+      <div class="gr"><span class="k">Total users</span><span class="v">${num(o.totalUsers)}</span></div>
+    </div>
+    ${myRole === 'owner' ? '<div class="sectionT">RECENT CALLS</div><div id="recentCalls"><div class="empty">Loading…</div></div>' : ''}`;
+  $('ptabs').onclick = (e) => {
+    const b = e.target.closest('button[data-t]'); if (!b) return;
+    chartTab = b.dataset.t;
+    $('ptabs').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    $('chartHost').innerHTML = lineChart(ov);
+  };
+  if (liveData) paintLive(liveData);
+  if (myRole === 'owner') renderAlertsCard(el);
+}
+
+async function loadOverview({ quiet = false } = {}) {
   const el = $('sec-overview');
-  el.innerHTML = '<div class="aHint">Loading…</div>';
+  if (!quiet || !ov) el.innerHTML = skeleton(4);
   try {
-    const o = await api('overview', { qs: `&days=${range}` });
-    const hasRates = o.ratePerMin > 0;
-    const profit = o.revenue - o.cost;
-    const max = Math.max(...o.series.map((x) => x.revenue), 1);
-    el.innerHTML = `<div class="aGrid">
-      ${card('Revenue', money(o.revenue, o.currency), `${o.purchases} purchase${o.purchases === 1 ? '' : 's'} · ${money(o.allTimeRevenue, o.currency)} all time`)}
-      ${card('Est. profit', hasRates ? `<span class="${profit < 0 ? 'aNeg' : 'aPos'}">${money(profit, o.currency)}</span>` : '—', hasRates ? `after ${money(o.cost, o.currency)} provider cost` : 'set provider rates in Costs')}
-      ${card('Minutes sold', num(o.minutesSold), `${o.payingUsers} paying user${o.payingUsers === 1 ? '' : 's'}`)}
-      ${card('Minutes used', num(o.minutesUsed), `${o.calls} calls`)}
-      ${card('Active users', num(o.activeUsers), `of ${num(o.totalUsers)} total`)}
-      ${card('Avg per call', o.calls ? `${num(o.minutesUsed / o.calls)}m` : '—', `last ${o.days} days`)}
-      <div class="aCard wide"><div class="l">Daily revenue</div><div class="aBars">${o.series.map((x) => `<i title="${x.d}: ${money(x.revenue, o.currency)}" style="height:${Math.max(2, (x.revenue / max) * 100)}%"></i>`).join('')}</div></div>
-    </div>`;
-    if (myRole === 'owner') renderAlertsCard(el);
-  } catch (err) { fail(el, err); }
+    ov = await api('overview', { qs: `&days=${range}` });
+    if (current === 'overview') drawOverview();
+  } catch (err) { if (!quiet) fail(el, err); }
+}
+
+// ---------- live: polled every few seconds while the overview is on screen ----------
+let liveData = null, liveTimer = 0, ovTimer = 0, stampTimer = 0, lastLiveAt = 0, liveFailing = false;
+function paintLive(d) {
+  const c = d.counts;
+  const set = (id, html) => { const n = $(id); if (n) n.innerHTML = html; };
+  set('liveActive', num(c.active));
+  $('liveDot')?.classList.toggle('on', c.active > 0);
+  set('liveLabel', c.active > 0 ? 'Live' : 'Idle');
+  set('liveSub', `<span><b>${num(c.talking)}</b> talking</span><span><b>${num(c.ringing)}</b> ringing</span><span>last 24h: <b>${num(c.calls24h)}</b> calls · <b>${num(c.completed24h)}</b> complete · <b>${num(c.noAnswer24h)}</b> no answer · <b>${num(c.failed24h)}</b> failed</span>`);
+  const host = $('recentCalls');
+  if (host && d.recent) {
+    host.innerHTML = d.recent.length ? d.recent.map((r) => {
+      const st = statusOf(r.status);
+      const when = relTime(r.createdAt) + (r.seconds ? ` · ${dur(r.seconds)}` : '');
+      return `<div class="oc"><div class="h"><span>#${esc(r.id.slice(0, 6).toUpperCase())}</span><span class="chip ${st.tone}">${st.label}</span></div>
+        <div class="r"><span class="k">User</span><span class="v">${esc(r.user)}</span></div>
+        <div class="r"><span class="k">Channel</span><span class="v">${esc(channelName(r.platform))} · ${r.direction === 'inbound' ? 'inbound' : 'outbound'}</span></div>
+        <div class="r"><span class="k">Number</span><span class="v">${esc(r.number)}</span></div>
+        <div class="r"><span class="k">Date</span><span class="v" data-ts="${esc(r.createdAt)}" data-secs="${r.seconds}">${esc(when)}</span></div></div>`;
+    }).join('') : '<div class="empty">No calls yet.</div>';
+  }
+  paintStamp();
+}
+function paintStamp() {
+  const n = $('liveStamp'); if (!n) return;
+  n.textContent = liveFailing ? 'Offline, retrying…' : (lastLiveAt ? `Updated ${Math.max(0, Math.round((Date.now() - lastLiveAt) / 1000))}s ago` : '');
+  document.querySelectorAll('#recentCalls [data-ts]').forEach((v) => { v.textContent = relTime(v.dataset.ts) + (Number(v.dataset.secs) ? ` · ${dur(Number(v.dataset.secs))}` : ''); });
+}
+async function refreshLive() {
+  if (document.hidden || current !== 'overview' || myRole !== 'owner') return; // live calls are owner-only; investors stay read-only
+  try { liveData = await api('live'); lastLiveAt = Date.now(); liveFailing = false; paintLive(liveData); }
+  catch { liveFailing = true; paintStamp(); }
+}
+function syncLive() {
+  clearInterval(liveTimer); clearInterval(ovTimer); clearInterval(stampTimer);
+  liveTimer = ovTimer = stampTimer = 0;
+  if (document.hidden || !(current === 'overview' || current === 'usage')) return;
+  if (current === 'overview' && myRole === 'owner') { refreshLive(); liveTimer = setInterval(refreshLive, 5000); stampTimer = setInterval(paintStamp, 1000); }
+  ovTimer = setInterval(() => loaders[current]({ quiet: true }), 30000);
 }
 
 // ---------- admins (owner only) ----------
@@ -306,49 +412,87 @@ async function renderAlertsCard(el) {
 function renderAlertsRefresh(el) { el.querySelector('.aCard.wide:last-child')?.remove(); renderAlertsCard(el); }
 
 // ---------- users ----------
-async function loadUsers() {
+const avatar = (email, cls = '') => `<span class="av ${cls}" style="background:linear-gradient(135deg,hsl(${hueOf(email)} 70% 58%),hsl(${(hueOf(email) + 40) % 360} 70% 46%))">${esc(initialOf(email))}</span>`;
+const minutesLeft = (u) => Math.max(0, u.minutes_limit + u.bonus_minutes - u.minutes_used);
+
+async function loadUsers({ quiet = false } = {}) {
   const el = $('sec-users');
+  if (!quiet) el.innerHTML = skeleton(5);
   try { usersCache = (await api('list-users')).users; } catch (err) { return fail(el, err); }
-  el.innerHTML = `<div class="aField"><input type="search" id="userSearch" placeholder="Search email"></div><div id="userRows"></div>`;
+  el.innerHTML = `<div class="aField"><input type="search" id="userSearch" placeholder="Search email"></div><div class="liveBar"><span id="userCount"></span></div><div id="userRows"></div>`;
   const draw = () => {
     const q = $('userSearch').value.trim().toLowerCase();
-    $('userRows').innerHTML = usersCache.filter((u) => (u.email || '').toLowerCase().includes(q)).map((u) => `
-      <div class="aRow" data-id="${u.id}">
-        <div class="aFlex"><div style="min-width:0"><div class="t">${esc(u.email)}</div>
-          <div class="m">${num(Math.max(0, u.minutes_limit + u.bonus_minutes - u.minutes_used))} min left · used ${num(u.minutes_used)} of ${num(u.minutes_limit)}${u.bonus_minutes ? ` + ${num(u.bonus_minutes)} credit` : ''}</div></div>
-          <button class="aBtn sm ${u.approved ? 'ghost' : ''}" data-a="approve" title="New accounts no longer need approval. This only allows renting a phone number.">${u.approved ? 'Can rent a number' : 'Allow number rental'}</button></div>
-        <div class="aFlex" style="margin-top:10px;"><input type="number" min="0" step="10" value="${u.minutes_limit}" style="width:90px;" aria-label="Monthly limit">
-          <button class="aBtn ghost sm" data-a="limit">Save limit</button><button class="aBtn ghost sm" data-a="credit" style="margin-left:auto;">+ Credit</button></div>
-      </div>`).join('') || '<div class="aHint">No users.</div>';
+    const list = usersCache.filter((u) => (u.email || '').toLowerCase().includes(q));
+    $('userCount').textContent = `${list.length} of ${usersCache.length} users`;
+    $('userRows').innerHTML = list.map((u) => {
+      const total = Math.max(1, u.minutes_limit + u.bonus_minutes);
+      return `<button class="person" data-id="${u.id}">${avatar(u.email)}<span class="who"><div class="t">${esc(u.email)}</div><div class="m">${num(minutesLeft(u))} min left · used ${num(u.minutes_used)}</div><div class="meter"><i style="width:${Math.min(100, (minutesLeft(u) / total) * 100)}%"></i></div></span>${ICON.chev}</button>`;
+    }).join('') || '<div class="empty">No users.</div>';
   };
   draw();
   $('userSearch').oninput = draw;
-  $('userRows').onclick = async (e) => {
-    const btn = e.target.closest('button[data-a]'); if (!btn) return;
-    const row = btn.closest('.aRow'); const u = usersCache.find((x) => x.id === row.dataset.id);
-    if (btn.dataset.a === 'credit') { openSection('credits'); $('creditUser').value = u.id; return; }
-    const val = Number(row.querySelector('input').value);
-    if (btn.dataset.a === 'limit' && (!Number.isFinite(val) || val < 0)) return;
-    btn.textContent = '…';
-    try {
-      await api('set-approval', { method: 'POST', body: btn.dataset.a === 'approve' ? { targetUserId: u.id, approved: !u.approved } : { targetUserId: u.id, monthlyMinuteLimit: val } });
-      loadUsers();
-    } catch (err) { btn.textContent = 'Failed'; }
+  $('userRows').onclick = (e) => { const b = e.target.closest('.person'); if (b) openDetail(b.dataset.id); };
+}
+
+// ---- one person: opens over the list like a page, edits through the app's own sheets ----
+let detailId = null;
+function closeDetail() { detailId = null; $('aDetail').classList.remove('on'); $('aDetail').setAttribute('aria-hidden', 'true'); }
+async function openDetail(id) {
+  detailId = id;
+  const u = usersCache.find((x) => x.id === id); if (!u) return;
+  $('aDetail').classList.add('on'); $('aDetail').setAttribute('aria-hidden', 'false');
+  const row = (k, v) => `<div class="gr"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  $('dBody').innerHTML = `<div class="dHero">${avatar(u.email)}<div class="nm">${esc(u.email)}</div></div>
+    <div class="grp">${row('Email', esc(u.email))}${row('Joined', u.created_at ? new Date(u.created_at).toLocaleDateString() : '—')}${row('Number rental', u.approved ? 'Allowed' : 'Not allowed')}</div>
+    <div class="grp">${row('Minutes left', num(minutesLeft(u)))}${row('Used this period', num(u.minutes_used))}${row('Monthly limit', num(u.minutes_limit))}${row('Credit minutes', num(u.bonus_minutes))}</div>
+    <div class="dActions"><button class="aBtn ghost" id="dLimit">Set limit</button><button class="aBtn ghost" id="dCredit">Add credit</button><button class="aBtn ghost" id="dRent">${u.approved ? 'Stop rental' : 'Allow rental'}</button></div>
+    <div class="sectionT">RECENT CALLS</div><div class="grp" id="dCalls"><div class="gr"><span class="k">Loading…</span></div></div>`;
+  $('dLimit').onclick = async () => {
+    const v = await promptSheet({ title: 'Monthly limit', message: 'Call minutes per month for this account.', value: String(u.minutes_limit), placeholder: 'Minutes', multiline: false, confirmLabel: 'Save' });
+    if (v === null || v === undefined) return;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return errorSheet('Enter minutes of 0 or more.');
+    await act(() => api('set-approval', { method: 'POST', body: { targetUserId: u.id, monthlyMinuteLimit: n } }), 'Limit saved.', id);
   };
+  $('dCredit').onclick = async () => {
+    const v = await promptSheet({ title: 'Add credit', message: `Minutes to add for ${u.email}. Use a negative number to remove.`, placeholder: 'Minutes', multiline: false, confirmLabel: 'Apply' });
+    if (v === null || v === undefined) return;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n === 0) return errorSheet('Enter minutes, not 0.');
+    await act(() => api('grant-credit', { method: 'POST', body: { targetUserId: u.id, minutes: n, note: 'Admin' } }), `${n > 0 ? '+' : ''}${n} min applied.`, id);
+  };
+  $('dRent').onclick = async () => {
+    const ok = await confirmSheet({ title: u.approved ? 'Stop number rental?' : 'Allow number rental?', message: 'New accounts do not need approval. This only controls renting a phone number.', confirmLabel: u.approved ? 'Stop' : 'Allow', destructive: !!u.approved });
+    if (!ok) return;
+    await act(() => api('set-approval', { method: 'POST', body: { targetUserId: u.id, approved: !u.approved } }), 'Saved.', id);
+  };
+  try {
+    const { calls } = await api('user-calls', { qs: `&uid=${u.id}` });
+    if (detailId !== id) return;
+    $('dCalls').innerHTML = calls.length ? calls.map((c) => { const st = statusOf(c.status); return `<div class="gr"><span class="k">${esc(channelName(c.platform))}<small>${esc(c.number)} · ${esc(relTime(c.createdAt))}${c.seconds ? ' · ' + esc(dur(c.seconds)) : ''}</small></span><span class="chip ${st.tone}">${st.label}</span></div>`; }).join('') : '<div class="gr"><span class="k">No calls yet.</span></div>';
+  } catch (err) { if (detailId === id) $('dCalls').innerHTML = `<div class="gr"><span class="k">${esc(err.message)}</span></div>`; }
+}
+async function act(fn, okMessage, id) {
+  try {
+    await fn();
+    usersCache = (await api('list-users')).users;
+    if (detailId === id) openDetail(id);
+    if (current === 'users') loadUsers({ quiet: true });
+    await successSheet(okMessage);
+  } catch (err) { errorSheet(err.message || 'That did not work.'); }
 }
 
 // ---------- usage ----------
-async function loadUsage() {
+async function loadUsage({ quiet = false } = {}) {
   const el = $('sec-usage');
-  el.innerHTML = '<div class="aHint">Loading…</div>';
+  if (!quiet) el.innerHTML = skeleton(4);
   try {
     const { users } = await api('analytics', { qs: `&days=${range}` });
-    if (!users.length) { el.innerHTML = `<div class="aHint">No calls in the last ${range} days.</div>`; return; }
+    if (!users.length) { el.innerHTML = `<div class="empty">No calls in the last ${range} days.</div>`; return; }
     const max = Math.max(...users.map((u) => u.minutes), 1);
-    el.innerHTML = users.map((u) => `<div class="aRow"><div class="aFlex"><div class="t" style="min-width:0">${esc(u.email)}</div><b>${num(u.minutes)}m</b></div>
-      <div class="aBars" style="height:6px;margin:8px 0 4px;display:block;background:var(--line);border-radius:3px;"><i style="display:block;height:6px;width:${(u.minutes / max) * 100}%;border-radius:3px;"></i></div>
-      <div class="m">${u.calls} call${u.calls === 1 ? '' : 's'}${u.lastActive ? ' · last ' + new Date(u.lastActive).toLocaleDateString() : ''}</div></div>`).join('');
-  } catch (err) { fail(el, err); }
+    el.innerHTML = `<div class="liveBar"><span>${users.length} user${users.length === 1 ? '' : 's'} on calls · last ${range} days</span></div>` + users.map((u) => `<div class="person" style="cursor:default">${avatar(u.email)}<span class="who"><div class="t">${esc(u.email)}</div>
+      <div class="m">${u.calls} call${u.calls === 1 ? '' : 's'}${u.lastActive ? ' · last ' + esc(relTime(u.lastActive)) : ''}</div><div class="meter"><i style="width:${(u.minutes / max) * 100}%"></i></div></span><b>${num(u.minutes)}m</b></div>`).join('');
+  } catch (err) { if (!quiet) fail(el, err); }
 }
 
 // ---------- credits: apply minutes + history ----------

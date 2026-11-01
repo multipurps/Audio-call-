@@ -1,6 +1,7 @@
 // Admin tab: global AI behavior, shared knowledge, examples, tests and history.
 // It edits instructions and retrieved guidance applied to every call. It does not train or
 // fine-tune GPT-Live or Luna.
+import { confirmSheet } from '../lib/statusSheet.js';
 const SECTIONS = [
   ['style', 'Conversation style and personality'],
   ['language', 'Natural conversational language'],
@@ -87,7 +88,7 @@ export async function loadAiBehavior(el, { api, esc }) {
       try { S.config = readConfig(); await api('ai-config-save', { method: 'POST', body: { config: S.config, note: el.querySelector('#cfg_note').value } }); await refreshOverview(); S.msg = 'Draft saved. Not live until you publish.'; render(); } catch (e) { say(e.message); }
     };
     el.querySelector('#cfgPublish').onclick = async () => {
-      if (!confirm('Publish this draft? Every new call will use it.')) return;
+      if (!(await confirmSheet({ title: 'Publish this draft?', message: 'Every new call will use it.', confirmLabel: 'Publish' }))) return;
       try {
         S.config = readConfig();
         await api('ai-config-save', { method: 'POST', body: { config: S.config, note: el.querySelector('#cfg_note').value } });
@@ -171,7 +172,7 @@ export async function loadAiBehavior(el, { api, esc }) {
   async function rowAction(a, id) {
     try {
       if (a === 'edit') { S.editing = S.items.find((i) => i.id === id); renderForm(); el.querySelector('#kForm').scrollIntoView({ behavior: 'smooth' }); return; }
-      if (a === 'delete') { if (!confirm('Delete this entry? Its earlier versions stay in the history.')) return; await api('ai-knowledge-delete', { method: 'POST', body: { id } }); }
+      if (a === 'delete') { if (!(await confirmSheet({ title: 'Delete this entry?', message: 'Its earlier versions stay in the history.', confirmLabel: 'Delete', destructive: true }))) return; await api('ai-knowledge-delete', { method: 'POST', body: { id } }); }
       else if (a === 'history') {
         const { history } = await api('ai-knowledge-history', { qs: `&id=${id}` });
         el.querySelector(`#h_${id}`).innerHTML = history.map((h) => `<div class="m">${esc(when(h.changed_at))} by ${esc(h.changed_by || '')}: ${esc(h.snapshot.title)} (${esc(h.snapshot.status)}) <button class="aBtn ghost sm" data-r="${h.id}">Restore as draft</button></div>`).join('') || '<div class="m">No earlier versions.</div>';
@@ -214,7 +215,7 @@ export async function loadAiBehavior(el, { api, esc }) {
       <div class="aCard wide"><div class="l">Audit log</div>${entries.map((a) => `<div class="m">${esc(when(a.at))} | ${esc(a.actor_email || '')} | ${esc(a.action)} | ${esc(a.entity || '')} ${esc(a.entity_id || '')}</div>`).join('') || '<div class="aHint">Nothing yet.</div>'}</div>`;
     pane.querySelectorAll('[data-rb]').forEach((b) => {
       b.onclick = async () => {
-        if (!confirm(`Roll back to version ${b.dataset.rb}? New calls will use it.`)) return;
+        if (!(await confirmSheet({ title: 'Roll back?', message: `New calls will use version ${b.dataset.rb}.`, confirmLabel: 'Roll back' }))) return;
         try { await api('ai-config-rollback', { method: 'POST', body: { version: Number(b.dataset.rb) } }); await refreshOverview(); S.msg = 'Rolled back.'; render(); } catch (e) { say(e.message); }
       };
     });

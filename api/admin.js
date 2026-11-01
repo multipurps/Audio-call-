@@ -1,3 +1,4 @@
+import { LIVE_STATUSES, maskNumber, pctChange, summariseChannels, dailySeries, splitByWindow } from '../lib/adminLive.js';
 import { randomUUID } from 'crypto';
 import webpush from 'web-push';
 import { readVapid, classifyPushFailure, summarizeFailures } from '../lib/vapid.js';
@@ -58,6 +59,8 @@ export default async function handler(req, res) {
     case 'analytics': return analytics(req, res, supabase, access);
     case 'send-announcement': return sendAnnouncement(req, res, supabase);
     case 'overview': return overview(req, res, supabase);
+    case 'live': return live(req, res, supabase, access);
+    case 'user-calls': return userCalls(req, res, supabase);
     case 'credit-ledger': return creditLedger(req, res, supabase);
     case 'grant-credit': return grantCredit(req, res, supabase);
     case 'rates': return rates(req, res, supabase);
@@ -365,36 +368,108 @@ async function getRates(supabase) {
 async function overview(req, res, supabase) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
   const days = [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 30;
-  const since = new Date(Date.now() - days * 864e5).toISOString();
+  const now = Date.now();
+  const sinceMs = now - days * 864e5;
+  const prevSinceMs = now - 2 * days * 864e5;
+  const since = new Date(sinceMs).toISOString();
   try {
     const paidAll = await fetchAll(() => supabase.from('minute_purchases').select('user_id, amount, minutes, currency, paid_at').eq('status', 'paid').order('paid_at', { ascending: false }));
     const currency = paidAll[0]?.currency || 'USD'; // one currency at a time; others are left out of the totals
     const paid = paidAll.filter((p) => p.currency === currency);
-    const sold = paid.filter((p) => p.paid_at >= since);
-    const calls = await fetchAll(() => supabase.from('calls').select('user_id, duration_seconds, created_at').gte('created_at', since).order('created_at'));
+    const sold = splitByWindow(paid, 'paid_at', sinceMs);
+    const soldPrev = splitByWindow(paid, 'paid_at', prevSinceMs, sinceMs);
+    // Two windows in one read: this period and the one before it, so every card can show a real trend.
+    const callsBoth = await fetchAll(() => supabase.from('calls').select('user_id, duration_seconds, created_at, platform').gte('created_at', new Date(prevSinceMs).toISOString()).order('created_at'));
+    const calls = splitByWindow(callsBoth, 'created_at', sinceMs);
+    const callsPrev = splitByWindow(callsBoth, 'created_at', prevSinceMs, sinceMs);
     const { count: totalUsers } = await supabase.from('profiles').select('user_id', { count: 'exact', head: true });
+    const { count: newUsers } = await supabase.from('profiles').select('user_id', { count: 'exact', head: true }).gte('created_at', since);
+    const { count: newUsersPrev } = await supabase.from('profiles').select('user_id', { count: 'exact', head: true }).gte('created_at', new Date(prevSinceMs).toISOString()).lt('created_at', since);
     const rates = await getRates(supabase);
 
-    const series = new Map();
-    for (let i = days - 1; i >= 0; i--) series.set(new Date(Date.now() - i * 864e5).toISOString().slice(0, 10), { revenue: 0, minutes: 0 });
-    for (const p of sold) { const d = series.get(String(p.paid_at).slice(0, 10)); if (d) d.revenue += Number(p.amount); }
-    let minutesUsed = 0;
-    for (const c of calls) {
-      const m = Math.ceil((c.duration_seconds || 0) / 60); // same rounding the billing code uses
-      minutesUsed += m;
-      const d = series.get(String(c.created_at).slice(0, 10)); if (d) d.minutes += m;
-    }
+    const minutesOf = (rows) => rows.reduce((a, c) => a + Math.ceil((c.duration_seconds || 0) / 60), 0); // same rounding the billing code uses
+    const minutesUsed = minutesOf(calls);
     const ratePerMin = rates.twilio + rates.xai + rates.openai;
     const revenue = sold.reduce((a, p) => a + Number(p.amount), 0);
+    const revenuePrev = soldPrev.reduce((a, p) => a + Number(p.amount), 0);
+    const activeUsers = new Set(calls.map((c) => c.user_id)).size;
+    const activePrev = new Set(callsPrev.map((c) => c.user_id)).size;
     return res.status(200).json({
       days, currency, revenue, allTimeRevenue: paid.reduce((a, p) => a + Number(p.amount), 0),
       purchases: sold.length, minutesSold: sold.reduce((a, p) => a + Number(p.minutes), 0),
       payingUsers: new Set(sold.map((p) => p.user_id)).size,
-      activeUsers: new Set(calls.map((c) => c.user_id)).size, totalUsers: totalUsers || 0,
+      activeUsers, totalUsers: totalUsers || 0, newUsers: newUsers || 0,
       calls: calls.length, minutesUsed, ratePerMin, cost: minutesUsed * ratePerMin,
-      series: [...series].map(([d, v]) => ({ d, ...v })),
+      trends: {
+        revenue: pctChange(revenue, revenuePrev),
+        calls: pctChange(calls.length, callsPrev.length),
+        minutes: pctChange(minutesUsed, minutesOf(callsPrev)),
+        activeUsers: pctChange(activeUsers, activePrev),
+        newUsers: pctChange(newUsers || 0, newUsersPrev || 0),
+      },
+      series: dailySeries(days, calls, sold, now),
+      channels: summariseChannels(calls),
+      asOf: new Date(now).toISOString(),
     });
   } catch (err) { return res.status(500).json({ error: err.message }); }
+}
+
+// ---- live: what is happening right now (polled every few seconds by the dashboard) ----
+let emailCache = { at: 0, map: new Map() };
+async function emailMap(supabase) {
+  if (Date.now() - emailCache.at < 60000) return emailCache.map;
+  const { data } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  emailCache = { at: Date.now(), map: new Map((data?.users || []).map((u) => [u.id, u.email])) };
+  return emailCache.map;
+}
+
+async function live(req, res, supabase, access) {
+  if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
+  try {
+    const now = Date.now();
+    const day = new Date(now - 864e5).toISOString();
+    const head = (q) => q.then((r) => r.count || 0);
+    const [calls24h, completed24h, failed24h, noAnswer24h, recentRes] = await Promise.all([
+      head(supabase.from('calls').select('id', { count: 'exact', head: true }).gte('created_at', day)),
+      head(supabase.from('calls').select('id', { count: 'exact', head: true }).gte('created_at', day).eq('status', 'completed')),
+      head(supabase.from('calls').select('id', { count: 'exact', head: true }).gte('created_at', day).eq('status', 'failed')),
+      head(supabase.from('calls').select('id', { count: 'exact', head: true }).gte('created_at', day).eq('status', 'no_answer')),
+      supabase.from('calls').select('id, user_id, status, platform, to_number, direction, duration_seconds, created_at, answered_at, ended_at').order('created_at', { ascending: false }).limit(40),
+    ]);
+    if (recentRes.error) return res.status(500).json({ error: recentRes.error.message });
+    const rows = recentRes.data || [];
+    // A call still "live" after 3 hours is a stuck row, not a call in progress.
+    const activeRows = rows.filter((c) => LIVE_STATUSES.includes(c.status) && Date.parse(c.created_at) > now - 3 * 3600e3);
+    const body = {
+      asOf: new Date(now).toISOString(),
+      counts: {
+        active: activeRows.length,
+        ringing: activeRows.filter((c) => c.status !== 'in_progress').length,
+        talking: activeRows.filter((c) => c.status === 'in_progress').length,
+        calls24h, completed24h, failed24h, noAnswer24h,
+      },
+    };
+    // Who and which number is for the owner only; read-only investor admins get counts.
+    if (access.role === 'owner') {
+      const emails = await emailMap(supabase);
+      body.recent = rows.slice(0, 25).map((c) => ({
+        id: c.id, status: c.status, platform: c.platform || 'phone', direction: c.direction || 'outbound',
+        user: emails.get(c.user_id) || String(c.user_id).slice(0, 8), number: maskNumber(c.to_number),
+        seconds: c.duration_seconds || 0, createdAt: c.created_at, answeredAt: c.answered_at, endedAt: c.ended_at,
+      }));
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).json(body);
+  } catch (err) { return res.status(500).json({ error: err.message }); }
+}
+
+async function userCalls(req, res, supabase) {
+  if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
+  const uid = String(req.query.uid || '');
+  if (!/^[0-9a-f-]{36}$/i.test(uid)) return res.status(400).json({ error: 'uid required' });
+  const { data, error } = await supabase.from('calls').select('id, status, platform, to_number, duration_seconds, created_at').eq('user_id', uid).order('created_at', { ascending: false }).limit(10);
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ calls: (data || []).map((c) => ({ id: c.id, status: c.status, platform: c.platform || 'phone', number: maskNumber(c.to_number), seconds: c.duration_seconds || 0, createdAt: c.created_at })) });
 }
 
 async function creditLedger(req, res, supabase) {

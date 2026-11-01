@@ -2,6 +2,7 @@
 // iOS keeps it in the installed app) and lists what she learned from your training calls. She saves lessons as draft memories on her own while you
 // talk. Each one can be edited, deleted or published here (and in the Knowledge tab). Users only get a
 // memory after you publish it.
+import { confirmSheet } from '../lib/statusSheet.js';
 const TAG = 'from-training-call';
 
 export function stopTrainerCall() {}
@@ -88,13 +89,13 @@ export async function loadTrainerCall(el, { api, esc }) {
         await refresh(); draw(); say(act === 'publish' ? 'Published. New calls get it within about 30 seconds.' : 'Taken off live.'); return;
       }
       if (act === 'delete') {
-        if (!confirm('Delete this memory?')) return;
+        if (!(await confirmSheet({ title: 'Delete this memory?', message: 'This cannot be undone.', confirmLabel: 'Delete', destructive: true }))) return;
         await call('ai-knowledge-delete', { id });
         await refresh(); draw(); say('Deleted.'); return;
       }
       if (act === 'publishAll') {
         const drafts = items.filter((i) => i.status === 'draft');
-        if (!confirm(`Publish ${drafts.length} memories to all users?`)) return;
+        if (!(await confirmSheet({ title: `Publish ${drafts.length} memories?`, message: 'They go to all users.', confirmLabel: 'Publish' }))) return;
         for (const d of drafts) await call('ai-knowledge-status', { id: d.id, status: 'published' });
         await refresh(); draw(); say('Published.'); return;
       }
