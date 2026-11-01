@@ -2057,8 +2057,56 @@ document.querySelectorAll('[data-method]').forEach((btn) => btn.addEventListener
     if (!mode) return;
   }
   contactPickMode = null;
+  if (mode === 'avatar') { openVideoCall({ contactName: contact.name }); return; }
   beginPreCall(target, btn.dataset.method, mode);
 }));
+// ---- Video call screen (phase 1): the Anam avatar speaks on the call; your camera is the PiP
+// (or the other half of the split). Keys never reach the browser: the server mints the session.
+let vcClient = null, vcSelfStream = null;
+function setVcStatus(text) { const el = $('vcStatus'); if (el) el.textContent = text; }
+async function openVideoCall({ contactName = '', brief = '' } = {}) {
+  $('videoCallScreen').classList.remove('hidden');
+  setVcStatus('Asking for microphone and camera…');
+  try {
+    // Ask now, on the tap, so the browser prompt is not a surprise in the middle of the call.
+    vcSelfStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    $('vcSelf').srcObject = vcSelfStream;
+  } catch (e) {
+    setVcStatus('Allow microphone and camera to start the video call.');
+    return;
+  }
+  setVcStatus('Starting avatar…');
+  try {
+    const resp = await authedFetch('/api/assistant?action=anam-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ brief, contactName }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.sessionToken) throw new Error(data.error || 'The avatar could not start.');
+    const sdk = await import('https://esm.sh/@anam-ai/js-sdk@4.27.1');
+    vcClient = sdk.createClient(data.sessionToken);
+    await vcClient.streamToVideoElement('vcMain');
+    setVcStatus('Live');
+  } catch (e) {
+    setVcStatus(e.message || 'The avatar could not start.');
+  }
+}
+function closeVideoCall() {
+  try { if (vcClient) vcClient.stopStreaming(); } catch (_) {}
+  vcClient = null;
+  if (vcSelfStream) { vcSelfStream.getTracks().forEach((t) => t.stop()); vcSelfStream = null; }
+  const self = $('vcSelf'); if (self) self.srcObject = null;
+  const main = $('vcMain'); if (main) main.srcObject = null;
+  $('videoCallScreen').classList.add('hidden');
+}
+$('vcHangBtn')?.addEventListener('click', closeVideoCall);
+$('vcLayoutBtn')?.addEventListener('click', () => {
+  const screen = $('videoCallScreen');
+  const split = screen.dataset.layout !== 'split';
+  screen.dataset.layout = split ? 'split' : 'pip';
+  $('vcLayoutBtn').textContent = split ? 'PiP' : 'Split';
+});
 function chooseVideoCallType() {
   return new Promise((resolve) => {
     const dialog = $('videoTypeDialog');
