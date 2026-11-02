@@ -1,7 +1,7 @@
 name: Deploy to Fly.io
 
 # Manual only: Actions tab -> "Deploy to Fly.io" -> Run workflow.
-# Needs the FLY_API_TOKEN repo secret (organization token for ayodele-onasanya).
+# Needs the FLY_API_TOKEN repo secret (Fly organization slug: personal).
 # Deploys the Wacalls app from the repo root (fly.toml). Creates the Fly app in the org on the first run.
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Create the app in ayodele-onasanya if it does not exist
+      - name: Create the app in the Fly organization if it does not exist
         working-directory: ${{ inputs.dir }}
         run: |
           APP=$(grep -m1 '^app' fly.toml | cut -d'"' -f2)
@@ -32,7 +32,7 @@ jobs:
           echo "$ORGS"
           if flyctl status --app "$APP" >/dev/null 2>&1; then echo "App $APP already exists"; exit 0; fi
           set +e
-          OUT=$(flyctl apps create "$APP" --org ayodele-onasanya 2>&1); CODE=$?
+          OUT=$(flyctl apps create "$APP" --org personal 2>&1); CODE=$?
           echo "$OUT"
           if [ $CODE -ne 0 ]; then
             echo "::error title=Fly app create failed::$(echo "$OUT" | tr '\n' ' ' | cut -c1-600) | orgs: $(echo "$ORGS" | tr '\n' ' ' | cut -c1-300)"
