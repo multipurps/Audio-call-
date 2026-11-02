@@ -27,6 +27,16 @@ jobs:
         working-directory: ${{ inputs.dir }}
         run: |
           APP=$(grep -m1 '^app' fly.toml | cut -d'"' -f2)
-          flyctl status --app "$APP" >/dev/null 2>&1 || flyctl apps create "$APP" --org ayodele-onasanya
+          echo "App: $APP"
+          ORGS=$(flyctl orgs list 2>&1) || true
+          echo "$ORGS"
+          if flyctl status --app "$APP" >/dev/null 2>&1; then echo "App $APP already exists"; exit 0; fi
+          set +e
+          OUT=$(flyctl apps create "$APP" --org ayodele-onasanya 2>&1); CODE=$?
+          echo "$OUT"
+          if [ $CODE -ne 0 ]; then
+            echo "::error title=Fly app create failed::$(echo "$OUT" | tr '\n' ' ' | cut -c1-600) | orgs: $(echo "$ORGS" | tr '\n' ' ' | cut -c1-300)"
+            exit 1
+          fi
       - run: flyctl deploy --remote-only
         working-directory: ${{ inputs.dir }}
