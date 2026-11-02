@@ -1,0 +1,49 @@
+name: Deploy WaCalls to Fly.io (wacalls/)
+on:
+  workflow_dispatch:
+    inputs:
+      org:
+        description: Fly organization slug
+        default: personal
+env:
+  APP: wacalls-zeeyus12
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Create app
+        run: flyctl apps create "$APP" --org "${{ inputs.org }}" || echo "app exists"
+      - name: Dedicated IPv4 (required for UDP)
+        run: |
+          # Only allocate when the app has no dedicated IPv4 yet.
+          # Each dedicated IPv4 costs $2/month, so never add a second one.
+          COUNT=$(flyctl ips list -a "$APP" --json | jq '[.[]|select(.Type=="v4")]|length')
+          if [ "$COUNT" -gt 0 ]; then
+            echo "Dedicated IPv4 already allocated ($COUNT), skipping"
+          else
+            flyctl ips allocate-v4 --yes -a "$APP"
+          fi
+      - name: Secrets
+        run: |
+          IP=$(flyctl ips list -a "$APP" --json | jq -r '[.[]|select(.Type=="v4")][0].Address')
+          echo "Public IPv4: $IP"
+          test -n "$IP" && [ "$IP" != "null" ]
+          flyctl secrets set --stage -a "$APP" \
+            WACALLS_PUBLIC_IP="$IP" \
+            WACALLS_API_KEY="${{ secrets.WACALLS_API_KEY }}" \
+            SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
+            SUPABASE_SERVICE_ROLE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+      - name: Deploy
+        working-directory: wacalls
+        run: flyctl deploy --remote-only --ha=false -a "$APP"
+      - name: Keep exactly ONE machine
+        # Two machines share one WhatsApp login and kick each other off
+        # ("stream replaced"), which shows up as "websocket not connected".
+        run: flyctl scale count 1 --yes -a "$APP" || true
+      - name: Result
+        run: |
+          flyctl ips list -a "$APP"
+          echo "URL: https://$APP.fly.dev"

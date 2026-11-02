@@ -1,0 +1,30 @@
+import { Phone } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { formatCallDuration } from "@/utils/format";
+import type { CallSummary } from "@/types/call";
+
+export const OtherCallsList = ({ calls }: { calls: CallSummary[] }) => {
+  if (calls.length === 0) return null;
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-medium text-muted-foreground">Other active calls</h2>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {calls.map((c) => (
+          <Card key={c.callId} className="opacity-90">
+            <CardContent className="flex items-center gap-3 p-3">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <Phone className="h-4 w-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{c.peer}</p>
+                <p className="text-xs text-muted-foreground">{c.direction}</p>
+              </div>
+              <Badge variant="muted">{formatCallDuration(c.startedAt, c.status)}</Badge>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </section>
+  );
+};
