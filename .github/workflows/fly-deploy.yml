@@ -1,0 +1,26 @@
+name: Deploy to Fly.io
+
+# Manual only: Actions tab -> "Deploy to Fly.io" -> Run workflow.
+# Needs the FLY_API_TOKEN repo secret (organization token for ayodele-onasanya) and a fly.toml in the folder.
+on:
+  workflow_dispatch:
+    inputs:
+      dir:
+        description: Folder with the fly.toml to deploy
+        default: signal-bridge
+        required: true
+
+concurrency:
+  group: fly-deploy-${{ inputs.dir }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only
+        working-directory: ${{ inputs.dir }}
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
