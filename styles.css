@@ -1473,16 +1473,49 @@ body::before{content:""; position:absolute; top:0; left:0; right:0; height:var(-
 .preCallIcWrap .phoneIc,.preCallIcWrap .preCallIc{width:18px; height:18px;}
 
 /* Video call screen: Anam avatar on the call, your camera as PiP or split. */
-#videoCallScreen{position:fixed; inset:0; background:#000; z-index:60; display:flex; flex-direction:column;}
+
+/* ---- Video call screen: same look as the audio call screen ---- */
+#videoCallScreen{position:fixed; inset:0; z-index:60; background:#0b0b0c; color:#f2e6e3; display:flex; flex-direction:column; padding:calc(env(safe-area-inset-top) + 12px) 12px calc(env(safe-area-inset-bottom) + 14px);}
 #videoCallScreen.hidden{display:none;}
-#videoCallScreen .vcStage{position:relative; flex:1; min-height:0; display:flex;}
-#videoCallScreen .vcMain{flex:1; width:100%; height:100%; object-fit:cover; background:#000;}
-#videoCallScreen .vcSelf{position:absolute; right:12px; bottom:12px; width:28vw; max-width:150px; aspect-ratio:3/4; object-fit:cover; border-radius:12px; border:1px solid rgba(255,255,255,.3); background:#111;}
-#videoCallScreen[data-layout="split"] .vcStage{flex-direction:row;}
-#videoCallScreen[data-layout="split"] .vcMain{flex:1 1 50%; min-width:0;}
-#videoCallScreen[data-layout="split"] .vcSelf{position:static; flex:1 1 50%; width:auto; max-width:none; height:100%; aspect-ratio:auto; border-radius:0; border:0; min-width:0;}
-#videoCallScreen .vcTop{position:absolute; top:0; left:0; right:0; display:flex; justify-content:space-between; align-items:center; gap:12px; padding:calc(env(safe-area-inset-top) + 14px) 16px 14px; color:#fff; z-index:2; pointer-events:none;}
-#videoCallScreen .vcTop > *{pointer-events:auto;}
-#videoCallScreen .vcStatus{font-size:14px; text-shadow:0 1px 3px rgba(0,0,0,.6);}
-#videoCallScreen .vcLayoutBtn{background:rgba(255,255,255,.16); color:#fff; border:0; border-radius:999px; padding:8px 14px; font-size:14px; cursor:pointer;}
-#videoCallScreen .vcBottom{display:flex; justify-content:center; padding:16px calc(env(safe-area-inset-bottom) + 16px);}
+#videoCallScreen .vcHeader{display:flex; flex-direction:column; align-items:center; gap:10px; padding:6px 0 14px;}
+#videoCallScreen .vcAvatar{width:64px; height:64px; border-radius:50%; background:rgba(255,255,255,.12); display:flex; align-items:center; justify-content:center; font-size:24px; font-weight:700;}
+#videoCallScreen .vcName{font-size:22px; font-weight:700; text-align:center;}
+#videoCallScreen .vcPill{display:inline-flex; align-items:center; gap:8px; padding:7px 14px; border-radius:999px; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14); font-size:14px;}
+#videoCallScreen .vcDot{width:9px; height:9px; border-radius:50%; background:#f5c400;}
+#videoCallScreen.live .vcDot{background:#30d158;}
+#videoCallScreen .vcStage{position:relative; flex:1; min-height:0; display:flex; border-radius:34px; overflow:hidden; background:#141414; touch-action:none;}
+#videoCallScreen .vcMain{flex:1 1 50%; min-width:0; min-height:0; width:100%; height:100%; object-fit:cover; background:#141414;}
+#videoCallScreen .vcSelfWrap{position:absolute; right:12px; bottom:12px; width:30%; max-width:170px; aspect-ratio:3/4; border-radius:16px; overflow:hidden; border:1px solid rgba(255,255,255,.35); background:#1b1b1b; touch-action:none; cursor:grab; box-shadow:0 8px 24px rgba(0,0,0,.45);}
+#videoCallScreen .vcSelf{width:100%; height:100%; object-fit:cover; transform:scaleX(-1); display:block; pointer-events:none;}
+#videoCallScreen .vcResize{position:absolute; right:0; bottom:0; width:30px; height:30px; cursor:nwse-resize; touch-action:none; background:linear-gradient(135deg,transparent 55%,rgba(255,255,255,.75) 55%,rgba(255,255,255,.75) 62%,transparent 62%,transparent 72%,rgba(255,255,255,.75) 72%,rgba(255,255,255,.75) 79%,transparent 79%);}
+/* Split: your picture becomes the other half, stacked on a phone, side by side when wide. */
+#videoCallScreen[data-layout="split"] .vcStage{flex-direction:column; gap:2px;}
+#videoCallScreen[data-layout="split"] .vcSelfWrap{position:static; flex:1 1 50%; width:auto; max-width:none; aspect-ratio:auto; border:0; border-radius:0; box-shadow:none; cursor:default; min-height:0;}
+#videoCallScreen[data-layout="split"] .vcResize{display:none;}
+@media (orientation:landscape){#videoCallScreen[data-layout="split"] .vcStage{flex-direction:row;}}
+#videoCallScreen .vcControls{display:flex; justify-content:center; align-items:flex-start; gap:34px; padding-top:18px;}
+#videoCallScreen .callBtn{color:#f2e6e3;}
+#videoCallScreen .callBtn svg{width:28px; height:28px; color:#f2e6e3;}
+#videoCallScreen .callBtn.endCall svg{width:28px; height:28px; color:#fff;}
+#videoCallScreen .callBtn .callBtnCircle{background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.16);}
+#videoCallScreen .callBtn.endCall .callBtnCircle{background:#880808; border:none;}
+#videoCallScreen .callBtn.active .callBtnCircle{background:#f6ddd9; border-color:#f6ddd9;}
+#videoCallScreen .callBtn.active svg{color:#1b1b1b;}
+#vcMuteBtn .micOff, #vcMuteBtn .micSlash{display:none;}
+#vcMuteBtn.active .micOn{display:none;}
+#vcMuteBtn.active .micOff, #vcMuteBtn.active .micSlash{display:inline;}
+/* One icon at a time: Split while in PiP, PiP while in split. */
+#videoCallScreen[data-layout="pip"] .vcIcPip, #videoCallScreen[data-layout="split"] .vcIcSplit{display:none;}
+
+/* ---- App notice sheet (Coming soon / success / error) ---- */
+.noticeSheet{position:fixed; inset:0; z-index:300; display:flex; flex-direction:column; justify-content:flex-end;}
+.noticeSheet.hidden{display:none;}
+.noticeBackdrop{position:absolute; inset:0; background:rgba(0,0,0,.4); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);}
+.noticePanel{position:relative; margin:0 10px calc(env(safe-area-inset-bottom) + 8px); background:#fff; color:#111; border-radius:44px; padding:78px 22px 22px; text-align:center; animation:noticeRise .28s ease-out;}
+@keyframes noticeRise{from{transform:translateY(40px); opacity:0;}to{transform:none; opacity:1;}}
+.noticeClose{position:absolute; top:-27px; left:50%; transform:translateX(-50%); width:54px; height:54px; border-radius:50%; background:#fff; color:#111; border:0; display:flex; align-items:center; justify-content:center; box-shadow:0 6px 18px rgba(0,0,0,.18); cursor:pointer;}
+.noticeClose svg{width:22px; height:22px;}
+.noticeBadge svg{width:150px; height:150px; display:block; margin:0 auto;}
+.noticeTitle{font-size:34px; font-weight:600; margin:14px 0 8px; color:#111;}
+.noticeText{font-size:17px; line-height:1.45; color:#6b7280; margin:0 6px;}
+.noticeDone{margin-top:28px; width:100%; height:64px; border-radius:32px; background:#232323; color:#fff; font-size:20px; font-weight:600; border:0; cursor:pointer;}

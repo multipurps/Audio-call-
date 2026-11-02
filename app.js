@@ -113,6 +113,61 @@ async function authedFetch(url, options = {}) {
 // Home / Chat / Recent / Profile are the bottom tabs. Contacts is a screen
 // reached from Home (People > See all, More, Call someone) and from Profile; it
 // keeps Home highlighted in the nav since it is a child of Home.
+
+// ---- App notice sheet: the one UI for success / info / error messages (Coming soon style).
+function scallopPath(R, a, n, phase) {
+  let d = '';
+  for (let i = 0; i <= 180; i++) {
+    const t = (i / 180) * Math.PI * 2;
+    const r = R + a * Math.cos(n * t + phase);
+    d += `${i ? 'L' : 'M'}${(75 + r * Math.cos(t)).toFixed(2)} ${(75 + r * Math.sin(t)).toFixed(2)}`;
+  }
+  return `${d}Z`;
+}
+const NOTICE_KINDS = {
+  info:    { outer: '#dfe8fd', inner: '#cdd9fb', glyph: '#2b4fd6', mark: '<circle cx="75" cy="56" r="6" fill="#2b4fd6"/><rect x="70.5" y="68" width="9" height="30" rx="4.5" fill="#2b4fd6"/>' },
+  success: { outer: '#dcf5e4', inner: '#c4ecd2', glyph: '#1f9d55', mark: '<path d="M58 77l12 12 23-26" fill="none" stroke="#1f9d55" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>' },
+  error:   { outer: '#fde2df', inner: '#fbcdc8', glyph: '#d63a2f', mark: '<rect x="70.5" y="50" width="9" height="32" rx="4.5" fill="#d63a2f"/><circle cx="75" cy="97" r="6" fill="#d63a2f"/>' },
+};
+function showNotice({ kind = 'info', title = '', message = '', onClose } = {}) {
+  const k = NOTICE_KINDS[kind] || NOTICE_KINDS.info;
+  $('noticeBadge').innerHTML = `<svg viewBox="0 0 150 150" aria-hidden="true"><path d="${scallopPath(66, 6, 12, 0)}" fill="${k.outer}"/><path d="${scallopPath(48, 5, 12, Math.PI)}" fill="${k.inner}"/>${k.mark}</svg>`;
+  $('noticeTitle').textContent = title;
+  $('noticeText').textContent = message;
+  $('noticeSheet').classList.remove('hidden');
+  $('noticeSheet').dataset.onclose = '';
+  showNotice.onClose = onClose || null;
+}
+function avatarNotice(t) { const el = $('avatarStatus'); if (el) el.textContent = ''; noticeFromStatus(t, 'Profile picture'); }
+function closeNotice() {
+  $('noticeSheet').classList.add('hidden');
+  const cb = showNotice.onClose; showNotice.onClose = null;
+  if (cb) cb();
+}
+document.querySelectorAll('[data-notice-close]').forEach((el) => el.addEventListener('click', closeNotice));
+// Plain status strings -> the notice sheet. Progress strings ("Uploading…") stay inline where they were.
+function noticeFromStatus(text, title) {
+  const msg = String(text || '').trim();
+  if (!msg) return;
+  const ok = /\b(ready|updated|saved|deleted|removed|created|applied)\b/i.test(msg);
+  showNotice({ kind: ok ? 'success' : 'error', title: ok ? 'Done' : (title || 'Something went wrong'), message: msg });
+}
+const isProgressText = (t) => /(\.\.\.|…)\s*$/.test(String(t || ''));
+// A saved contact is shown by name and initials, never by their number.
+const looksLikeNumber = (t) => /^\+?[\d\s().-]{5,}$/.test(String(t || '').trim());
+function initialsOf(name) {
+  const w = String(name || '').trim().split(/\s+/).filter(Boolean);
+  return ((w[0]?.[0] || '') + (w.length > 1 ? w[w.length - 1][0] : '')).toUpperCase();
+}
+function savedContactForNumber(num) {
+  const n = normalizePhone(num || '');
+  return n ? savedContacts.find((c) => normalizePhone(c.phone_number) === n) || null : null;
+}
+function callPartyLabel(name, number) {
+  const saved = (!name || looksLikeNumber(name)) ? savedContactForNumber(number || name) : null;
+  const shown = saved?.name || (name && !looksLikeNumber(name) ? name : '');
+  return shown ? { name: shown, initials: initialsOf(shown) || '?' } : { name: number || name || 'Caller', initials: (String(number || name || '').replace(/[^0-9]/g, '').slice(-2)) || '?' };
+}
 // Which Start call card sent the user to Contacts: null (plain contacts), 'audio' or 'video'.
 let contactPickMode = null;
 function showTab(name) {
@@ -800,6 +855,16 @@ $('homeHeaderLogoWrap').addEventListener('click', () => {
 
 async function sendChatMessage(text, onReply, source = 'text', channel = null) {
   const isCall = source === 'call';
+  if (!isCall && preCallTarget && (preCallTarget.mode === 'avatar' || preCallTarget.mode === 'live')) {
+    const t = preCallTarget;
+    appendChatBubble({ id: `local-${Date.now()}`, role: 'user', content: text, created_at: new Date().toISOString() });
+    setHomeChatActive(true);
+    scrollHomeChatToBottom();
+    clearPreCallContext();
+    if (t.mode === 'live') showNotice({ kind: 'info', title: 'Coming soon', message: 'Live video calls aren’t available yet. They turn on once a provider is connected.' });
+    else openVideoCall({ contactName: t.name, toNumber: t.toNumber, brief: text });
+    return;
+  }
   const revision = chatRevision;
   const target = !isCall && preCallTarget ? { ...preCallTarget } : null;
   if (!isCall) {
@@ -2059,36 +2124,54 @@ document.querySelectorAll('[data-method]').forEach((btn) => btn.addEventListener
   contactPickMode = null;
   beginPreCall(target, btn.dataset.method, mode);
 }));
-// ---- Video call screen (phase 1): the Anam avatar speaks on the call; your camera is the PiP
-// (or the other half of the split). Keys never reach the browser: the server mints the session.
-let vcClient = null, vcSelfStream = null;
-function setVcStatus(text) { const el = $('vcStatus'); if (el) el.textContent = text; }
-async function openVideoCall({ contactName = '', brief = '' } = {}) {
+// ---- Video call screen: the Anam avatar speaks on the call; your camera is the PiP (or the other half of
+// the split). Keys never reach the browser: the server mints the session.
+let vcClient = null, vcSelfStream = null, vcMuted = false;
+function setVcStatus(text, live = false) { const el = $('vcStatus'); if (el) el.textContent = text; $('videoCallScreen').classList.toggle('live', live); }
+function setVcLayout(layout) {
+  const screen = $('videoCallScreen');
+  screen.dataset.layout = layout;
+  const toSplit = layout === 'pip';
+  $('vcLayoutLabel').textContent = toSplit ? 'Split' : 'PiP';
+  $('vcLayoutBtn').setAttribute('aria-label', toSplit ? 'Switch to split screen' : 'Switch to picture in picture');
+}
+function setVcMuted(muted) {
+  vcMuted = muted;
+  if (vcSelfStream) vcSelfStream.getAudioTracks().forEach((t) => { t.enabled = !muted; });
+  try { muted ? vcClient?.muteInputAudio?.() : vcClient?.unmuteInputAudio?.(); } catch (_) {}
+  $('vcMuteBtn').classList.toggle('active', muted);
+  $('vcMuteBtn').setAttribute('aria-pressed', String(muted));
+}
+async function openVideoCall({ contactName = '', toNumber = '', brief = '' } = {}) {
+  const party = callPartyLabel(contactName, toNumber);
+  $('vcName').textContent = party.name;
+  $('vcAvatar').textContent = party.initials;
+  setVcLayout('pip'); setVcMuted(false); resetVcSelfBox();
   $('videoCallScreen').classList.remove('hidden');
-  setVcStatus('Asking for microphone and camera…');
+  setVcStatus('Starting…');
+  const fail = (title, message) => { closeVideoCall(); showNotice({ kind: 'error', title, message }); };
   try {
     // Ask now, on the tap, so the browser prompt is not a surprise in the middle of the call.
     vcSelfStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
     $('vcSelf').srcObject = vcSelfStream;
   } catch (e) {
-    setVcStatus('Allow microphone and camera to start the video call.');
+    fail('Camera and microphone', 'Allow camera and microphone access to start the video call.');
     return;
   }
-  setVcStatus('Starting avatar…');
   try {
     const resp = await authedFetch('/api/assistant?action=anam-session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ brief, contactName }),
+      body: JSON.stringify({ brief, contactName: party.name }),
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || !data.sessionToken) throw new Error(data.error || 'The avatar could not start.');
     const sdk = await import('https://esm.sh/@anam-ai/js-sdk@4.27.1');
     vcClient = sdk.createClient(data.sessionToken);
     await vcClient.streamToVideoElement('vcMain');
-    setVcStatus('Live');
+    setVcStatus('Live', true);
   } catch (e) {
-    setVcStatus(e.message || 'The avatar could not start.');
+    fail('Avatar call', e.message || 'The avatar could not start.');
   }
 }
 function closeVideoCall() {
@@ -2100,12 +2183,61 @@ function closeVideoCall() {
   $('videoCallScreen').classList.add('hidden');
 }
 $('vcHangBtn')?.addEventListener('click', closeVideoCall);
-$('vcLayoutBtn')?.addEventListener('click', () => {
-  const screen = $('videoCallScreen');
-  const split = screen.dataset.layout !== 'split';
-  screen.dataset.layout = split ? 'split' : 'pip';
-  $('vcLayoutBtn').textContent = split ? 'PiP' : 'Split';
-});
+$('vcMuteBtn')?.addEventListener('click', () => setVcMuted(!vcMuted));
+$('vcLayoutBtn')?.addEventListener('click', () => setVcLayout($('videoCallScreen').dataset.layout === 'split' ? 'pip' : 'split'));
+
+// Your picture in PiP: drag it anywhere on the stage, drag the corner to resize it (3:4), double-tap to
+// jump between small and large. It is the other half of the screen in split, so it is fixed there.
+const VC_SELF_MIN = 90;
+function resetVcSelfBox() {
+  const box = $('vcSelfWrap'); if (!box) return;
+  box.style.width = ''; box.style.left = ''; box.style.top = ''; box.style.right = '12px'; box.style.bottom = '12px';
+}
+function vcSelfGeometry() {
+  const stage = $('vcStage').getBoundingClientRect(), box = $('vcSelfWrap').getBoundingClientRect();
+  return { stage, box };
+}
+function placeVcSelf(left, top, width) {
+  const box = $('vcSelfWrap'), stage = $('vcStage').getBoundingClientRect();
+  const maxW = Math.min(stage.width - 16, (stage.height - 16) * 0.75);
+  const w = Math.min(Math.max(width, VC_SELF_MIN), maxW), h = w * 4 / 3;
+  box.style.width = `${w}px`;
+  box.style.left = `${Math.min(Math.max(left, 8), stage.width - w - 8)}px`;
+  box.style.top = `${Math.min(Math.max(top, 8), stage.height - h - 8)}px`;
+  box.style.right = 'auto'; box.style.bottom = 'auto';
+}
+(() => {
+  const box = $('vcSelfWrap'), handle = $('vcResize'); if (!box || !handle) return;
+  let drag = null, lastTap = 0;
+  const pip = () => $('videoCallScreen').dataset.layout === 'pip';
+  box.addEventListener('pointerdown', (e) => {
+    if (!pip() || e.target === handle) return;
+    const { stage, box: r } = vcSelfGeometry();
+    drag = { kind: 'move', dx: e.clientX - r.left, dy: e.clientY - r.top, w: r.width, stageLeft: stage.left, stageTop: stage.top };
+    box.setPointerCapture(e.pointerId); box.style.cursor = 'grabbing';
+    const now = Date.now();
+    if (now - lastTap < 300) { // double-tap: toggle small / large
+      const big = r.width < stage.width * 0.5;
+      placeVcSelf(r.left - stage.left, r.top - stage.top, big ? stage.width * 0.62 : stage.width * 0.3);
+      drag = null;
+    }
+    lastTap = now;
+  });
+  handle.addEventListener('pointerdown', (e) => {
+    if (!pip()) return;
+    e.stopPropagation();
+    const { stage, box: r } = vcSelfGeometry();
+    drag = { kind: 'resize', startX: e.clientX, w: r.width, left: r.left - stage.left, top: r.top - stage.top };
+    handle.setPointerCapture(e.pointerId);
+  });
+  const move = (e) => {
+    if (!drag) return;
+    if (drag.kind === 'move') placeVcSelf(e.clientX - drag.stageLeft - drag.dx, e.clientY - drag.stageTop - drag.dy, drag.w);
+    else placeVcSelf(drag.left, drag.top, drag.w + (e.clientX - drag.startX));
+  };
+  const end = () => { drag = null; box.style.cursor = ''; };
+  [box, handle].forEach((el) => { el.addEventListener('pointermove', move); el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end); });
+})();
 function chooseVideoCallType() {
   return new Promise((resolve) => {
     const dialog = $('videoTypeDialog');
@@ -2341,8 +2473,9 @@ function openCallScreen(callId, toNumber, contactName) {
   $('callAddBtn').onclick = () => minimizeCallScreenToChat();
   $('callMinimizeBtn').onclick = () => minimizeCallScreenToChat();
   $('callContactAvatar').style.display = '';
-  const displayName = contactName || toNumber || 'Caller';
-  $('callContactAvatar').textContent = (contactName ? contactName[0] : (toNumber || '').replace(/[^0-9]/g, '').slice(-2)) || '?';
+  const party = callPartyLabel(contactName, toNumber);
+  const displayName = party.name;
+  $('callContactAvatar').textContent = party.initials;
   $('callTitleText').textContent = contactName === 'Emysa (callback to you)' ? 'Emysa · your phone' : `Emysa & ${displayName}`;
 
   if (!isSameCall) {
@@ -3740,7 +3873,11 @@ async function refreshAnamImage() {
   } catch (_) { /* offline: keep the current background */ }
 }
 
-const mediaStatus = (t) => { $('avatarSlotStatus').textContent = t; };
+const mediaStatus = (t) => {
+  if (!t || isProgressText(t)) { $('avatarSlotStatus').textContent = t || ''; return; }
+  $('avatarSlotStatus').textContent = '';
+  noticeFromStatus(t, 'Avatar');
+};
 
 async function uploadMedia(key, file) {
   const m = MEDIA_SLOTS[key];
@@ -4163,11 +4300,11 @@ $('avatarFileInput').addEventListener('change', async (e) => {
   e.target.value = '';
   if (!file || !currentUser) return;
   if (!file.type.startsWith('image/')) {
-    $('avatarStatus').textContent = 'Please choose an image file.';
+    avatarNotice('Please choose an image file.');
     return;
   }
   if (file.size > 8 * 1024 * 1024) {
-    $('avatarStatus').textContent = 'Image is too large (max 8MB).';
+    avatarNotice('Image is too large (max 8MB).');
     return;
   }
   $('avatarStatus').textContent = 'Uploading...';
@@ -4186,7 +4323,7 @@ $('avatarFileInput').addEventListener('change', async (e) => {
       .upsert({ user_id: currentUser.id, avatar_url: url }, { onConflict: 'user_id' });
     if (dbError) throw dbError;
     renderAvatar(url);
-    $('avatarStatus').textContent = 'Profile picture updated.';
+    avatarNotice('Profile picture updated.');
   } catch (err) {
     console.error('avatar upload failed:', err);
     // Surface the real reason instead of a generic message: "bucket not found"
@@ -4195,13 +4332,13 @@ $('avatarFileInput').addEventListener('change', async (e) => {
     // fix from "your file is too big" and shouldn't be masked as the same thing.
     const reason = (err?.message || err?.error_description || '').toLowerCase();
     if (reason.includes('bucket not found')) {
-      $('avatarStatus').textContent = 'Storage isn\'t set up yet (avatars bucket missing) — run sql/006_avatars.sql against this project, then try again.';
+      avatarNotice('Storage isn\'t set up yet (avatars bucket missing) — run sql/006_avatars.sql against this project, then try again.');
     } else if (reason.includes('row-level security') || reason.includes('permission') || reason.includes('policy')) {
-      $('avatarStatus').textContent = 'Not allowed to upload (storage policy). Check sql/006_avatars.sql has been applied.';
+      avatarNotice('Not allowed to upload (storage policy). Check sql/006_avatars.sql has been applied.');
     } else if (err?.message) {
-      $('avatarStatus').textContent = `Could not upload photo: ${err.message}`;
+      avatarNotice(`Could not upload photo: ${err.message}`);
     } else {
-      $('avatarStatus').textContent = 'Could not upload photo — try a smaller image.';
+      avatarNotice('Could not upload photo — try a smaller image.');
     }
   }
 });

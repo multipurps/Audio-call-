@@ -593,6 +593,11 @@
         <div class="cBody"><div class="cValue">Account</div></div>
         <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
       </div>
+      <div class="profileCard linkCard" id="avatarSettingsBtn">
+        <div class="cIcon"><svg viewBox="0 0 16 16"><use href="#ic-avatar"/></svg></div>
+        <div class="cBody"><div class="cValue">Avatar</div><div class="cLabel">Pictures for video calls and Live Swap</div></div>
+        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
       <div class="profileCard linkCard" id="referralsBtn">
         <div class="cIcon"><svg viewBox="0 0 24 24" fill="none"><path d="M20 12v8H4v-8M2 8h20v4H2V8zm10 0v12M12 8s-1-5-4.5-5S5 6 5 6.5 6 8 8 8h4zm0 0s1-5 4.5-5S19 6 19 6.5 18 8 16 8h-4z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
         <div class="cBody"><div class="cValue">Referrals</div></div>
@@ -623,11 +628,6 @@
       <div class="profileCard linkCard" id="callSettingsBtn">
         <div class="cIcon"><svg class="phoneIc" viewBox="0 0 24 24"><use href="#ic-phone"/></svg></div>
         <div class="cBody"><div class="cValue">Call Settings</div></div>
-        <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-      </div>
-      <div class="profileCard linkCard" id="avatarSettingsBtn">
-        <div class="cIcon"><svg viewBox="0 0 16 16"><use href="#ic-avatar"/></svg></div>
-        <div class="cBody"><div class="cValue">Avatar</div><div class="cLabel">Pictures for video calls and Live Swap</div></div>
         <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
       </div>
       <div class="profileCard linkCard" id="permissionsBtn">
@@ -756,19 +756,36 @@
 
   <!-- ---------- active call screen ---------- -->
 <div id="videoCallScreen" class="hidden" data-layout="pip">
-  <div class="vcStage">
+  <div class="vcHeader">
+    <div class="vcAvatar" id="vcAvatar">?</div>
+    <div class="vcName" id="vcName">Video call</div>
+    <div class="vcPill"><i class="vcDot"></i><span id="vcStatus" aria-live="polite">Connecting…</span></div>
+  </div>
+  <div class="vcStage" id="vcStage">
     <video id="vcMain" class="vcMain" autoplay playsinline></video>
-    <video id="vcSelf" class="vcSelf" autoplay playsinline muted></video>
+    <div class="vcSelfWrap" id="vcSelfWrap">
+      <video id="vcSelf" class="vcSelf" autoplay playsinline muted></video>
+      <span class="vcResize" id="vcResize" aria-label="Resize your picture"></span>
+    </div>
   </div>
-  <div class="vcTop">
-    <span class="vcStatus" id="vcStatus" aria-live="polite">Connecting…</span>
-    <button type="button" class="vcLayoutBtn" id="vcLayoutBtn">Split</button>
-  </div>
-  <div class="vcBottom">
+  <div class="vcControls">
+    <button class="callBtn" id="vcMuteBtn" aria-label="Mute" aria-pressed="false">
+      <div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <defs><mask id="vcMicSlashCut" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24"><rect width="24" height="24" fill="white"/><path d="M3.2 2.6L20.8 21.4" stroke="black" stroke-width="4.4" stroke-linecap="round"/></mask></defs>
+              <g class="micOn"><path fill-rule="evenodd" clip-rule="evenodd" d="M4 9C4.41421 9 4.75 9.33579 4.75 9.75V10.75C4.75 14.7541 7.99594 18 12 18C16.0041 18 19.25 14.7541 19.25 10.75V9.75C19.25 9.33579 19.5858 9 20 9C20.4142 9 20.75 9.33579 20.75 9.75V10.75C20.75 15.3298 17.2314 19.0879 12.75 19.4683V21.75C12.75 22.1642 12.4142 22.5 12 22.5C11.5858 22.5 11.25 22.1642 11.25 21.75V19.4683C6.7686 19.0879 3.25 15.3298 3.25 10.75V9.75C3.25 9.33579 3.58579 9 4 9Z" fill="currentColor"/><path opacity="0.75" d="M9.75 7.75C9.75 7.33579 9.41421 7 9 7H7.81597H6.29847C6.66598 4.17873 9.07855 2 12 2C14.9214 2 17.334 4.17873 17.7015 7H16.184L13.5 7C13.0858 7 12.75 7.33579 12.75 7.75C12.75 8.16421 13.0858 8.5 13.5 8.5L16.25 8.5H17.75V10H16.25H13.5C13.0858 10 12.75 10.3358 12.75 10.75C12.75 11.1642 13.0858 11.5 13.5 11.5H16.184H17.7015C17.334 14.3213 14.9214 16.5 12 16.5C9.07855 16.5 6.66598 14.3213 6.29847 11.5H7.81597H9C9.41421 11.5 9.75 11.1642 9.75 10.75C9.75 10.3358 9.41421 10 9 10H7.75H6.25V8.5H7.75H9C9.41421 8.5 9.75 8.16421 9.75 7.75Z" fill="currentColor"/><path d="M12.75 10.75C12.75 11.1642 13.0858 11.5 13.5 11.5H16.184H17.7015L17.75 10H16.25H13.5C13.0858 10 12.75 10.3358 12.75 10.75Z" fill="currentColor"/><path d="M12.75 7.75C12.75 8.16421 13.0858 8.5 13.5 8.5L16.25 8.5H17.75L17.7015 7H16.184L13.5 7C13.0858 7 12.75 7.33579 12.75 7.75Z" fill="currentColor"/><path d="M9.75 7.75C9.75 7.33579 9.41421 7 9 7H7.81597H6.29847L6.25 8.5H7.75H9C9.41421 8.5 9.75 8.16421 9.75 7.75Z" fill="currentColor"/><path d="M9.75 10.75C9.75 10.3358 9.41421 10 9 10H7.75H6.25L6.29847 11.5H7.81597H9C9.41421 11.5 9.75 11.1642 9.75 10.75Z" fill="currentColor"/></g>
+              <g class="micOff" mask="url(#vcMicSlashCut)"><path fill-rule="evenodd" clip-rule="evenodd" d="M4 9C4.41421 9 4.75 9.33579 4.75 9.75V10.75C4.75 14.7541 7.99594 18 12 18C16.0041 18 19.25 14.7541 19.25 10.75V9.75C19.25 9.33579 19.5858 9 20 9C20.4142 9 20.75 9.33579 20.75 9.75V10.75C20.75 15.3298 17.2314 19.0879 12.75 19.4683V21.75C12.75 22.1642 12.4142 22.5 12 22.5C11.5858 22.5 11.25 22.1642 11.25 21.75V19.4683C6.7686 19.0879 3.25 15.3298 3.25 10.75V9.75C3.25 9.33579 3.58579 9 4 9Z" fill="currentColor"/><path opacity="0.75" d="M9.75 7.75C9.75 7.33579 9.41421 7 9 7H7.81597H6.29847C6.66598 4.17873 9.07855 2 12 2C14.9214 2 17.334 4.17873 17.7015 7H16.184L13.5 7C13.0858 7 12.75 7.33579 12.75 7.75C12.75 8.16421 13.0858 8.5 13.5 8.5L16.25 8.5H17.75V10H16.25H13.5C13.0858 10 12.75 10.3358 12.75 10.75C12.75 11.1642 13.0858 11.5 13.5 11.5H16.184H17.7015C17.334 14.3213 14.9214 16.5 12 16.5C9.07855 16.5 6.66598 14.3213 6.29847 11.5H7.81597H9C9.41421 11.5 9.75 11.1642 9.75 10.75C9.75 10.3358 9.41421 10 9 10H7.75H6.25V8.5H7.75H9C9.41421 8.5 9.75 8.16421 9.75 7.75Z" fill="currentColor"/><path d="M12.75 10.75C12.75 11.1642 13.0858 11.5 13.5 11.5H16.184H17.7015L17.75 10H16.25H13.5C13.0858 10 12.75 10.3358 12.75 10.75Z" fill="currentColor"/><path d="M12.75 7.75C12.75 8.16421 13.0858 8.5 13.5 8.5L16.25 8.5H17.75L17.7015 7H16.184L13.5 7C13.0858 7 12.75 7.33579 12.75 7.75Z" fill="currentColor"/><path d="M9.75 7.75C9.75 7.33579 9.41421 7 9 7H7.81597H6.29847L6.25 8.5H7.75H9C9.41421 8.5 9.75 8.16421 9.75 7.75Z" fill="currentColor"/><path d="M9.75 10.75C9.75 10.3358 9.41421 10 9 10H7.75H6.25L6.29847 11.5H7.81597H9C9.41421 11.5 9.75 11.1642 9.75 10.75Z" fill="currentColor"/></g>
+              <path class="micSlash" d="M3.2 2.6L20.8 21.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+            </svg></div>
+      <span>Mute</span>
+    </button>
     <button class="callBtn endCall" id="vcHangBtn" aria-label="End call">
-            <div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 13.4782L8 12.8617C8 12.8617 8 11.3963 12 11.3963C16 11.3963 16 12.8617 16 12.8617V13.25C16 14.2064 16.7227 15.0192 17.7004 15.1625L19.7004 15.4556C20.9105 15.6329 22 14.7267 22 13.5429V11.4183C22 10.8313 21.8162 10.2542 21.3703 9.85601C20.2296 8.83732 17.4208 7 12 7C6.25141 7 3.44027 9.58269 2.44083 10.7889C2.1247 11.1704 2 11.6525 2 12.1414L2 14.0643C2 15.3623 3.29561 16.292 4.57997 15.9156L6.57997 15.3295C7.42329 15.0823 8 14.3305 8 13.4782Z" fill="currentColor"/></svg></div>
-            End
-          </button>
+      <div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 13.4782L8 12.8617C8 12.8617 8 11.3963 12 11.3963C16 11.3963 16 12.8617 16 12.8617V13.25C16 14.2064 16.7227 15.0192 17.7004 15.1625L19.7004 15.4556C20.9105 15.6329 22 14.7267 22 13.5429V11.4183C22 10.8313 21.8162 10.2542 21.3703 9.85601C20.2296 8.83732 17.4208 7 12 7C6.25141 7 3.44027 9.58269 2.44083 10.7889C2.1247 11.1704 2 11.6525 2 12.1414L2 14.0643C2 15.3623 3.29561 16.292 4.57997 15.9156L6.57997 15.3295C7.42329 15.0823 8 14.3305 8 13.4782Z" fill="currentColor"/></svg></div>
+      <span>End</span>
+    </button>
+    <button class="callBtn" id="vcLayoutBtn" aria-label="Switch to split screen">
+      <div class="callBtnCircle"><svg class="vcIcSplit" viewBox="0 0 52 52" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M47,23.5H5a2,2,0,0,1-2-2V2A2,2,0,0,1,7,2V19.5H45V2a2,2,0,0,1,4,0V21.5A2,2,0,0,1,47,23.5Z"/><path d="M47,52a2,2,0,0,1-2-2V32.5H7V50a2,2,0,0,1-4,0V30.5a2,2,0,0,1,2-2H47a2,2,0,0,1,2,2V50A2,2,0,0,1,47,52Z"/></svg><svg class="vcIcPip" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M11 21H10C6.22876 21 4.34315 21 3.17157 19.8284C2 18.6569 2 16.7712 2 13V11C2 7.22876 2 5.34315 3.17157 4.17157C4.34315 3 6.22876 3 10 3H14C17.7712 3 19.6569 3 20.8284 4.17157C22 5.34315 22 7.22876 22 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13 17C13 15.1144 13 14.1716 13.5858 13.5858C14.1716 13 15.1144 13 17 13H18C19.8856 13 20.8284 13 21.4142 13.5858C22 14.1716 22 15.1144 22 17C22 18.8856 22 19.8284 21.4142 20.4142C20.8284 21 19.8856 21 18 21H17C15.1144 21 14.1716 21 13.5858 20.4142C13 19.8284 13 18.8856 13 17Z" stroke="currentColor" stroke-width="1.5"/></svg></div>
+      <span id="vcLayoutLabel">Split</span>
+    </button>
   </div>
 </div>
   <div id="callScreen" class="hidden">
@@ -1585,6 +1602,16 @@
     <button class="contactMethod iosRow iosRowLink" data-method="whatsapp"><span class="methodSymbol methodSymbol--brand"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3C7.03 3 3 7.03 3 12c0 1.66.46 3.22 1.25 4.56L3 21l4.6-1.2A8.93 8.93 0 0 0 12 21c4.97 0 9-4.03 9-9s-4.03-9-9-9z" fill="#25D366"/><path d="M8.7 7.6c.2-.44.4-.45.6-.46h.5c.17 0 .4-.06.6.47.24.6.8 2.07.87 2.22.07.16.12.34.02.55-.09.2-.14.32-.28.5-.14.16-.3.36-.42.49-.14.14-.29.3-.13.58.17.3.75 1.24 1.62 2 1.12.99 2.06 1.3 2.36 1.44.3.14.47.12.65-.07.18-.2.75-.87.95-1.17.2-.3.4-.24.66-.14.28.1 1.75.83 2.05.98.3.15.5.22.57.35.08.13.08.75-.17 1.47-.25.72-1.46 1.4-2 1.49-.55.1-1 .17-3.4-.71-2.88-1.06-4.7-4-4.85-4.19-.14-.2-1.16-1.55-1.16-2.95 0-1.4.73-2.08.99-2.36z" fill="#fff"/></svg></span><span class="iosRowTitle">WhatsApp</span><svg class="iosChevron" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   </div>
 </dialog>
+<div id="noticeSheet" class="noticeSheet hidden" role="dialog" aria-modal="true" aria-labelledby="noticeTitle">
+  <div class="noticeBackdrop" data-notice-close></div>
+  <div class="noticePanel">
+    <button type="button" class="noticeClose" data-notice-close aria-label="Close"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    <div class="noticeBadge" id="noticeBadge"></div>
+    <h2 class="noticeTitle" id="noticeTitle"></h2>
+    <p class="noticeText" id="noticeText"></p>
+    <button type="button" class="noticeDone" data-notice-close>Done</button>
+  </div>
+</div>
 <dialog id="videoTypeDialog" class="callDialog actionSheet iosMenu" aria-label="Video call type">
   <div class="iosMenuGroup">
     <div class="iosMenuHeader">Video call</div>
