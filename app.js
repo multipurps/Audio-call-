@@ -2096,6 +2096,8 @@ document.querySelectorAll('[data-method]').forEach((btn) => btn.addEventListener
     if (!mode) return;
   }
   contactPickMode = null;
+  // Live Swap needs no brief: it opens on the tap.
+  if (mode === 'live') { openLiveSwap({ contactName: contact.name }); return; }
   beginPreCall(target, btn.dataset.method, mode);
 }));
 // ---- Video call screen: the Anam avatar speaks on the call; your camera is the PiP (or the other half of
@@ -2148,9 +2150,93 @@ async function openVideoCall({ contactName = '', toNumber = '', brief = '' } = {
     fail('Avatar call', e.message || 'The avatar could not start.');
   }
 }
+// ---- Live Swap (Live video). Your face from your own camera, through Xmax, with your Live Swap picture as
+// the reference. No briefing and no microphone. The output fills the call screen. It is shown only on your
+// screen until WhatsApp video (phase 2) carries it to the callee.
+let vcXmax = null; // { realtime, timer, cam, camVid, tk }
+async function openLiveSwap({ contactName = '' } = {}) {
+  const party = callPartyLabel(contactName, '');
+  $('vcName').textContent = party.name;
+  $('vcAvatar').textContent = party.initials;
+  setVcLayout('pip'); setVcMuted(false); resetVcSelfBox();
+  $('vcSelfWrap').style.display = 'none';
+  $('videoCallScreen').classList.remove('hidden');
+  setVcStatus('Starting…');
+  const fail = (title, message) => { closeVideoCall(); showNotice({ kind: 'error', title, message }); };
+  try {
+    const { data: prof } = await supabase.from('profiles').select('live_swap_url').eq('user_id', currentUser.id).maybeSingle();
+    const ref = prof?.live_swap_url;
+    if (!ref) return fail('Live Swap', 'Add your Live Swap picture first (Profile > Avatar).');
+    const tr = await authedFetch('/api/assistant?action=xmax-token', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'mint' }),
+    });
+    const tk = await tr.json().catch(() => ({}));
+    if (!tr.ok || !tk.temporaryApiKey) return fail('Live Swap', tk.error || 'Xmax could not start.');
+    const X = await import('https://esm.sh/@xmaxai/web-sdk@1.0.10');
+    const client = new X.XmaxClient(new X.XmaxConfiguration({ apiKey: tk.temporaryApiKey, environment: X.XmaxEnvironment.global }));
+    const realtime = client.createRealtimeManager(new X.RealtimeConfiguration({ model: X.RealtimeModel.x2_1_1_preview_us }));
+    vcXmax = { realtime, tk: tk.temporaryApiKey, timer: null, cam: null, camVid: null };
+    // Camera only. Flipped left/right through a canvas, so the output keeps the true left/right.
+    const cam = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1024 }, height: { ideal: 1920 }, frameRate: { ideal: 30, max: 30 } },
+    });
+    vcXmax.cam = cam;
+    const camVid = document.createElement('video');
+    camVid.muted = true; camVid.playsInline = true; camVid.srcObject = cam;
+    await camVid.play().catch(() => {});
+    vcXmax.camVid = camVid;
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024; canvas.height = 1920;
+    const cctx = canvas.getContext('2d');
+    const drawFlipped = () => {
+      const vw = camVid.videoWidth, vh = camVid.videoHeight;
+      if (!vw || !vh) return;
+      const scale = Math.max(canvas.width / vw, canvas.height / vh);
+      const sw = canvas.width / scale, sh = canvas.height / scale;
+      cctx.save(); cctx.translate(canvas.width, 0); cctx.scale(-1, 1);
+      cctx.drawImage(camVid, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, canvas.width, canvas.height);
+      cctx.restore();
+    };
+    drawFlipped();
+    vcXmax.timer = setInterval(drawFlipped, 1000 / 30);
+    const flippedTrack = canvas.captureStream(30).getVideoTracks()[0];
+    const localStream = await realtime.createExternalVideoStream({
+      videoTrack: flippedTrack,
+      videoFormat: new X.RealtimeVideoFormat({ width: 1024, height: 1920, fps: 30 }),
+    });
+    setVcStatus('Opening connection…');
+    const remote = await realtime.startGeneration({
+      localStream,
+      context: new X.RealtimeContext({
+        prompt: 'Substitute the character in the video with the person in the reference image.',
+        referencePath: ref,
+      }),
+    });
+    const remoteTrack = remote.videoTrack && remote.videoTrack.mediaStreamTrack;
+    if (!remoteTrack) throw new Error('Xmax returned no video');
+    $('vcMain').srcObject = new MediaStream([remoteTrack]);
+    $('vcMain').play?.().catch(() => {});
+    setVcStatus('Live', true);
+  } catch (e) {
+    const cameraDenied = /NotAllowed|Permission|denied/i.test(String(e && (e.name || e.message)));
+    fail('Live Swap', cameraDenied ? 'Allow camera access to use Live Swap.' : (e.message || 'Live Swap could not start.'));
+  }
+}
+// Stops Live Swap: closes Xmax, revokes its temporary key, and stops the camera.
+function stopLiveSwap() {
+  if (!vcXmax) return;
+  const x = vcXmax; vcXmax = null;
+  if (x.timer) clearInterval(x.timer);
+  try { x.realtime && x.realtime.close(); } catch (_) {}
+  if (x.cam) x.cam.getTracks().forEach((t) => t.stop());
+  if (x.tk) authedFetch('/api/assistant?action=xmax-token', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'revoke', temporaryApiKey: x.tk }),
+  }).catch(() => {});
+}
 function closeVideoCall() {
   try { if (vcClient) vcClient.stopStreaming(); } catch (_) {}
   vcClient = null;
+  stopLiveSwap();
   if (vcSilentCtx) { vcSilentCtx.close().catch(() => {}); vcSilentCtx = null; }
   const main = $('vcMain'); if (main) main.srcObject = null;
   $('videoCallScreen').classList.add('hidden');
