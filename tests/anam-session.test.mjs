@@ -57,4 +57,11 @@ test('route: GET refused; POST uses the person\'s own key and avatar and returns
   assert.match(JSON.parse(calls[0].init.body).personaConfig.systemPrompt, /Say hello/);
   assert.equal(JSON.parse(calls[0].init.body).personaConfig.llmId, 'llm-1');
   assert.equal(JSON.parse(calls[0].init.body).personaConfig.voiceId, 'voice-1');
+  const noVoice = fakeRes();
+  await anamSessionRoute({ method: 'POST', body: {} }, noVoice, supabaseNoRow, 'u1', {
+    env: {}, getKey: async () => KEY, getAvatar: async () => ({ id: 'av1', name: 'Me' }), fetchImpl: okFetch([]),
+    getLlmId: async () => 'llm-1', getVoiceId: async () => null,
+  });
+  assert.equal(noVoice.code, 400);
+  assert.match(noVoice.body.error, /Record or upload your voice/);
 });
