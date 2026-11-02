@@ -1506,16 +1506,3 @@ body::before{content:""; position:absolute; top:0; left:0; right:0; height:var(-
 #vcMuteBtn.active .micOff, #vcMuteBtn.active .micSlash{display:inline;}
 /* One icon at a time: Split while in PiP, PiP while in split. */
 #videoCallScreen[data-layout="pip"] .vcIcPip, #videoCallScreen[data-layout="split"] .vcIcSplit{display:none;}
-
-/* ---- App notice sheet (Coming soon / success / error) ---- */
-.noticeSheet{position:fixed; inset:0; z-index:300; display:flex; flex-direction:column; justify-content:flex-end;}
-.noticeSheet.hidden{display:none;}
-.noticeBackdrop{position:absolute; inset:0; background:rgba(0,0,0,.4); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);}
-.noticePanel{position:relative; margin:0 10px calc(env(safe-area-inset-bottom) + 8px); background:#fff; color:#111; border-radius:44px; padding:78px 22px 22px; text-align:center; animation:noticeRise .28s ease-out;}
-@keyframes noticeRise{from{transform:translateY(40px); opacity:0;}to{transform:none; opacity:1;}}
-.noticeClose{position:absolute; top:-27px; left:50%; transform:translateX(-50%); width:54px; height:54px; border-radius:50%; background:#fff; color:#111; border:0; display:flex; align-items:center; justify-content:center; box-shadow:0 6px 18px rgba(0,0,0,.18); cursor:pointer;}
-.noticeClose svg{width:22px; height:22px;}
-.noticeBadge svg{width:150px; height:150px; display:block; margin:0 auto;}
-.noticeTitle{font-size:34px; font-weight:600; margin:14px 0 8px; color:#111;}
-.noticeText{font-size:17px; line-height:1.45; color:#6b7280; margin:0 6px;}
-.noticeDone{margin-top:28px; width:100%; height:64px; border-radius:32px; background:#232323; color:#fff; font-size:20px; font-weight:600; border:0; cursor:pointer;}

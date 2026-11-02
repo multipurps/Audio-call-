@@ -11,7 +11,7 @@ import { greetingForNow as pickGreeting } from './lib/greeting.js';
 import { isAppCall, callAgainPlatform, transcriptSpeakerLabel, callTalked } from './lib/callDetail.js';
 import { userError, friendlyAccountName } from './lib/userFacing.js';
 import * as Tutorial from './lib/tutorial.js';
-import { confirmSheet, promptSheet, successSheet, errorSheet, closeAllSheets } from './lib/statusSheet.js';
+import { sheet, confirmSheet, promptSheet, successSheet, errorSheet, closeAllSheets } from './lib/statusSheet.js';
 import { installOverlayStacking } from './lib/overlayStack.js';
 import { fileToWavBase64, looksLikeAudio, CLIP_MIN_SECONDS, CLIP_MAX_SECONDS } from './lib/voiceClip.js';
 import { pickFirstCallChannel, firstCallPrompt, firstCallExplainer } from './lib/firstCall.js';
@@ -114,37 +114,11 @@ async function authedFetch(url, options = {}) {
 // reached from Home (People > See all, More, Call someone) and from Profile; it
 // keeps Home highlighted in the nav since it is a child of Home.
 
-// ---- App notice sheet: the one UI for success / info / error messages (Coming soon style).
-function scallopPath(R, a, n, phase) {
-  let d = '';
-  for (let i = 0; i <= 180; i++) {
-    const t = (i / 180) * Math.PI * 2;
-    const r = R + a * Math.cos(n * t + phase);
-    d += `${i ? 'L' : 'M'}${(75 + r * Math.cos(t)).toFixed(2)} ${(75 + r * Math.sin(t)).toFixed(2)}`;
-  }
-  return `${d}Z`;
-}
-const NOTICE_KINDS = {
-  info:    { outer: '#dfe8fd', inner: '#cdd9fb', glyph: '#2b4fd6', mark: '<circle cx="75" cy="56" r="6" fill="#2b4fd6"/><rect x="70.5" y="68" width="9" height="30" rx="4.5" fill="#2b4fd6"/>' },
-  success: { outer: '#dcf5e4', inner: '#c4ecd2', glyph: '#1f9d55', mark: '<path d="M58 77l12 12 23-26" fill="none" stroke="#1f9d55" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>' },
-  error:   { outer: '#fde2df', inner: '#fbcdc8', glyph: '#d63a2f', mark: '<rect x="70.5" y="50" width="9" height="32" rx="4.5" fill="#d63a2f"/><circle cx="75" cy="97" r="6" fill="#d63a2f"/>' },
-};
+// Results go through the app's one status sheet (lib/statusSheet.js).
 function showNotice({ kind = 'info', title = '', message = '', onClose } = {}) {
-  const k = NOTICE_KINDS[kind] || NOTICE_KINDS.info;
-  $('noticeBadge').innerHTML = `<svg viewBox="0 0 150 150" aria-hidden="true"><path d="${scallopPath(66, 6, 12, 0)}" fill="${k.outer}"/><path d="${scallopPath(48, 5, 12, Math.PI)}" fill="${k.inner}"/>${k.mark}</svg>`;
-  $('noticeTitle').textContent = title;
-  $('noticeText').textContent = message;
-  $('noticeSheet').classList.remove('hidden');
-  $('noticeSheet').dataset.onclose = '';
-  showNotice.onClose = onClose || null;
+  sheet({ kind, title: title || undefined, message }).then(() => onClose && onClose());
 }
 function avatarNotice(t) { const el = $('avatarStatus'); if (el) el.textContent = ''; noticeFromStatus(t, 'Profile picture'); }
-function closeNotice() {
-  $('noticeSheet').classList.add('hidden');
-  const cb = showNotice.onClose; showNotice.onClose = null;
-  if (cb) cb();
-}
-document.querySelectorAll('[data-notice-close]').forEach((el) => el.addEventListener('click', closeNotice));
 // Plain status strings -> the notice sheet. Progress strings ("Uploading…") stay inline where they were.
 function noticeFromStatus(text, title) {
   const msg = String(text || '').trim();
