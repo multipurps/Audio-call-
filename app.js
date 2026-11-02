@@ -2121,17 +2121,12 @@ async function openVideoCall({ contactName = '', toNumber = '', brief = '' } = {
   $('vcName').textContent = party.name;
   $('vcAvatar').textContent = party.initials;
   setVcLayout('pip'); setVcMuted(false); resetVcSelfBox();
+  // The avatar call never uses your camera or microphone. The PiP is for the callee's camera (phase 2),
+  // so it stays hidden until that exists.
+  const selfBox = $('vcSelfWrap'); if (selfBox) selfBox.style.display = 'none';
   $('videoCallScreen').classList.remove('hidden');
   setVcStatus('Starting…');
   const fail = (title, message) => { closeVideoCall(); showNotice({ kind: 'error', title, message }); };
-  try {
-    // Ask now, on the tap, so the browser prompt is not a surprise in the middle of the call.
-    vcSelfStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-    $('vcSelf').srcObject = vcSelfStream;
-  } catch (e) {
-    fail('Camera and microphone', 'Allow camera and microphone access to start the video call.');
-    return;
-  }
   try {
     const resp = await authedFetch('/api/assistant?action=anam-session', {
       method: 'POST',
@@ -2151,8 +2146,6 @@ async function openVideoCall({ contactName = '', toNumber = '', brief = '' } = {
 function closeVideoCall() {
   try { if (vcClient) vcClient.stopStreaming(); } catch (_) {}
   vcClient = null;
-  if (vcSelfStream) { vcSelfStream.getTracks().forEach((t) => t.stop()); vcSelfStream = null; }
-  const self = $('vcSelf'); if (self) self.srcObject = null;
   const main = $('vcMain'); if (main) main.srcObject = null;
   $('videoCallScreen').classList.add('hidden');
 }
