@@ -2132,6 +2132,7 @@ async function openVideoCall({ contactName = '', toNumber = '', brief = '' } = {
   // The avatar call never uses your camera or microphone. The PiP is for the callee's camera (phase 2),
   // so it stays hidden until that exists.
   const selfBox = $('vcSelfWrap'); if (selfBox) selfBox.style.display = 'none';
+  const glow = $('vcGlowImg'); if (glow && !glow.src) glow.src = 'assets/call/call-glow.webp';
   $('videoCallScreen').classList.remove('hidden');
   setVcStatus('Starting…');
   const fail = (title, message) => { closeVideoCall(); showNotice({ kind: 'error', title, message }); };
