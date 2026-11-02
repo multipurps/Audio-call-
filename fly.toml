@@ -1,0 +1,31 @@
+app = "wacalls"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Secrets (fly secrets set ...), same names as the Vercel env vars:
+#   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENAI_API_KEY, LUNA_API_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN,
+#   PUBLIC_APP_URL, ASSISTANT_BRIDGE_URL, ASSISTANT_BRIDGE_SECRET, PUBLIC_ASSISTANT_WS_URL, RELAY_WS_URL,
+#   RELAY_CALLBACK_SECRET, SIGNAL_BRIDGE_URL, SIGNAL_BRIDGE_SECRET, MP_RELAY_URL, MP_RELAY_INTERNAL_SECRET,
+#   SOCIAL_RELAY_URL, SOCIAL_RELAY_INTERNAL_SECRET, WACALLS_RELAY_URL, WACALLS_INTERNAL_SECRET
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/healthz"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "15s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

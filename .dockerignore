@@ -1,0 +1,14 @@
+.git
+.github
+node_modules
+tests
+test-results
+playwright-report
+pipecat-service
+telegram-call-bridge
+signal-bridge
+server
+server-social
+.env
+.env.local
+.venv

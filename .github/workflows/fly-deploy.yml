@@ -1,26 +1,32 @@
 name: Deploy to Fly.io
 
 # Manual only: Actions tab -> "Deploy to Fly.io" -> Run workflow.
-# Needs the FLY_API_TOKEN repo secret (organization token for ayodele-onasanya) and a fly.toml in the folder.
+# Needs the FLY_API_TOKEN repo secret (organization token for ayodele-onasanya).
+# Deploys the Wacalls app from the repo root (fly.toml). Creates the Fly app in the org on the first run.
 on:
   workflow_dispatch:
     inputs:
       dir:
-        description: Folder with the fly.toml to deploy
-        default: signal-bridge
+        description: Folder with the fly.toml to deploy (repo root = the Wacalls app)
+        default: "."
         required: true
 
 concurrency:
-  group: fly-deploy-${{ inputs.dir }}
+  group: fly-deploy
   cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Create the app in ayodele-onasanya if it does not exist
+        working-directory: ${{ inputs.dir }}
+        run: |
+          APP=$(grep -m1 '^app' fly.toml | cut -d'"' -f2)
+          flyctl status --app "$APP" >/dev/null 2>&1 || flyctl apps create "$APP" --org ayodele-onasanya
       - run: flyctl deploy --remote-only
         working-directory: ${{ inputs.dir }}
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
