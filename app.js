@@ -2100,7 +2100,7 @@ document.querySelectorAll('[data-method]').forEach((btn) => btn.addEventListener
 }));
 // ---- Video call screen: the Anam avatar speaks on the call; your camera is the PiP (or the other half of
 // the split). Keys never reach the browser: the server mints the session.
-let vcClient = null, vcSelfStream = null, vcMuted = false;
+let vcClient = null, vcSelfStream = null, vcMuted = false, vcSilentCtx = null;
 function setVcStatus(text, live = false) { const el = $('vcStatus'); if (el) el.textContent = text; $('videoCallScreen').classList.toggle('live', live); }
 function setVcLayout(layout) {
   const screen = $('videoCallScreen');
@@ -2137,7 +2137,12 @@ async function openVideoCall({ contactName = '', toNumber = '', brief = '' } = {
     if (!resp.ok || !data.sessionToken) throw new Error(data.error || 'The avatar could not start.');
     const sdk = await import('https://esm.sh/@anam-ai/js-sdk@4.27.1');
     vcClient = sdk.createClient(data.sessionToken);
-    await vcClient.streamToVideoElement('vcMain');
+    // The callee talks, not you: the avatar gets silence as its input (no microphone prompt, nothing of yours is sent).
+    const AC = window.AudioContext || window.webkitAudioContext;
+    vcSilentCtx = new AC();
+    const silentIn = vcSilentCtx.createMediaStreamDestination().stream;
+    await vcClient.streamToVideoElement('vcMain', silentIn);
+    try { vcClient.muteInputAudio(); } catch (_) {}
     setVcStatus('Live', true);
   } catch (e) {
     fail('Avatar call', e.message || 'The avatar could not start.');
@@ -2146,6 +2151,7 @@ async function openVideoCall({ contactName = '', toNumber = '', brief = '' } = {
 function closeVideoCall() {
   try { if (vcClient) vcClient.stopStreaming(); } catch (_) {}
   vcClient = null;
+  if (vcSilentCtx) { vcSilentCtx.close().catch(() => {}); vcSilentCtx = null; }
   const main = $('vcMain'); if (main) main.srcObject = null;
   $('videoCallScreen').classList.add('hidden');
 }
