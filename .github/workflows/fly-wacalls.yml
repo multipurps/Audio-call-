@@ -2,11 +2,14 @@ name: Deploy WaCalls to Fly.io (wacalls/)
 on:
   workflow_dispatch:
     inputs:
+      app:
+        description: Fly app name for WaCalls (the Emysa app, not the site)
+        required: true
       org:
         description: Fly organization slug
-        default: personal
+        default: ayodele-onasanya
 env:
-  APP: wacalls-zeeyus12
+  APP: ${{ inputs.app }}
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 jobs:
   deploy:

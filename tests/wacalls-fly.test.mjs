@@ -5,7 +5,7 @@ import {
   flyWaitForQr, flySessionDetail, startFlyCall, submitFlyOffer, flyVideoStart, flyVideoAccept, flyVideoStop, flyEndCall,
 } from '../lib/wacallsFly.js';
 
-const env = { WACALLS_FLY_URL: 'https://wacalls-zeeyus12.fly.dev/', WACALLS_FLY_API_KEY: 'k-123' };
+const env = { WACALLS_FLY_URL: 'https://wacalls.example.test/', WACALLS_FLY_API_KEY: 'k-123' };
 
 // Fake WaCalls: JSON routes by "METHOD /path" and an SSE body for /api/events.
 function fake(routes = {}, { events = [] } = {}) {
@@ -41,7 +41,7 @@ test('config: enabled only with both URL and key; URL has no trailing slash', ()
   assert.equal(flyEnabled({ WACALLS_FLY_URL: 'x' }), false);
   assert.equal(flyEnabled(env), true);
   assert.throws(() => flyConfig({}), /not configured/);
-  assert.equal(flyConfig(env).baseUrl, 'https://wacalls-zeeyus12.fly.dev');
+  assert.equal(flyConfig(env).baseUrl, 'https://wacalls.example.test');
 });
 
 test('create and delete a per-user session with the key on every request', async () => {
