@@ -4,10 +4,11 @@ on:
     inputs:
       app:
         description: Fly app name for WaCalls (the Emysa app, not the site)
+        default: wacalls
         required: true
       org:
         description: Fly organization slug
-        default: ayodele-onasanya
+        default: personal
 env:
   APP: ${{ inputs.app }}
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
