@@ -5,6 +5,7 @@ import { attemptStateForProviderStatus } from '../lib/callAttempts.js';
 import { describeSocialCallEnd } from '../lib/socialCallEnd.js';
 import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsSessionExists, wacallsPlaceAICall, wacallsHangup } from '../lib/wacallsClient.js';
 import { flyEnabled } from '../lib/wacallsFly.js';
+import { startFlyWhatsappCall, relayFlyOffer, videoStartFly, videoAcceptFly, endFlyCall } from '../lib/wacallsFlyCalls.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
 import { signalStartLink, signalLinkStatus, signalRemoveAccount, signalPlaceCall, signalHangup } from '../lib/signalClient.js';
 import { hangupPipecatSession } from '../lib/pipecatHangup.js';
@@ -76,6 +77,12 @@ export default async function handler(req, res) {
       case 'call':
       case 'place-call': return await placeCall(req, res, supabase, userId);
       case 'hangup': return await hangupSocialCall(req, res, supabase, userId);
+      case 'whatsapp-fly-call': return await flyCallStart(req, res, supabase, userId);
+      case 'whatsapp-fly-webrtc': return await flyCallOffer(req, res, supabase, userId, false);
+      case 'whatsapp-fly-renegotiate': return await flyCallOffer(req, res, supabase, userId, true);
+      case 'whatsapp-fly-video-start': return await flyCallVideo(req, res, supabase, userId, 'start');
+      case 'whatsapp-fly-video-accept': return await flyCallVideo(req, res, supabase, userId, 'accept');
+      case 'whatsapp-fly-end': return await flyCallEnd(req, res, supabase, userId);
       default: return await status(req, res, supabase, userId);
     }
   } catch (err) {
@@ -678,6 +685,43 @@ async function signalDisconnect(req, res, supabase, userId) {
   }
   await supabase.from('signal_accounts').update({ signal_number: null, link_id: null, status: 'disconnected', last_error: null }).eq('user_id', userId);
   return res.status(200).json({ status: 'disconnected' });
+}
+
+// WhatsApp calls through WaCalls on Fly, driven by the browser media leg (wacalls-media.js).
+async function flyCallStart(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const gate = minutesGate(await minutesLeft(supabase, userId));
+  if (!gate.ok) return res.status(gate.status).json({ error: gate.error, code: gate.code });
+  const b = req.body || {};
+  const to = String(b.to || b.toNumber || '').trim();
+  const out = await startFlyWhatsappCall({
+    supabase, userId, to, video: b.video === true,
+    objective: b.objective || '', instructions: b.instructions || null,
+    contactId: b.contactId || null, contactName: b.contactName || null, sessionId: b.sessionId || null,
+  });
+  return res.status(200).json(out);
+}
+
+async function flyCallOffer(req, res, supabase, userId, renegotiate) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const b = req.body || {};
+  const out = await relayFlyOffer({ supabase, userId, callId: b.callId, sdpOffer: b.sdp_offer, renegotiate });
+  return res.status(200).json(out);
+}
+
+async function flyCallVideo(req, res, supabase, userId, which) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const callId = (req.body || {}).callId;
+  const out = which === 'start'
+    ? await videoStartFly({ supabase, userId, callId })
+    : await videoAcceptFly({ supabase, userId, callId });
+  return res.status(200).json(out);
+}
+
+async function flyCallEnd(req, res, supabase, userId) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const out = await endFlyCall({ supabase, userId, callId: (req.body || {}).callId });
+  return res.status(200).json(out);
 }
 
 async function placeCall(req, res, supabase, userId) {
