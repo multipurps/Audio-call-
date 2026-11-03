@@ -459,7 +459,7 @@ const TELEGRAM_RECONNECT_MESSAGE = 'Telegram session expired - please reconnect 
 async function telegramStart(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { phone } = req.body || {};
-  if (!phone || !phone.trim()) return res.status(400).json({ error: 'phone required (with country code, e.g. +234...)' });
+  if (!phone || !phone.trim()) return res.status(400).json({ error: 'phone required (with country code, e.g. +14155552671)' });
   const started = await mpRelayRequest(`/sessions/${userId}/start`, { method: 'POST', body: { phone: phone.trim() } });
   // The relay still holds a live Telegram login for this user (the app only
   // thought it was signed out): no code is needed, just mark it connected.
@@ -569,7 +569,7 @@ async function whatsappStart(req, res, supabase, userId) {
 async function whatsappStartWithPhone(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const phone = (req.body?.phone || '').trim();
-  if (!phone) return res.status(400).json({ error: 'phone required (with country code, e.g. +234...)' });
+  if (!phone) return res.status(400).json({ error: 'phone required (with country code, e.g. +14155552671)' });
   const { data: row } = await supabase.from('whatsapp_accounts').select('wacalls_session_id').eq('user_id', userId).maybeSingle();
   let sessionId = row?.wacalls_session_id;
   if (sessionId) {

@@ -245,7 +245,7 @@ async function resolveTelegramPeer(client, toUsernameOrPhone) {
   // resolved; there's no way to guess which country it belongs to).
   const digits = raw.replace(/[\s()-]/g, '');
   if (!/^\+[1-9]\d{7,14}$/.test(digits)) {
-    const err = new Error("That number needs a country code to call on Telegram — e.g. +2349038226059, not 09038226059.");
+    const err = new Error("That number needs a country code to call on Telegram — e.g. +14155552671, not 4155552671.");
     err.statusCode = 400;
     throw err;
   }
@@ -524,7 +524,7 @@ async function whatsappStart(userId) {
 async function whatsappStartWithPhone(userId, phone) {
   const digits = String(phone || '').replace(/[^\d]/g, '');
   if (!/^[1-9]\d{7,14}$/.test(digits)) {
-    const err = new Error('Enter the full number with country code, e.g. 2349038226059 (no +).');
+    const err = new Error('Enter the full number with country code, e.g. 14155552671 (no +).');
     err.statusCode = 400;
     throw err;
   }
@@ -593,7 +593,7 @@ async function whatsappCall(userId, toJidOrPhone) {
     : (() => {
         const digits = toJidOrPhone.replace(/[\s()-]/g, '');
         if (!/^\+?[1-9]\d{7,14}$/.test(digits)) {
-          const err = new Error('That doesn\'t look like a full phone number — include the country code, e.g. +2349038226059.');
+          const err = new Error('That doesn\'t look like a full phone number — include the country code, e.g. +14155552671.');
           err.statusCode = 400;
           throw err;
         }

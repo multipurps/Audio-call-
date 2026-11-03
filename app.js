@@ -12,6 +12,7 @@ import { isAppCall, callAgainPlatform, transcriptSpeakerLabel, callTalked } from
 import { userError, friendlyAccountName } from './lib/userFacing.js';
 import * as Tutorial from './lib/tutorial.js';
 import { sheet, confirmSheet, promptSheet, successSheet, errorSheet, closeAllSheets } from './lib/statusSheet.js';
+import { mountPhoneField } from './lib/phoneField.js';
 import { installOverlayStacking } from './lib/overlayStack.js';
 import { fileToWavBase64, looksLikeAudio, CLIP_MIN_SECONDS, CLIP_MAX_SECONDS } from './lib/voiceClip.js';
 import { pickFirstCallChannel, firstCallPrompt, firstCallExplainer } from './lib/firstCall.js';
@@ -58,6 +59,11 @@ supabase.auth.onAuthStateChange((_event, session) => {
 });
 
 const $ = (id) => document.getElementById(id);
+
+// Phone number fields: the country is chosen separately and always starts as the United States (never guessed).
+// Each field's .value stays the full international number, so everything that reads it is unchanged.
+['lineNumInput', 'waNumInput', 'tgNumInput', 'newContactPhone', 'telegramPhoneInput', 'whatsappPhoneInput'].forEach((id) => mountPhoneField($(id)));
+mountPhoneField($('dialNumber'), { big: true });
 
 // Referral capture: ?ref=CODE on first load gets stashed until sign-up
 // completes and there's a user to actually attach it to.
@@ -1892,7 +1898,7 @@ $('contactsAddBtn').addEventListener('click', () => {
 $('addContactBtn').addEventListener('click', async () => {
   const name = $('newContactName').value.trim();
   const phoneNumber = normalizePhone($('newContactPhone').value);
-  if (!name || !phoneNumber) { $('contactStatus').textContent = 'Enter a name and a phone number with country code.'; return; }
+  if (!name || !phoneNumber) { $('contactStatus').textContent = 'Enter a name and a phone number.'; return; }
   $('addContactBtn').disabled = true;
   $('contactStatus').textContent = 'Saving…';
   try {
@@ -2353,7 +2359,7 @@ $('dialSaveBtn').addEventListener('click', () => {
 });
 $('dialCallBtn').addEventListener('click', () => {
   const number = normalizePhone($('dialNumber').value);
-  if (!number) { $('dialStatus').textContent = 'Enter a phone number with country code. * and # are not dialable phone numbers.'; return; }
+  if (!number) { $('dialStatus').textContent = 'Enter a phone number. * and # are not dialable phone numbers.'; return; }
   const contact = matchedDialContact();
   $('keypadDialog').close();
   if (contact) openContactMethods(contact);
@@ -4547,7 +4553,7 @@ Tutorial.register(FIRST_CALL_TUTORIAL, {
     },
     {
       id: 'contact-fields', target: '#contactEditor', interactive: true,
-      text: 'Enter their name and phone number with country code, like +1 415 555 2671.',
+      text: 'Enter their name, choose their country, then type their phone number.',
       skipIf: (ctx) => tutorialHadContacts(ctx),
       onEnter: () => { tutorialEnsureTab('contacts'); $('contactEditor').open = true; },
     },
@@ -6197,7 +6203,7 @@ async function startOwnVerification(phone) {
 }
 $('lineNumSubmit').addEventListener('click', async () => {
   const phone = $('lineNumInput').value.trim();
-  if (!phone) { hint('lineNumHint', 'Enter your number with country code, e.g. +2348012345678.'); return; }
+  if (!phone) { hint('lineNumHint', 'Enter your phone number.'); return; }
   $('lineNumSubmit').disabled = true;
   hint('lineNumHint', '');
   try { await startOwnVerification(phone); } catch (err) { hint('lineNumHint', err.message); }
@@ -6219,6 +6225,7 @@ $('lineRentBtn').addEventListener('click', () => {
   const sel = $('rentCountry');
   sel.textContent = '';
   (rent.countries || []).forEach((c) => { const o = document.createElement('option'); o.value = c; o.textContent = countryName(c); sel.appendChild(o); });
+  if ([...sel.options].some((o) => o.value === 'US')) sel.value = 'US'; // United States first, always
   $('rentResults').textContent = '';
   hint('rentHint', '');
   showSetupPanel('panelRent');
@@ -6451,8 +6458,8 @@ function showProfileSetup() {
     const ph = document.createElement('option'); ph.value = ''; ph.textContent = 'Select country'; country.appendChild(ph);
     COUNTRY_CODES.map((c) => ({ c, n: countryName(c) })).sort((a, b) => a.n.localeCompare(b.n))
       .forEach(({ c, n }) => { const o = document.createElement('option'); o.value = c; o.textContent = n; country.appendChild(o); });
-    const guess = (navigator.language || '').split('-')[1]?.toUpperCase();
-    if (guess && COUNTRY_CODES.includes(guess)) country.value = guess;
+    // Always the United States to start: it is never guessed from the phone's language or region.
+    country.value = 'US';
   }
   if (!$('psName').value) $('psName').value = currentUser?.user_metadata?.full_name || currentUser?.user_metadata?.name || '';
   hint('psHint', '');

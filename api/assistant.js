@@ -742,7 +742,7 @@ async function sendMessage(req, res, supabase, userId) {
       const digitsOnly = toNumber.replace(/[\s()-]/g, '');
       if (!/^\+[1-9]\d{7,14}$/.test(digitsOnly)) {
         const who = contact?.name ? `${contact.name}'s saved number (${toNumber})` : `That number (${toNumber})`;
-        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `${who} needs a country code to call on ${channelName} — e.g. +2349038226059. Update the contact or give me the full number.`, null, msgSource));
+        newMessages.push(await insertMessage(supabase, userId, sessionId, 'assistant', `${who} needs a country code to call on ${channelName} — e.g. +14155552671. Update the contact or give me the full number.`, null, msgSource));
         return respond();
       }
       // Social calls get their own row in `calls` (not just social_calls) so
