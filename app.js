@@ -2188,6 +2188,12 @@ async function askLivePermissions() {
   try { return await navigator.mediaDevices.getUserMedia({ video: LIVE_CAM, audio: true }); } catch (_) { return null; }
 }
 const LIVE_PERMISSION_MSG = 'Allow the camera and microphone for this app in your phone settings, then try again.';
+// Live Swap's own messages can be in another language or refer to model names. Show one plain sentence instead.
+function plainLiveSwapError(message = '') {
+  const m = String(message || '');
+  if (!m || /[\u3400-\u9fff]/.test(m) || /model|resolution|quota|credit|limit/i.test(m)) return 'Live Swap is not available right now. Please try again in a little while.';
+  return m;
+}
 async function openLiveSwap({ contactName = '', stream = null } = {}) {
   const granted = stream || await askLivePermissions();
   if (!granted) return showNotice({ kind: 'error', title: 'Live video', message: LIVE_PERMISSION_MSG });
@@ -2253,7 +2259,7 @@ async function openLiveSwap({ contactName = '', stream = null } = {}) {
     setVcStatus('Live', true);
   } catch (e) {
     const cameraDenied = /NotAllowed|Permission|denied/i.test(String(e && (e.name || e.message)));
-    fail('Live Swap', cameraDenied ? 'Allow camera access to use Live Swap.' : (e.message || 'Live Swap could not start.'));
+    fail('Live Swap', cameraDenied ? 'Allow camera access to use Live Swap.' : plainLiveSwapError(e.message));
   }
 }
 // Stops Live Swap: closes Xmax, revokes its temporary key, and stops the camera.

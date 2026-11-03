@@ -51,3 +51,15 @@ test('a 404 from WaCalls marks the account disconnected and fails with the plain
   await assert.rejects(startFlyWhatsappCall({ supabase, userId: 'u1', to: '1', deps }), (e) => e.statusCode === 404 && /not connected anymore/.test(e.message));
   assert.deepEqual(updates.find((u) => u.table === 'whatsapp_accounts'), { table: 'whatsapp_accounts', v: { wacalls_session_id: null, status: 'disconnected', display_name: null } });
 });
+
+test('a 404 that is not "no such session" keeps the WhatsApp link', async () => {
+  const updates = [];
+  const supabase = fakeSupabase({ wacalls_session_id: 'sess-ok', status: 'connected' }, updates);
+  const deps = {
+    createCallRecord: async () => ({ id: 'db-new' }),
+    startFlyCall: async () => { throw Object.assign(new Error('WaCalls POST /api/sessions/sess-ok/calls failed (HTTP 404): not found'), { statusCode: 404 }); },
+    markCallFailed: async () => {},
+  };
+  await assert.rejects(startFlyWhatsappCall({ supabase, userId: 'u1', to: '1', deps }), (e) => e.statusCode === 404);
+  assert.equal(updates.some((u) => u.table === 'whatsapp_accounts'), false);
+});
