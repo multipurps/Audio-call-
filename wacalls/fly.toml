@@ -1,4 +1,4 @@
-app = "wacalls"
+app = "emysa-wacalls"
 primary_region = "lhr"
 
 [build]

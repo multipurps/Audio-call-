@@ -4,7 +4,7 @@ on:
     inputs:
       app:
         description: Fly app name for WaCalls (the Emysa app, not the site)
-        default: wacalls
+        default: emysa-wacalls
         required: true
       org:
         description: Fly organization slug
