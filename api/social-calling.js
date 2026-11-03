@@ -5,7 +5,7 @@ import { attemptStateForProviderStatus } from '../lib/callAttempts.js';
 import { describeSocialCallEnd } from '../lib/socialCallEnd.js';
 import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsSessionExists, wacallsPlaceAICall, wacallsHangup } from '../lib/wacallsClient.js';
 import { flyEnabled } from '../lib/wacallsFly.js';
-import { startFlyWhatsappCall, relayFlyOffer, videoStartFly, videoAcceptFly, endFlyCall } from '../lib/wacallsFlyCalls.js';
+import { startFlyWhatsappCall, relayFlyOffer, videoStartFly, videoAcceptFly, endFlyCall, stateFlyCall } from '../lib/wacallsFlyCalls.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
 import { signalStartLink, signalLinkStatus, signalRemoveAccount, signalPlaceCall, signalHangup } from '../lib/signalClient.js';
 import { hangupPipecatSession } from '../lib/pipecatHangup.js';
@@ -83,6 +83,7 @@ export default async function handler(req, res) {
       case 'whatsapp-fly-video-start': return await flyCallVideo(req, res, supabase, userId, 'start');
       case 'whatsapp-fly-video-accept': return await flyCallVideo(req, res, supabase, userId, 'accept');
       case 'whatsapp-fly-end': return await flyCallEnd(req, res, supabase, userId);
+      case 'whatsapp-fly-state': return await flyCallState(req, res, supabase, userId);
       default: return await status(req, res, supabase, userId);
     }
   } catch (err) {
@@ -722,6 +723,12 @@ async function flyCallEnd(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const out = await endFlyCall({ supabase, userId, callId: (req.body || {}).callId });
   return res.status(200).json(out);
+}
+
+async function flyCallState(req, res, supabase, userId) {
+  if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).json({ error: 'GET only' });
+  const callId = req.query?.callId || (req.body || {}).callId;
+  return res.status(200).json(await stateFlyCall({ supabase, userId, callId }));
 }
 
 async function placeCall(req, res, supabase, userId) {

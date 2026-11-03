@@ -5764,6 +5764,23 @@ $('socialCallingBtn').addEventListener('click', () => { openSheet('sheet-social-
 // ---------- Connected accounts (Telegram / WhatsApp) ----------
 let whatsappLinking = false;
 let signalLinking = false;
+// WhatsApp calls through WaCalls on Fly (wacalls-call.js). Every WaCalls step runs on the server;
+// this only asks the server, with this person's sign-in.
+async function flyCallApi(action, { method = 'POST', body, query } = {}) {
+  const qs = new URLSearchParams({ action, ...(query || {}) });
+  const resp = await authedFetch('/api/social-calling?' + qs.toString(), {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.error || ('Request failed (' + resp.status + ')'));
+  return data;
+}
+if (window.WaCallsFlyCall && window.WaCallsMedia) {
+  WaCallsFlyCall.setup({ api: flyCallApi, media: WaCallsMedia, onUpdate: (u) => console.log('[whatsapp call] ' + u.phase + (u.text ? ' - ' + u.text : '')) });
+}
+
 async function loadSocialAccounts() {
   $('telegramLoginForm').classList.add('hidden');
   $('telegramOtpForm').classList.add('hidden');
