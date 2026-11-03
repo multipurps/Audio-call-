@@ -1490,7 +1490,7 @@ body::before{content:""; position:absolute; top:0; left:0; right:0; height:var(-
 #videoCallScreen .vcResize{position:absolute; right:0; bottom:0; width:30px; height:30px; cursor:nwse-resize; touch-action:none; background:linear-gradient(135deg,transparent 55%,rgba(255,255,255,.75) 55%,rgba(255,255,255,.75) 62%,transparent 62%,transparent 72%,rgba(255,255,255,.75) 72%,rgba(255,255,255,.75) 79%,transparent 79%);}
 /* Split: your picture becomes the other half, stacked on a phone, side by side when wide. */
 #videoCallScreen[data-layout="split"] .vcStage{flex-direction:column; gap:2px;}
-#videoCallScreen[data-layout="split"] .vcSelfWrap{position:static; flex:1 1 50%; width:auto; max-width:none; aspect-ratio:auto; border:0; border-radius:0; box-shadow:none; cursor:default; min-height:0;}
+#videoCallScreen[data-layout="split"] .vcSelfWrap{position:relative; flex:1 1 50%; min-height:0; aspect-ratio:auto; border:0; border-radius:0; box-shadow:none; cursor:default; width:auto !important; max-width:none !important; left:auto !important; top:auto !important; right:auto !important; bottom:auto !important;}
 #videoCallScreen[data-layout="split"] .vcResize{display:none;}
 @media (orientation:landscape){#videoCallScreen[data-layout="split"] .vcStage{flex-direction:row;}}
 #videoCallScreen .vcControls{position:relative; overflow:hidden; display:flex; justify-content:center; align-items:flex-start; gap:34px; padding:18px 0 calc(env(safe-area-inset-bottom) + 14px); background:#0b0b0c;}
@@ -1553,3 +1553,18 @@ body::before{content:""; position:absolute; top:0; left:0; right:0; height:var(-
 
 /* WhatsApp video call: the picture-in-picture shows the callee (not you), so it is not mirrored, and fits without stretching. */
 #videoCallScreen .vcSelf[data-feed="peer"]{transform:none; object-fit:contain; background:#000;}
+
+/* Video call: the callee's picture-in-picture is always there (a person icon until their video arrives),
+   and the main area shows the app's own background until the first frame plays, never a black screen. */
+#videoCallScreen .vcMainPh{position:absolute; inset:0; z-index:1; display:flex; align-items:center; justify-content:center; background:radial-gradient(120% 80% at 50% 28%, #2b2421 0%, #151212 55%, #0b0b0b 100%);}
+#videoCallScreen .vcMainPh.hidden{display:none;}
+#videoCallScreen .vcMainPhInit{width:132px; height:132px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:48px; font-weight:700; color:#f6ddd9; background:rgba(246,221,217,.1); border:1px solid rgba(246,221,217,.24); animation:vcPulse 2.2s ease-out infinite;}
+@keyframes vcPulse{0%{box-shadow:0 0 0 0 rgba(246,221,217,.26);}100%{box-shadow:0 0 0 42px rgba(246,221,217,0);}}
+@media (prefers-reduced-motion: reduce){#videoCallScreen .vcMainPhInit{animation:none;}}
+#videoCallScreen[data-layout="split"] .vcMainPh{inset:0 0 50% 0;}
+@media (orientation:landscape){#videoCallScreen[data-layout="split"] .vcMainPh{inset:0 50% 0 0;}}
+#videoCallScreen .vcPeerPh{position:absolute; inset:0; z-index:1; display:flex; align-items:center; justify-content:center; background:linear-gradient(160deg,#f8e7e3,#efcfc9); pointer-events:none;}
+#videoCallScreen .vcPeerPh.hidden{display:none;}
+#videoCallScreen .vcPeerPh svg{width:46%; height:46%; display:block;}
+#videoCallScreen .vcSelfWrap{z-index:3;}
+#videoCallScreen .vcResize{z-index:2;}

@@ -278,6 +278,7 @@
     audioCtx: null, calleeDest: null, nextPlayTime: 0, decoder: null, canvas: null, c2d: null, rotation: 0,
     reset(canvas) {
       this.canvas = canvas || null;
+      if (canvas && canvas.dataset) delete canvas.dataset.frame;
       this.c2d = this.canvas ? this.canvas.getContext('2d') : null;
     },
     ensureAudio() {
@@ -323,6 +324,8 @@
               this.c2d.rotate((-rot * Math.PI) / 180);
               this.c2d.drawImage(frame, -fw / 2, -fh / 2, fw, fh);
               this.c2d.restore();
+              const cv = this.canvas;
+              if (cv.dataset && cv.dataset.frame !== '1') { cv.dataset.frame = '1'; if (cv.dispatchEvent) cv.dispatchEvent(new Event('wacalls-frame')); }
             } catch (e) {}
             try { frame.close(); } catch (e) {}
           },

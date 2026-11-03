@@ -2139,14 +2139,22 @@ function setVcMuted(muted) {
   $('vcMuteBtn').classList.toggle('active', muted);
   $('vcMuteBtn').setAttribute('aria-pressed', String(muted));
 }
+// Every video call screen: the callee's PiP is there from the start (person icon until their video shows),
+// and the main area shows the app background until its first frame plays.
+function vcShowStage() {
+  const box = $('vcSelfWrap'); if (box) box.style.display = '';
+  const init = $('vcMainPhInit'); if (init) init.textContent = ($('vcAvatar').textContent || '?').trim() || '?';
+  $('vcMainPh')?.classList.remove('hidden');
+  $('vcPeerPh')?.classList.remove('hidden');
+}
+$('vcMain')?.addEventListener('playing', () => $('vcMainPh')?.classList.add('hidden'));
 async function openVideoCall({ contactName = '', toNumber = '', brief = '', calleeInput = null } = {}) {
   const party = callPartyLabel(contactName, toNumber);
   $('vcName').textContent = party.name;
   $('vcAvatar').textContent = party.initials;
   setVcLayout('pip'); setVcMuted(false); resetVcSelfBox();
-  // The avatar call never uses your camera or microphone. The PiP is for the callee's camera (phase 2),
-  // so it stays hidden until that exists.
-  const selfBox = $('vcSelfWrap'); if (selfBox) selfBox.style.display = 'none';
+  // The avatar call never uses your camera or microphone. The PiP is the callee's.
+  vcShowStage();
   const glow = $('vcGlowImg'); if (glow && !glow.src) glow.src = 'assets/call/call-glow.webp';
   $('videoCallScreen').classList.remove('hidden');
   setVcStatus('Starting…');
@@ -2201,7 +2209,7 @@ async function openLiveSwap({ contactName = '', stream = null } = {}) {
   $('vcName').textContent = party.name;
   $('vcAvatar').textContent = party.initials;
   setVcLayout('pip'); setVcMuted(false); resetVcSelfBox();
-  $('vcSelfWrap').style.display = 'none';
+  vcShowStage();
   $('videoCallScreen').classList.remove('hidden');
   setVcStatus('Starting…');
   const fail = (title, message) => { closeVideoCall(); showNotice({ kind: 'error', title, message }); };
@@ -2301,6 +2309,7 @@ const flyPeerCanvas = (() => {
   document.body.appendChild(c);
   return c;
 })();
+flyPeerCanvas.addEventListener('wacalls-frame', () => $('vcPeerPh')?.classList.add('hidden'));
 const FLY_CALL_BRIEF = 'You are on a live WhatsApp video call. Keep to what the person on the line says; respond naturally.';
 function flyOutgoingAudio() {
   if (!flyCall) return null;
@@ -2374,7 +2383,7 @@ async function startFlyVideoCall({ contactName = '', toNumber = '', mode = 'avat
   $('vcName').textContent = party.name;
   $('vcAvatar').textContent = party.initials;
   setVcLayout('pip'); setVcMuted(false); resetVcSelfBox();
-  $('vcSelfWrap').style.display = 'none';
+  vcShowStage();
   $('videoCallScreen').classList.remove('hidden');
   setVcStatus('Calling…');
   try {
@@ -2397,12 +2406,12 @@ async function startFlyVideoCall({ contactName = '', toNumber = '', mode = 'avat
 $('vcMuteBtn')?.addEventListener('click', () => setVcMuted(!vcMuted));
 $('vcLayoutBtn')?.addEventListener('click', () => setVcLayout($('videoCallScreen').dataset.layout === 'split' ? 'pip' : 'split'));
 
-// Your picture in PiP: drag it anywhere on the stage, drag the corner to resize it (3:4), double-tap to
+// Your picture in PiP: drag it anywhere on the stage, drag the corner to resize it (3:4), tap to
 // jump between small and large. It is the other half of the screen in split, so it is fixed there.
 const VC_SELF_MIN = 90;
 function resetVcSelfBox() {
   const box = $('vcSelfWrap'); if (!box) return;
-  box.style.width = ''; box.style.left = ''; box.style.top = ''; box.style.right = '12px'; box.style.bottom = '12px';
+  box.style.width = ''; box.style.maxWidth = ''; box.style.left = ''; box.style.top = ''; box.style.right = '12px'; box.style.bottom = '12px';
 }
 function vcSelfGeometry() {
   const stage = $('vcStage').getBoundingClientRect(), box = $('vcSelfWrap').getBoundingClientRect();
@@ -2413,26 +2422,25 @@ function placeVcSelf(left, top, width) {
   const maxW = Math.min(stage.width - 16, (stage.height - 16) * 0.75);
   const w = Math.min(Math.max(width, VC_SELF_MIN), maxW), h = w * 4 / 3;
   box.style.width = `${w}px`;
+  box.style.maxWidth = 'none';
   box.style.left = `${Math.min(Math.max(left, 8), stage.width - w - 8)}px`;
   box.style.top = `${Math.min(Math.max(top, 8), stage.height - h - 8)}px`;
   box.style.right = 'auto'; box.style.bottom = 'auto';
 }
 (() => {
   const box = $('vcSelfWrap'), handle = $('vcResize'); if (!box || !handle) return;
-  let drag = null, lastTap = 0;
+  let drag = null;
   const pip = () => $('videoCallScreen').dataset.layout === 'pip';
+  const togglePip = () => { // tap: small <-> large
+    const { stage, box: r } = vcSelfGeometry();
+    const big = r.width < stage.width * 0.5;
+    placeVcSelf(r.left - stage.left, r.top - stage.top, big ? stage.width * 0.62 : stage.width * 0.3);
+  };
   box.addEventListener('pointerdown', (e) => {
     if (!pip() || e.target === handle) return;
     const { stage, box: r } = vcSelfGeometry();
-    drag = { kind: 'move', dx: e.clientX - r.left, dy: e.clientY - r.top, w: r.width, stageLeft: stage.left, stageTop: stage.top };
+    drag = { kind: 'move', dx: e.clientX - r.left, dy: e.clientY - r.top, w: r.width, stageLeft: stage.left, stageTop: stage.top, sx: e.clientX, sy: e.clientY, t: Date.now(), moved: false };
     box.setPointerCapture(e.pointerId); box.style.cursor = 'grabbing';
-    const now = Date.now();
-    if (now - lastTap < 300) { // double-tap: toggle small / large
-      const big = r.width < stage.width * 0.5;
-      placeVcSelf(r.left - stage.left, r.top - stage.top, big ? stage.width * 0.62 : stage.width * 0.3);
-      drag = null;
-    }
-    lastTap = now;
   });
   handle.addEventListener('pointerdown', (e) => {
     if (!pip()) return;
@@ -2443,10 +2451,16 @@ function placeVcSelf(left, top, width) {
   });
   const move = (e) => {
     if (!drag) return;
-    if (drag.kind === 'move') placeVcSelf(e.clientX - drag.stageLeft - drag.dx, e.clientY - drag.stageTop - drag.dy, drag.w);
+    if (drag.kind === 'move') {
+      if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 8) drag.moved = true;
+      if (drag.moved) placeVcSelf(e.clientX - drag.stageLeft - drag.dx, e.clientY - drag.stageTop - drag.dy, drag.w);
+    }
     else placeVcSelf(drag.left, drag.top, drag.w + (e.clientX - drag.startX));
   };
-  const end = () => { drag = null; box.style.cursor = ''; };
+  const end = (e) => {
+    const d = drag; drag = null; box.style.cursor = '';
+    if (e && e.type === 'pointerup' && d && d.kind === 'move' && !d.moved && Date.now() - d.t < 450) togglePip();
+  };
   [box, handle].forEach((el) => { el.addEventListener('pointermove', move); el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end); });
 })();
 function chooseVideoCallType() {
