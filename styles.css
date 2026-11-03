@@ -103,7 +103,7 @@ img{display:block; max-width:100%;}
   display:none;
 }
 .screen.active{display:block;}
-.screen.fadeIn{animation:screenFadeIn 0.25s ease both;}
+.screen.fadeIn{animation:screenFadeIn 0.25s ease backwards;} /* not "both": a kept transform makes position:fixed children (the keypad button) scroll with the list */
 @keyframes screenFadeIn{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);}}
 
 /* Bare icons — no pill/capsule background around each item. */

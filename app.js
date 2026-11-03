@@ -2180,7 +2180,16 @@ async function openVideoCall({ contactName = '', toNumber = '', brief = '', call
 // the reference. No briefing and no microphone. The output fills the call screen. It is shown only on your
 // screen until WhatsApp video (phase 2) carries it to the callee.
 let vcXmax = null; // { realtime, timer, cam, camVid, tk }
-async function openLiveSwap({ contactName = '' } = {}) {
+// Camera and microphone are asked for BEFORE any call screen opens, so the permission prompt never
+// appears on top of a half-open call. Null when the person says no.
+const LIVE_CAM = { facingMode: 'user', width: { ideal: 576 }, height: { ideal: 1024 }, frameRate: { ideal: 24, max: 24 } };
+async function askLivePermissions() {
+  try { return await navigator.mediaDevices.getUserMedia({ video: LIVE_CAM, audio: true }); } catch (_) { return null; }
+}
+const LIVE_PERMISSION_MSG = 'Allow the camera and microphone for this app in your phone settings, then try again.';
+async function openLiveSwap({ contactName = '', stream = null } = {}) {
+  const granted = stream || await askLivePermissions();
+  if (!granted) return showNotice({ kind: 'error', title: 'Live video', message: LIVE_PERMISSION_MSG });
   const party = callPartyLabel(contactName, '');
   $('vcName').textContent = party.name;
   $('vcAvatar').textContent = party.initials;
@@ -2203,16 +2212,14 @@ async function openLiveSwap({ contactName = '' } = {}) {
     const realtime = client.createRealtimeManager(new X.RealtimeConfiguration({ model: X.RealtimeModel.x2_1_1_preview_us }));
     vcXmax = { realtime, tk: tk.temporaryApiKey, timer: null, cam: null, camVid: null };
     // Camera only. Flipped left/right through a canvas, so the output keeps the true left/right.
-    const cam = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 1024 }, height: { ideal: 1920 }, frameRate: { ideal: 30, max: 30 } },
-    });
+    const cam = granted;
     vcXmax.cam = cam;
     const camVid = document.createElement('video');
     camVid.muted = true; camVid.playsInline = true; camVid.srcObject = cam;
     await camVid.play().catch(() => {});
     vcXmax.camVid = camVid;
     const canvas = document.createElement('canvas');
-    canvas.width = 1024; canvas.height = 1920;
+    canvas.width = 576; canvas.height = 1024;
     const cctx = canvas.getContext('2d');
     const drawFlipped = () => {
       const vw = camVid.videoWidth, vh = camVid.videoHeight;
@@ -2224,11 +2231,11 @@ async function openLiveSwap({ contactName = '' } = {}) {
       cctx.restore();
     };
     drawFlipped();
-    vcXmax.timer = setInterval(drawFlipped, 1000 / 30);
-    const flippedTrack = canvas.captureStream(30).getVideoTracks()[0];
+    vcXmax.timer = setInterval(drawFlipped, 1000 / 24);
+    const flippedTrack = canvas.captureStream(24).getVideoTracks()[0];
     const localStream = await realtime.createExternalVideoStream({
       videoTrack: flippedTrack,
-      videoFormat: new X.RealtimeVideoFormat({ width: 1024, height: 1920, fps: 30 }),
+      videoFormat: new X.RealtimeVideoFormat({ width: 576, height: 1024, fps: 24 }),
     });
     setVcStatus('Opening connection…');
     const remote = await realtime.startGeneration({
@@ -2344,7 +2351,13 @@ async function startFlyVideoCall({ contactName = '', toNumber = '', mode = 'avat
   // The tap is what lets the browser start audio: the callee's voice stream is created here.
   const calleeIn = WaCallsMedia.prepareAudio();
   if (calleeIn) calleeIn.getAudioTracks().forEach((t) => { t.enabled = false; });
-  flyCall = { mode, greetTimer: null, avatarReady: false, connectedAt: 0, micStream: null, greeted: false };
+  // Live: the camera and microphone are granted before the call screen opens.
+  let liveStream = null;
+  if (mode === 'live') {
+    liveStream = await askLivePermissions();
+    if (!liveStream) return showNotice({ kind: 'error', title: 'Live video', message: LIVE_PERMISSION_MSG });
+  }
+  flyCall = { mode, greetTimer: null, avatarReady: false, connectedAt: 0, micStream: liveStream, greeted: false };
   WaCallsMedia.configure({
     remoteCanvas: flyPeerCanvas,
     getAvatarVideo: () => $('vcMain'),
@@ -2362,8 +2375,7 @@ async function startFlyVideoCall({ contactName = '', toNumber = '', mode = 'avat
     await WaCallsFlyCall.start({ to: toNumber, name: party.name, video: true });
     if (!flyCall) return; // the call was closed while it was starting
     if (mode === 'live') {
-      flyCall.micStream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
-      await openLiveSwap({ contactName: party.name });
+      await openLiveSwap({ contactName: party.name, stream: liveStream });
     } else {
       await openVideoCall({ contactName: party.name, toNumber, brief: FLY_CALL_BRIEF, calleeInput: calleeIn });
     }
