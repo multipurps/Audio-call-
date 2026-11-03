@@ -13,18 +13,26 @@ function fakeDb({ whatsapp_accounts = [], calls = [] } = {}) {
       const q = {
         select() { return q; },
         eq(col, val) { filters.push([col, val]); return q; },
+        in(col, vals) { filters.push([col, (r) => vals.includes(r)]); return q; },
         maybeSingle() {
-          const hit = rows.find((r) => filters.every(([c, v]) => r[c] === v));
+          const hit = rows.find((r) => filters.every(([c, v]) => (typeof v === 'function' ? v(r[c]) : r[c] === v)));
           return Promise.resolve({ data: hit || null, error: null });
         },
         update(patch) {
-          return {
-            eq(col, val) {
-              rows.filter((r) => r[col] === val).forEach((r) => Object.assign(r, patch));
-              updates.push({ table, patch, id: val });
-              return { neq: () => Promise.resolve({ error: null }), then: (ok) => Promise.resolve({ error: null }).then(ok) };
-            },
+          const conds = [];
+          const applyNow = () => {
+            const hits = rows.filter((r) => conds.every(([col, test]) => test(r[col])));
+            hits.forEach((r) => Object.assign(r, patch));
+            updates.push({ table, patch, count: hits.length });
+            return { error: null };
           };
+          const u = {
+            eq(col, val) { conds.push([col, (x) => x === val]); return u; },
+            in(col, vals) { conds.push([col, (x) => vals.includes(x)]); return u; },
+            neq(col, val) { conds.push([col, (x) => x !== val]); return u; },
+            then(ok) { return Promise.resolve(applyNow()).then(ok); },
+          };
+          return u;
         },
       };
       return q;
@@ -135,4 +143,37 @@ test('summary: a failure in the summary never fails the end of the call', async 
   const out = await endFlyCall({ supabase: db, userId: 'u1', callId: 'c-9', deps });
   assert.equal(out.ok, true);
   assert.equal(out.summary, 'error');
+});
+
+test('busy: WaCalls says an old call is still live, so it is cleared and the start is retried once', async () => {
+  const calls = [{ id: 'old', user_id: 'u1', platform: 'whatsapp', platform_call_id: 'c-old', status: 'ringing' }];
+  const db = fakeDb({ whatsapp_accounts: [linked], calls });
+  let starts = 0, cleared = 0;
+  const deps = {
+    createCallRecord: async () => ({ id: 'db-new' }),
+    startFlyCall: async () => {
+      starts++;
+      if (starts === 1) throw Object.assign(new Error('operator already on a call'), { statusCode: 409 });
+      return { callId: 'c-new' };
+    },
+    flyClearCalls: async () => { cleared++; return { cleared: 1 }; },
+    markCallPlaced: async () => {},
+  };
+  const out = await startFlyWhatsappCall({ supabase: db, userId: 'u1', to: '1', deps });
+  assert.equal(out.callId, 'c-new');
+  assert.equal(starts, 2);
+  assert.equal(cleared, 1);
+  assert.equal(calls[0].status, 'canceled', 'the old live row is closed');
+});
+
+test('busy: a different WaCalls error is not retried', async () => {
+  const db = fakeDb({ whatsapp_accounts: [linked] });
+  let starts = 0;
+  const deps = {
+    createCallRecord: async () => ({ id: 'db-new' }),
+    startFlyCall: async () => { starts++; throw Object.assign(new Error('max calls reached'), { statusCode: 429 }); },
+    markCallFailed: async () => {},
+  };
+  await assert.rejects(startFlyWhatsappCall({ supabase: db, userId: 'u1', to: '1', deps }), /max calls/);
+  assert.equal(starts, 1);
 });

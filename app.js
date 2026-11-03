@@ -327,6 +327,8 @@ async function ensureNotificationsEnabled({ fromTap = false } = {}) {
 async function enterApp(session) {
   currentSession = session;
   currentUser = session.user;
+  // Preload Connected accounts so the sheet opens with the data already there.
+  loadSocialAccounts().catch(() => {});
   if (TRAINER_URL && !window.__trainerGateShown) { window.__trainerGateShown = true; setTimeout(showTrainerGate, 900); }
   // This Supabase project may be shared with other apps of yours — mark this
   // user as belonging to Audio Call so the admin's user list can filter to
@@ -5923,7 +5925,7 @@ function renderTelegramStatus(tg) {
     statusEl.textContent = `Connected as ${friendlyAccountName(tg.displayName, 'Telegram user')}`;
     subEl.textContent = tg.phoneLast4 ? `Ending in ${tg.phoneLast4}` : '';
     btn.textContent = 'Disconnect';
-    btn.onclick = async () => { await authedFetch('/api/social-calling?action=telegram-disconnect', { method: 'POST' }); loadSocialAccounts(); };
+    btn.onclick = async () => { const r = await authedFetch('/api/social-calling?action=telegram-disconnect', { method: 'POST' }); if (r.ok) successSheet('Telegram unlinked.', 'Account unlinked'); loadSocialAccounts(); };
   } else {
     statusEl.textContent = 'Not connected';
     subEl.textContent = tg?.error || '';
@@ -5940,7 +5942,7 @@ function renderWhatsappStatus(wa) {
     statusEl.textContent = `Connected as ${friendlyAccountName(wa.displayName, 'WhatsApp user')}`;
     subEl.textContent = '';
     btn.textContent = 'Disconnect';
-    btn.onclick = async () => { await authedFetch('/api/social-calling?action=whatsapp-disconnect', { method: 'POST' }); loadSocialAccounts(); };
+    btn.onclick = async () => { const r = await authedFetch('/api/social-calling?action=whatsapp-disconnect', { method: 'POST' }); if (r.ok) successSheet('WhatsApp unlinked.', 'Account unlinked'); loadSocialAccounts(); };
   } else {
     statusEl.textContent = 'Not connected';
     subEl.textContent = wa?.error || '';
@@ -6012,7 +6014,7 @@ $('telegramVerifyBtn').addEventListener('click', async () => {
       return;
     }
     $('telegramOtpForm').classList.add('hidden');
-    loadSocialAccounts();
+    successSheet('Your Telegram account is linked.', 'Telegram linked'); loadSocialAccounts();
   } catch (err) {
     $('telegramLoginError').textContent = err.message;
   } finally {
@@ -6047,7 +6049,7 @@ function watchWhatsappStatus() {
       clearInterval(whatsappPollTimer);
       whatsappLinking = false;
       $('whatsappQrWrap').classList.add('hidden');
-      loadSocialAccounts();
+      successSheet('Your WhatsApp account is linked. Calls can now go through it.', 'WhatsApp linked'); loadSocialAccounts();
     }
   }, 3000);
 }
@@ -6073,7 +6075,7 @@ async function startWhatsappLink() {
     if (!resp.ok) throw new Error(data.error || 'Could not start WhatsApp link');
     $('whatsappLoginError').textContent = '';
     if (data.qr) $('whatsappQrImg').src = data.qr;
-    if (data.status === 'connected') { whatsappLinking = false; $('whatsappQrWrap').classList.add('hidden'); loadSocialAccounts(); return; }
+    if (data.status === 'connected') { whatsappLinking = false; $('whatsappQrWrap').classList.add('hidden'); successSheet('Your WhatsApp account is linked. Calls can now go through it.', 'WhatsApp linked'); loadSocialAccounts(); return; }
     watchWhatsappStatus();
   } catch (err) {
     $('whatsappLoginError').textContent = err.message;
@@ -6092,7 +6094,7 @@ function renderSignalStatus(sg) {
     subEl.textContent = sg.phoneLast4 ? `Ending in ${sg.phoneLast4}` : '';
     btn.textContent = 'Disconnect';
     btn.onclick = async () => {
-      await authedFetch('/api/social-calling?action=signal-disconnect', { method: 'POST' });
+      const r = await authedFetch('/api/social-calling?action=signal-disconnect', { method: 'POST' }); if (r.ok) successSheet('Signal unlinked.', 'Account unlinked');
       subEl.textContent = '';
       loadSocialAccounts();
     };
@@ -6117,7 +6119,7 @@ function watchSignalStatus() {
     try {
       const r = await authedFetch('/api/social-calling?action=signal-status');
       const d = await r.json();
-      if (d.status === 'connected') { stopSignalLinking(); loadSocialAccounts(); return; }
+      if (d.status === 'connected') { stopSignalLinking(); successSheet('Your Signal account is linked.', 'Signal linked'); loadSocialAccounts(); return; }
       if (d.status === 'expired' || d.status === 'failed' || d.status === 'error' || d.status === 'disconnected') {
         stopSignalLinking();
         $('signalLoginError').textContent = d.status === 'failed' ? 'Linking failed. Tap Connect to try again.' : 'The code expired. Tap Connect to get a new one.';
@@ -6141,7 +6143,7 @@ async function startSignalLink() {
     const resp = await authedFetch('/api/social-calling?action=signal-start', { method: 'POST' });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || 'Could not start Signal link');
-    if (data.status === 'connected') { stopSignalLinking(); loadSocialAccounts(); return; }
+    if (data.status === 'connected') { stopSignalLinking(); successSheet('Your Signal account is linked.', 'Signal linked'); loadSocialAccounts(); return; }
     $('signalLoginError').textContent = '';
     $('signalQrImg').src = data.qr;
     watchSignalStatus();
@@ -6174,7 +6176,7 @@ $('whatsappPhoneSubmitBtn').addEventListener('click', async () => {
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || 'Could not get a pairing code');
-    if (data.status === 'connected') { $('whatsappQrWrap').classList.add('hidden'); loadSocialAccounts(); return; }
+    if (data.status === 'connected') { $('whatsappQrWrap').classList.add('hidden'); successSheet('Your WhatsApp account is linked. Calls can now go through it.', 'WhatsApp linked'); loadSocialAccounts(); return; }
     if (data.pairingCode) showWhatsappPairingCode(data.pairingCode);
     watchWhatsappStatus();
   } catch (err) {
