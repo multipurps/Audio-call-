@@ -10,3 +10,4 @@ playwright-report/
 .pytest_cache/
 __pycache__/
 
+!wacalls/client/package-lock.json
