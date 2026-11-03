@@ -816,6 +816,7 @@ async function resumeActiveCallIfAny() {
       .channel(`user-calls-${currentUser.id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'calls', filter: `user_id=eq.${currentUser.id}` }, (payload) => {
         const c = payload?.new;
+        if (videoCallOnScreen()) return; // the WhatsApp video call writes its own row: it must not open the audio screen
         if (c && ['queued', 'ringing', 'in_progress', 'in-progress'].includes(c.status)) {
           trackActiveCall(c.id, c.to_number, c.contact_name);
           if ($('callScreen').classList.contains('hidden') && !assistantCallOpen) {
@@ -2182,7 +2183,7 @@ async function openVideoCall({ contactName = '', toNumber = '', brief = '', call
 let vcXmax = null; // { realtime, timer, cam, camVid, tk }
 // Camera and microphone are asked for BEFORE any call screen opens, so the permission prompt never
 // appears on top of a half-open call. Null when the person says no.
-const LIVE_CAM = { facingMode: 'user', width: { ideal: 576 }, height: { ideal: 1024 }, frameRate: { ideal: 24, max: 24 } };
+const LIVE_CAM = { facingMode: 'user', width: { ideal: 1024 }, height: { ideal: 1920 }, frameRate: { ideal: 15, max: 15 } };
 async function askLivePermissions() {
   try { return await navigator.mediaDevices.getUserMedia({ video: LIVE_CAM, audio: true }); } catch (_) { return null; }
 }
@@ -2219,7 +2220,7 @@ async function openLiveSwap({ contactName = '', stream = null } = {}) {
     await camVid.play().catch(() => {});
     vcXmax.camVid = camVid;
     const canvas = document.createElement('canvas');
-    canvas.width = 576; canvas.height = 1024;
+    canvas.width = 1024; canvas.height = 1920;
     const cctx = canvas.getContext('2d');
     const drawFlipped = () => {
       const vw = camVid.videoWidth, vh = camVid.videoHeight;
@@ -2231,11 +2232,11 @@ async function openLiveSwap({ contactName = '', stream = null } = {}) {
       cctx.restore();
     };
     drawFlipped();
-    vcXmax.timer = setInterval(drawFlipped, 1000 / 24);
-    const flippedTrack = canvas.captureStream(24).getVideoTracks()[0];
+    vcXmax.timer = setInterval(drawFlipped, 1000 / 15);
+    const flippedTrack = canvas.captureStream(15).getVideoTracks()[0];
     const localStream = await realtime.createExternalVideoStream({
       videoTrack: flippedTrack,
-      videoFormat: new X.RealtimeVideoFormat({ width: 576, height: 1024, fps: 24 }),
+      videoFormat: new X.RealtimeVideoFormat({ width: 1024, height: 1920, fps: 15 }),
     });
     setVcStatus('Opening connection…');
     const remote = await realtime.startGeneration({
@@ -2662,7 +2663,10 @@ function applyCallStatusUpdate(callRow) {
 }
 let callEndShownFor = null;
 
+// True while a video call (WhatsApp video or Live/Avatar) owns the screen.
+function videoCallOnScreen() { return Boolean(flyCall) || !document.getElementById('videoCallScreen').classList.contains('hidden'); }
 function openCallScreen(callId, toNumber, contactName) {
+  if (videoCallOnScreen()) return; // a video call never shows the audio call screen
   window.callWakeLock?.start();
   const isSameCall = activeCallScreenId === callId && !$('callScreen').classList.contains('hidden');
   activeCallScreenId = callId;
