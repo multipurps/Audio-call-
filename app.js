@@ -2072,11 +2072,19 @@ function updateCallPlanAction(plan, node) {
 let contactCallTarget = null;
 function openContactMethods(contact, anchorEl) {
   contactCallTarget = contact;
+  // Video calls go to WhatsApp only, so there is no line to pick: straight to Live or Avatar.
+  if (contactPickMode === 'video') { startVideoOnWhatsApp(contact); return; }
   $('contactCallTitle').textContent = contact.name;
   $('contactCallNumber').textContent = contact.phone_number;
   const dialog = $('contactCallDialog');
   dialog.showModal();
   positionActionSheet(dialog, anchorEl);
+}
+async function startVideoOnWhatsApp(contact) {
+  contactPickMode = null;
+  const mode = await chooseVideoCallType();
+  if (!mode) return;
+  startFlyVideoCall({ contactName: contact.name, toNumber: contact.phone_number, mode });
 }
 function positionActionSheet(dialog, anchorEl) {
   if (!anchorEl) { dialog.style.top = ''; dialog.style.left = ''; dialog.style.transform = ''; return; }

@@ -82,8 +82,8 @@ test('start: a WaCalls refusal marks the row failed with the real reason and ret
     startFlyCall: async () => { throw Object.assign(new Error('operator already on a call'), { statusCode: 409 }); },
     markCallFailed: async (_s, id, reason) => { failedWith = { id, reason }; },
   };
-  await assert.rejects(startFlyWhatsappCall({ supabase: db, userId: 'u1', to: '1', deps }), /operator already on a call/);
-  assert.deepEqual(failedWith, { id: 'db-new', reason: 'operator already on a call' });
+  await assert.rejects(startFlyWhatsappCall({ supabase: db, userId: 'u1', to: '1', deps }), /Another WhatsApp call is still open/);
+  assert.deepEqual(failedWith, { id: 'db-new', reason: 'Another WhatsApp call is still open. Wait a moment, then try again.' });
 });
 
 test('offer: only the owner can relay an SDP offer; the answer comes back under the app’s name', async () => {
@@ -174,6 +174,6 @@ test('busy: a different WaCalls error is not retried', async () => {
     startFlyCall: async () => { starts++; throw Object.assign(new Error('max calls reached'), { statusCode: 429 }); },
     markCallFailed: async () => {},
   };
-  await assert.rejects(startFlyWhatsappCall({ supabase: db, userId: 'u1', to: '1', deps }), /max calls/);
+  await assert.rejects(startFlyWhatsappCall({ supabase: db, userId: 'u1', to: '1', deps }), (e) => e.statusCode === 429 && /could not start/.test(e.message));
   assert.equal(starts, 1);
 });
