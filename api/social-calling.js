@@ -3,7 +3,8 @@ import { minutesLeft, minutesGate } from '../lib/billing.js';
 import { resolveWhatsappStatus } from '../lib/whatsappStatus.js';
 import { attemptStateForProviderStatus } from '../lib/callAttempts.js';
 import { describeSocialCallEnd } from '../lib/socialCallEnd.js';
-import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsPlaceAICall, wacallsHangup } from '../lib/wacallsClient.js';
+import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsSessionExists, wacallsPlaceAICall, wacallsHangup } from '../lib/wacallsClient.js';
+import { flyEnabled } from '../lib/wacallsFly.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
 import { signalStartLink, signalLinkStatus, signalRemoveAccount, signalPlaceCall, signalHangup } from '../lib/signalClient.js';
 import { hangupPipecatSession } from '../lib/pipecatHangup.js';
@@ -571,20 +572,22 @@ async function whatsappStartWithPhone(req, res, supabase, userId) {
   const phone = (req.body?.phone || '').trim();
   if (!phone) return res.status(400).json({ error: 'phone required (with country code, e.g. +14155552671)' });
   const { data: row } = await supabase.from('whatsapp_accounts').select('wacalls_session_id').eq('user_id', userId).maybeSingle();
-  let sessionId = row?.wacalls_session_id;
-  if (sessionId) {
-    try {
-      await wacallsDetail(userId, sessionId);
-    } catch (err) {
-      if (err.statusCode !== 404) throw err;
-      sessionId = null; // stale - relay has no memory of this id, mint a fresh one below
-    }
-  }
-  let detail;
-  if (!sessionId) {
+  let sessionId = row?.wacalls_session_id || null;
+  // A stale id (WaCalls no longer has the session) is replaced by a fresh one below.
+  if (sessionId && !(await wacallsSessionExists(userId, sessionId))) sessionId = null;
+  const fresh = !sessionId;
+  if (fresh) {
     const created = await wacallsCreateSession(userId, `user-${userId}`, phone);
     sessionId = created.id;
     await supabase.from('whatsapp_accounts').upsert({ user_id: userId, wacalls_session_id: sessionId, status: 'pending_qr' }, { onConflict: 'user_id' });
+  }
+  // Fly returns the code from the pairing call itself, and a session check never starts QR pairing.
+  if (flyEnabled()) {
+    const paired = await wacallsPairWithCode(userId, sessionId, phone);
+    return res.status(200).json({ status: 'pending_code', pairingCode: paired?.code || null });
+  }
+  let detail;
+  if (fresh) {
     detail = await wacallsDetail(userId, sessionId);
   } else {
     await wacallsPairWithCode(userId, sessionId, phone);
