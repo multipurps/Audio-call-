@@ -46,7 +46,7 @@ test('decideNext: pickup opens media once; ended finishes; silence past the limi
   assert.equal(C.decideNext({ flyState: 'ringing', mediaOpen: false, ringedMs: 90000 }), 'no-answer');
 });
 
-test('flow: ring, pick up, media opens exactly once, remote end finishes without a second hang-up', async () => {
+test('flow: ring, pick up, media opens exactly once, remote end saves the call once', async () => {
   const C = load();
   const { api, calls } = fakeApi(['ringing', 'active', 'active', 'ended']);
   const media = fakeMedia();
@@ -57,7 +57,7 @@ test('flow: ring, pick up, media opens exactly once, remote end finishes without
   assert.equal(media.opened[0].callId, 'c-9');
   assert.equal(media.opened[0].video, true);
   assert.equal(C.state().phase, 'ended');
-  assert.equal(calls.filter((c) => c.action === 'whatsapp-fly-end').length, 0, 'the far side ended it, so no end request');
+  assert.equal(calls.filter((c) => c.action === 'whatsapp-fly-end').length, 1, 'one end request, so the conversation is saved even when the far side ended the call');
   assert.ok(media.closed >= 1);
 });
 

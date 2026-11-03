@@ -275,7 +275,7 @@
 
   // Plays the callee's voice and draws the callee's video (decoded H.264) onto the remote canvas.
   const PeerPlayout = {
-    audioCtx: null, nextPlayTime: 0, decoder: null, canvas: null, c2d: null, rotation: 0,
+    audioCtx: null, calleeDest: null, nextPlayTime: 0, decoder: null, canvas: null, c2d: null, rotation: 0,
     reset(canvas) {
       this.canvas = canvas || null;
       this.c2d = this.canvas ? this.canvas.getContext('2d') : null;
@@ -284,6 +284,8 @@
       if (!this.audioCtx) {
         this.audioCtx = new (root.AudioContext || root.webkitAudioContext)({ sampleRate: 16000 });
         this.nextPlayTime = 0;
+        // The callee's voice also goes here, as a MediaStream the avatar can listen to.
+        this.calleeDest = this.audioCtx.createMediaStreamDestination();
       }
       if (this.audioCtx.state === 'suspended') this.audioCtx.resume().catch(() => {});
       return this.audioCtx;
@@ -296,6 +298,7 @@
         const src = ctx.createBufferSource();
         src.buffer = buf;
         src.connect(ctx.destination);
+        if (this.calleeDest) src.connect(this.calleeDest);
         // Back to back with a small lead so frame gaps do not click; resync if we fell behind.
         const now = ctx.currentTime;
         if (this.nextPlayTime < now) this.nextPlayTime = now + 0.06;
@@ -341,9 +344,17 @@
       this.rotation = 0;
       if (this.decoder) { try { this.decoder.close(); } catch (e) {} this.decoder = null; }
       if (this.audioCtx) { try { this.audioCtx.close(); } catch (e) {} this.audioCtx = null; }
+      this.calleeDest = null;
       this.nextPlayTime = 0;
     },
   };
 
-  root.WaCallsMedia = { configure: (n) => Leg.configure(n), open: (o) => Leg.open(o), leg: Leg, close: () => Leg.close(), setMuted: (m) => Leg.setMuted(m), upgradeToVideo: () => Leg.upgradeToVideo(), keyframeBurst: () => Leg.keyframeBurst(), supported: () => Leg.supported() };
+  // Browsers only start audio from a tap, so the page calls this from the tap that starts the call.
+  // Returns the callee's voice as a MediaStream (for the avatar's input).
+  function prepareAudio() {
+    PeerPlayout.ensureAudio();
+    return PeerPlayout.calleeDest ? PeerPlayout.calleeDest.stream : null;
+  }
+
+  root.WaCallsMedia = { prepareAudio, calleeStream: () => (PeerPlayout.calleeDest ? PeerPlayout.calleeDest.stream : null), configure: (n) => Leg.configure(n), open: (o) => Leg.open(o), leg: Leg, close: () => Leg.close(), setMuted: (m) => Leg.setMuted(m), upgradeToVideo: () => Leg.upgradeToVideo(), keyframeBurst: () => Leg.keyframeBurst(), supported: () => Leg.supported() };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

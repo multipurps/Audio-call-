@@ -29,11 +29,13 @@
     ringedMs: 0,
     mediaOpen: false,
     onUpdate: () => {},
+    getTranscript: () => [],
 
-    setup({ api, media, onUpdate }) {
+    setup({ api, media, onUpdate, getTranscript }) {
       this.api = api;
       this.media = media || root.WaCallsMedia;
       this.onUpdate = onUpdate || (() => {});
+      this.getTranscript = getTranscript || (() => []);
     },
 
     async start({ to, name = '', video = false }) {
@@ -62,7 +64,7 @@
       }
       const action = decideNext({ flyState: fly.state, mediaOpen: this.mediaOpen, ringedMs: this.ringedMs });
       if (action === 'open-media') return this.openMedia();
-      if (action === 'finish-ended') return this.finish('The call ended.');
+      if (action === 'finish-ended') return this.end('The call ended.');
       if (action === 'no-answer') return this.end('No one picked up.');
     },
 
@@ -89,25 +91,19 @@
       }
     },
 
-    // Hangs up on WaCalls and in the browser. Safe to call more than once.
+    // Ends the call once, for both sides: closes the media, asks WaCalls to hang up (a call that already
+    // ended there is fine), and saves the conversation so the summary can be made. The transcript is read
+    // first, before anything is torn down.
     async end(reason = 'The call ended.') {
       if (this.phase === 'ending' || this.phase === 'ended' || this.phase === 'idle') return;
+      const transcript = (() => { try { return this.getTranscript() || []; } catch (e) { return []; } })();
       this.phase = 'ending';
       clearInterval(this.timer);
       this.timer = null;
       try { this.media.close(); } catch (e) {}
       if (this.callId) {
-        try { await this.api('whatsapp-fly-end', { method: 'POST', body: { callId: this.callId } }); } catch (e) {}
+        try { await this.api('whatsapp-fly-end', { method: 'POST', body: { callId: this.callId, transcript } }); } catch (e) {}
       }
-      this.phase = 'ended';
-      this.mediaOpen = false;
-      this.onUpdate({ phase: 'ended', text: reason });
-    },
-
-    finish(reason) {
-      clearInterval(this.timer);
-      this.timer = null;
-      try { this.media.close(); } catch (e) {}
       this.phase = 'ended';
       this.mediaOpen = false;
       this.onUpdate({ phase: 'ended', text: reason });

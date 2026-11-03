@@ -721,7 +721,8 @@ async function flyCallVideo(req, res, supabase, userId, which) {
 
 async function flyCallEnd(req, res, supabase, userId) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const out = await endFlyCall({ supabase, userId, callId: (req.body || {}).callId });
+  const body = req.body || {};
+  const out = await endFlyCall({ supabase, userId, callId: body.callId, transcript: body.transcript });
   return res.status(200).json(out);
 }
 

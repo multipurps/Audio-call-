@@ -1550,3 +1550,6 @@ body::before{content:""; position:absolute; top:0; left:0; right:0; height:var(-
 .cpDial{flex:none; color:var(--muted); font-size:16px;}
 .cpEmpty{padding:34px 20px; text-align:center; color:var(--muted);}
 @media (prefers-reduced-motion: reduce){ .cpSheet, .cpBackdrop, .pfField{transition:none;} }
+
+/* WhatsApp video call: the picture-in-picture shows the callee (not you), so it is not mirrored, and fits without stretching. */
+#videoCallScreen .vcSelf[data-feed="peer"]{transform:none; object-fit:contain; background:#000;}

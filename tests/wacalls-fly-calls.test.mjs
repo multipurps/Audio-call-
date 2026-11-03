@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveOwnedFlyCall, startFlyWhatsappCall, relayFlyOffer, endFlyCall } from '../lib/wacallsFlyCalls.js';
+import { resolveOwnedFlyCall, startFlyWhatsappCall, relayFlyOffer, endFlyCall, sanitizeTranscript } from '../lib/wacallsFlyCalls.js';
 
 // Minimal fake of the Supabase query builder used here: rows per table, eq filters, maybeSingle, update.
 function fakeDb({ whatsapp_accounts = [], calls = [] } = {}) {
@@ -22,7 +22,7 @@ function fakeDb({ whatsapp_accounts = [], calls = [] } = {}) {
             eq(col, val) {
               rows.filter((r) => r[col] === val).forEach((r) => Object.assign(r, patch));
               updates.push({ table, patch, id: val });
-              return Promise.resolve({ error: null });
+              return { neq: () => Promise.resolve({ error: null }), then: (ok) => Promise.resolve({ error: null }).then(ok) };
             },
           };
         },
@@ -89,13 +89,50 @@ test('offer: only the owner can relay an SDP offer; the answer comes back under 
 test('end: WaCalls already not knowing the call counts as ended; the row is closed', async () => {
   const calls = [{ ...ownCall }];
   const db = fakeDb({ whatsapp_accounts: [linked], calls });
-  const deps = { flyEndCall: async () => { throw Object.assign(new Error('gone'), { statusCode: 404 }); } };
-  assert.deepEqual(await endFlyCall({ supabase: db, userId: 'u1', callId: 'c-9', deps }), { ok: true });
+  const deps = { flyEndCall: async () => { throw Object.assign(new Error('gone'), { statusCode: 404 }); }, maybeGenerateCallSummary: async () => ({ status: 'noop' }) };
+  assert.equal((await endFlyCall({ supabase: db, userId: 'u1', callId: 'c-9', deps })).ok, true);
   assert.equal(calls[0].status, 'completed');
 });
 
 test('end: a real WaCalls error is not swallowed', async () => {
   const db = fakeDb({ whatsapp_accounts: [linked], calls: [{ ...ownCall }] });
-  const deps = { flyEndCall: async () => { throw Object.assign(new Error('boom'), { statusCode: 500 }); } };
+  const deps = { flyEndCall: async () => { throw Object.assign(new Error('boom'), { statusCode: 500 }); }, maybeGenerateCallSummary: async () => ({ status: 'noop' }) };
   await assert.rejects(endFlyCall({ supabase: db, userId: 'u1', callId: 'c-9', deps }), /boom/);
+});
+
+test('transcript: only text turns, bounded, roles normalised', () => {
+  const t = sanitizeTranscript([{ role: 'user', content: '  hi  ' }, { role: 'system', content: 'x' }, { role: 'assistant', content: '' }, { text: 'legacy' }, { role: 'user', content: 'y'.repeat(5000) }]);
+  assert.equal(t.length, 4, 'empty turns dropped, the legacy text field kept');
+  assert.equal(t[0].content, 'hi');
+  assert.equal(t[1].role, 'assistant', 'anything but user is assistant');
+  assert.equal(t[2].content, 'legacy');
+  assert.equal(t[3].content.length, 2000);
+  assert.deepEqual(sanitizeTranscript('nope'), []);
+});
+
+test('summary: a finished call with a summary is posted to the chat once', async () => {
+  const calls = [{ id: 'db-1', user_id: 'u1', platform: 'whatsapp', platform_call_id: 'c-9', session_id: 'chat-1', status: 'ringing' }];
+  const db = fakeDb({ whatsapp_accounts: [linked], calls });
+  const posted = [];
+  const deps = {
+    flyEndCall: async () => ({}),
+    maybeGenerateCallSummary: async () => ({ status: 'completed', summary: 'Talked about the trip.', summaryJson: { outcome: 'Agreed' } }),
+    postCallChatMessage: async (_s, args) => { posted.push(args); return { posted: true }; },
+    formatSummaryForChat: (text, j) => text + ' / ' + j.outcome,
+  };
+  const out = await endFlyCall({ supabase: db, userId: 'u1', callId: 'c-9', transcript: [{ role: 'user', content: 'hello' }], deps });
+  assert.equal(out.summary, 'posted');
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].text, 'Talked about the trip. / Agreed');
+  assert.equal(posted[0].sessionId, 'chat-1');
+  assert.equal(calls[0].status, 'completed');
+  assert.equal(calls[0].transcript.length, 1);
+});
+
+test('summary: a failure in the summary never fails the end of the call', async () => {
+  const db = fakeDb({ whatsapp_accounts: [linked], calls: [{ ...ownCall }] });
+  const deps = { flyEndCall: async () => ({}), maybeGenerateCallSummary: async () => { throw new Error('model down'); } };
+  const out = await endFlyCall({ supabase: db, userId: 'u1', callId: 'c-9', deps });
+  assert.equal(out.ok, true);
+  assert.equal(out.summary, 'error');
 });

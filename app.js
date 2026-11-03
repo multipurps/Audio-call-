@@ -2101,7 +2101,10 @@ document.querySelectorAll('[data-method]').forEach((btn) => btn.addEventListener
     mode = await chooseVideoCallType();
     if (!mode) return;
   }
+  const wasVideo = contactPickMode === 'video';
   contactPickMode = null;
+  // WhatsApp video goes through WaCalls on Fly: the avatar or Live Swap goes to the callee.
+  if (wasVideo && btn.dataset.method === 'whatsapp') { startFlyVideoCall({ contactName: contact.name, toNumber: contact.phone_number, mode }); return; }
   // Live Swap needs no brief: it opens on the tap.
   if (mode === 'live') { openLiveSwap({ contactName: contact.name }); return; }
   beginPreCall(target, btn.dataset.method, mode);
@@ -2109,6 +2112,7 @@ document.querySelectorAll('[data-method]').forEach((btn) => btn.addEventListener
 // ---- Video call screen: the Anam avatar speaks on the call; your camera is the PiP (or the other half of
 // the split). Keys never reach the browser: the server mints the session.
 let vcClient = null, vcSelfStream = null, vcMuted = false, vcSilentCtx = null;
+let vcTranscript = [], vcAvatarAudio = null, flyCall = null;
 function setVcStatus(text, live = false) { const el = $('vcStatus'); if (el) el.textContent = text; $('videoCallScreen').classList.toggle('live', live); }
 function setVcLayout(layout) {
   const screen = $('videoCallScreen');
@@ -2124,7 +2128,7 @@ function setVcMuted(muted) {
   $('vcMuteBtn').classList.toggle('active', muted);
   $('vcMuteBtn').setAttribute('aria-pressed', String(muted));
 }
-async function openVideoCall({ contactName = '', toNumber = '', brief = '' } = {}) {
+async function openVideoCall({ contactName = '', toNumber = '', brief = '', calleeInput = null } = {}) {
   const party = callPartyLabel(contactName, toNumber);
   $('vcName').textContent = party.name;
   $('vcAvatar').textContent = party.initials;
@@ -2146,10 +2150,15 @@ async function openVideoCall({ contactName = '', toNumber = '', brief = '' } = {
     if (!resp.ok || !data.sessionToken) throw new Error(data.error || 'The avatar could not start.');
     const sdk = await import('https://esm.sh/@anam-ai/js-sdk@4.27.1');
     vcClient = sdk.createClient(data.sessionToken);
+    vcTranscript = []; vcAvatarAudio = null;
+    // The avatar's own voice (sent to the callee) and the conversation so far (kept for the call summary).
+    try { vcClient.addListener(sdk.AnamEvent.AUDIO_STREAM_STARTED, (st) => { vcAvatarAudio = st || null; }); } catch (_) {}
+    try { vcClient.addListener(sdk.AnamEvent.MESSAGE_HISTORY_UPDATED, (msgs) => { vcTranscript = (msgs || []).map((m) => ({ role: m.role, content: m.content })); }); } catch (_) {}
     // The callee talks, not you: the avatar gets silence as its input (no microphone prompt, nothing of yours is sent).
+    // On a WhatsApp call the avatar's input is the callee's voice, held silent until they pick up.
     const AC = window.AudioContext || window.webkitAudioContext;
-    vcSilentCtx = new AC();
-    const silentIn = vcSilentCtx.createMediaStreamDestination().stream;
+    vcSilentCtx = calleeInput ? null : new AC();
+    const silentIn = calleeInput || vcSilentCtx.createMediaStreamDestination().stream;
     await vcClient.streamToVideoElement('vcMain', silentIn);
     try { vcClient.muteInputAudio(); } catch (_) {}
     setVcStatus('Live', true);
@@ -2241,6 +2250,15 @@ function stopLiveSwap() {
   }).catch(() => {});
 }
 function closeVideoCall() {
+  if (flyCall) {
+    const f = flyCall; flyCall = null;
+    clearTimeout(f.greetTimer);
+    // The end reads the conversation first, so it is saved before the avatar goes.
+    WaCallsFlyCall.end('You ended the call.');
+  }
+  vcAvatarAudio = null;
+  const self = $('vcSelf'); if (self) { self.srcObject = null; delete self.dataset.feed; }
+  const selfWrap = $('vcSelfWrap'); if (selfWrap) selfWrap.style.display = 'none';
   try { if (vcClient) vcClient.stopStreaming(); } catch (_) {}
   vcClient = null;
   stopLiveSwap();
@@ -2249,6 +2267,104 @@ function closeVideoCall() {
   $('videoCallScreen').classList.add('hidden');
 }
 $('vcHangBtn')?.addEventListener('click', closeVideoCall);
+// ---- WhatsApp video call through WaCalls on Fly. The avatar (or your Live Swap picture) goes to the callee,
+// and the callee's video comes back into the picture-in-picture. The avatar listens to the callee from the
+// start but stays silent until they pick up, then greets them 5 seconds later (WaCallsMediaCore.greetingWaitMs).
+// Every WaCalls step runs on the server; the media runs in the page (wacalls-media.js).
+const flyPeerCanvas = (() => {
+  const c = document.createElement('canvas');
+  c.style.cssText = 'position:absolute;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none;';
+  document.body.appendChild(c);
+  return c;
+})();
+const FLY_CALL_BRIEF = 'You are on a live WhatsApp video call. Keep to what the person on the line says; respond naturally.';
+function flyOutgoingAudio() {
+  if (!flyCall) return null;
+  return flyCall.mode === 'live' ? flyCall.micStream : vcAvatarAudio;
+}
+function flyAttachCalleeVideo() {
+  const self = $('vcSelf');
+  if (!self || typeof flyPeerCanvas.captureStream !== 'function') return;
+  try {
+    self.srcObject = flyPeerCanvas.captureStream(15);
+    self.dataset.feed = 'peer'; // shown as the other person: no mirror
+    self.muted = true;
+    self.play?.().catch(() => {});
+    $('vcSelfWrap').style.display = '';
+  } catch (e) { console.warn('[whatsapp call] could not show the callee video:', e.message); }
+}
+function flyOnConnected() {
+  if (!flyCall) return;
+  flyCall.connectedAt = Date.now();
+  flyAttachCalleeVideo();
+  if (flyCall.mode === 'live') return; // Live Swap has no greeting
+  const wait = WaCallsMediaCore.greetingWaitMs(flyCall.connectedAt, Date.now());
+  flyCall.greetTimer = setTimeout(flyGreet, wait);
+}
+function flyGreet() {
+  if (!flyCall || flyCall.greeted) return;
+  if (!flyCall.avatarReady || !vcClient) { flyCall.greetTimer = setTimeout(flyGreet, 500); return; }
+  flyCall.greeted = true;
+  const calleeIn = WaCallsMedia.calleeStream();
+  if (calleeIn) calleeIn.getAudioTracks().forEach((t) => { t.enabled = true; }); // the avatar starts hearing the callee
+  try { vcClient.unmuteInputAudio(); } catch (_) {}
+  const who = $('vcName')?.textContent || 'the person you called';
+  try {
+    vcClient.sendUserMessage('[CALL EVENT] The call has just connected and ' + who + ' is on the line. Say a short, natural hello in your own words, then follow their lead.');
+  } catch (e) { console.warn('[whatsapp call] could not send the call-connected event:', e.message); }
+}
+function flyOnUpdate(u) {
+  console.log('[whatsapp call] ' + u.phase + (u.text ? ' - ' + u.text : ''));
+  if (!flyCall) return;
+  if (u.phase === 'ringing') setVcStatus(u.text || 'Calling…');
+  if (u.phase === 'connected') { setVcStatus('Connected', true); flyOnConnected(); }
+  if (u.phase === 'ended') {
+    const reason = u.text || 'The call ended.';
+    closeVideoCall();
+    showNotice({ kind: 'info', title: 'WhatsApp video', message: reason });
+  }
+}
+async function startFlyVideoCall({ contactName = '', toNumber = '', mode = 'avatar' } = {}) {
+  if (!window.WaCallsFlyCall || !window.WaCallsMedia || !window.WaCallsMediaCore) {
+    return showNotice({ kind: 'error', title: 'WhatsApp video', message: 'The call engine did not load. Reload the app and try again.' });
+  }
+  if (!toNumber) return showNotice({ kind: 'error', title: 'WhatsApp video', message: 'This contact has no WhatsApp number.' });
+  if (flyCall) return;
+  const party = callPartyLabel(contactName, toNumber);
+  // The tap is what lets the browser start audio: the callee's voice stream is created here.
+  const calleeIn = WaCallsMedia.prepareAudio();
+  if (calleeIn) calleeIn.getAudioTracks().forEach((t) => { t.enabled = false; });
+  flyCall = { mode, greetTimer: null, avatarReady: false, connectedAt: 0, micStream: null, greeted: false };
+  WaCallsMedia.configure({
+    remoteCanvas: flyPeerCanvas,
+    getAvatarVideo: () => $('vcMain'),
+    getOutgoingAudio: () => flyOutgoingAudio(),
+  });
+  WaCallsFlyCall.setup({ api: flyCallApi, media: WaCallsMedia, getTranscript: () => vcTranscript, onUpdate: flyOnUpdate });
+  $('vcName').textContent = party.name;
+  $('vcAvatar').textContent = party.initials;
+  setVcLayout('pip'); setVcMuted(false); resetVcSelfBox();
+  $('vcSelfWrap').style.display = 'none';
+  $('videoCallScreen').classList.remove('hidden');
+  setVcStatus('Calling…');
+  try {
+    // Ring first, so the callee's phone is ringing while the avatar starts.
+    await WaCallsFlyCall.start({ to: toNumber, name: party.name, video: true });
+    if (!flyCall) return; // the call was closed while it was starting
+    if (mode === 'live') {
+      flyCall.micStream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
+      await openLiveSwap({ contactName: party.name });
+    } else {
+      await openVideoCall({ contactName: party.name, toNumber, brief: FLY_CALL_BRIEF, calleeInput: calleeIn });
+    }
+    if (flyCall) flyCall.avatarReady = true;
+  } catch (e) {
+    const msg = e.message || 'The call could not start.';
+    closeVideoCall();
+    showNotice({ kind: 'error', title: 'WhatsApp video', message: msg });
+  }
+}
+
 $('vcMuteBtn')?.addEventListener('click', () => setVcMuted(!vcMuted));
 $('vcLayoutBtn')?.addEventListener('click', () => setVcLayout($('videoCallScreen').dataset.layout === 'split' ? 'pip' : 'split'));
 
