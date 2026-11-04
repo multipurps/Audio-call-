@@ -22,6 +22,10 @@ primary_region = "lhr"
   [[services.ports]]
     port = 10000
 
+[mounts]
+  source = "wacalls_data"
+  destination = "/app/data"
+
 [[vm]]
   cpu_kind = "shared"
   cpus = 1

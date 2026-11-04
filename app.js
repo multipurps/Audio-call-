@@ -2225,7 +2225,7 @@ async function openLiveSwap({ contactName = '', stream = null } = {}) {
     const X = await import('https://esm.sh/@xmaxai/web-sdk@1.0.10');
     const client = new X.XmaxClient(new X.XmaxConfiguration({ apiKey: tk.temporaryApiKey, environment: X.XmaxEnvironment.global }));
     const realtime = client.createRealtimeManager(new X.RealtimeConfiguration({ model: X.RealtimeModel.x2_1_1_preview_us }));
-    vcXmax = { realtime, tk: tk.temporaryApiKey, timer: null, cam: null, camVid: null };
+    vcXmax = { realtime, tk: tk.temporaryApiKey, timer: null, cam: null, camVid: null, canvasTrack: null };
     // Camera only. Flipped left/right through a canvas, so the output keeps the true left/right.
     const cam = granted;
     vcXmax.cam = cam;
@@ -2248,6 +2248,7 @@ async function openLiveSwap({ contactName = '', stream = null } = {}) {
     drawFlipped();
     vcXmax.timer = setInterval(drawFlipped, 1000 / 15);
     const flippedTrack = canvas.captureStream(15).getVideoTracks()[0];
+    vcXmax.canvasTrack = flippedTrack;
     const localStream = await realtime.createExternalVideoStream({
       videoTrack: flippedTrack,
       videoFormat: new X.RealtimeVideoFormat({ width: 1024, height: 1920, fps: 15 }),
@@ -2276,6 +2277,9 @@ function stopLiveSwap() {
   const x = vcXmax; vcXmax = null;
   if (x.timer) clearInterval(x.timer);
   try { x.realtime && x.realtime.close(); } catch (_) {}
+  // Release everything the live path started: the flipped canvas feed, the hidden camera element, and the camera.
+  if (x.canvasTrack) x.canvasTrack.stop();
+  if (x.camVid) x.camVid.srcObject = null;
   if (x.cam) x.cam.getTracks().forEach((t) => t.stop());
   if (x.tk) authedFetch('/api/assistant?action=xmax-token', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'revoke', temporaryApiKey: x.tk }),

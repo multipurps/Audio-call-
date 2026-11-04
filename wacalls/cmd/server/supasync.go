@@ -50,6 +50,12 @@ func restoreFromSupabase(dbPath string, log *slog.Logger) bool {
 		log.Warn("supabase sync disabled (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set) - sessions will NOT survive a restart")
 		return false
 	}
+	// The local session database on the persistent volume is the live copy. Keep it: a restore would
+	// overwrite it with the last Supabase backup on every restart. Backups still run, so the copy stays safe.
+	if st, err := os.Stat(dbPath); err == nil && st.Size() > 0 {
+		log.Info("using the local session database on the persistent volume, skipping restore", "bytes", st.Size())
+		return true
+	}
 	// make sure the private bucket exists
 	if r, err := supaReq("POST", base+"/storage/v1/bucket", key,
 		[]byte(`{"id":"`+supaBucket+`","name":"`+supaBucket+`","public":false}`),

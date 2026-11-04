@@ -40,6 +40,16 @@ jobs:
             WACALLS_API_KEY="${{ secrets.WACALLS_API_KEY }}" \
             SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
             SUPABASE_SERVICE_ROLE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+      - name: Persistent volume for the WhatsApp session file
+        # The session database lives here. Without a volume it is wiped on every restart or deploy,
+        # which logs WhatsApp out of WaCalls. Create the volume once; later runs skip it.
+        run: |
+          COUNT=$(flyctl volumes list -a "$APP" --json | jq '[.[]|select(.Name=="wacalls_data")]|length')
+          if [ "$COUNT" -gt 0 ]; then
+            echo "Volume wacalls_data already exists, skipping"
+          else
+            flyctl volumes create wacalls_data --region lhr --size 1 --yes -a "$APP"
+          fi
       - name: Deploy
         working-directory: wacalls
         run: flyctl deploy --remote-only --ha=false -a "$APP"
