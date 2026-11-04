@@ -331,7 +331,8 @@
           },
           error: () => { this.decoder = null; },
         });
-        this.decoder.configure({ codec: 'avc1.42E01F', optimizeForLatency: true });
+        // WaCalls sends Annex-B. Say so: the default H.264 format differs between browsers (Safari is the one to watch).
+        this.decoder.configure({ codec: 'avc1.42E01F', optimizeForLatency: true, avc: { format: 'annexb' } });
       } catch (e) { this.decoder = null; }
       return this.decoder;
     },
