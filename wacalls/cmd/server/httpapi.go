@@ -33,6 +33,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/video/start", s.handleVideoStart)
 	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/video/stop", s.handleVideoStop)
 	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/video/accept", s.handleVideoAccept)
+	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/ai", s.handleAttachAI)
 	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/accept", s.handleAccept)
 	mux.HandleFunc("POST /api/sessions/{sid}/calls/{id}/reject", s.handleReject)
 	mux.HandleFunc("DELETE /api/sessions/{sid}/calls/{id}", s.handleEndCall)

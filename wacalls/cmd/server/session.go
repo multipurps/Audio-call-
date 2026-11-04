@@ -123,6 +123,11 @@ func (s *Session) wireCall(c *meowcaller.Call, direction string, extraOnEnd func
 		}
 		endOnce.Do(func() {
 			s.log.Info("call ended", "call_id", callID, "reason", reason)
+			if ac, ok := s.reg.get(callID); ok {
+				if a := ac.ai.Load(); a != nil {
+					a.reportEnd(reason)
+				}
+			}
 			s.removeCall(callID)
 			s.mgr.broker.endCall(callID, reason)
 			if extraOnEnd != nil {
@@ -131,6 +136,11 @@ func (s *Session) wireCall(c *meowcaller.Call, direction string, extraOnEnd func
 		})
 	}
 	c.OnStateChange(func(p meowcaller.CallPhase) {
+		if ac, ok := s.reg.get(callID); ok {
+			if a := ac.ai.Load(); a != nil {
+				a.onPhase(p)
+			}
+		}
 		if p == meowcaller.CallPhaseEnded {
 			time.AfterFunc(600*time.Millisecond, func() { finish("ended") })
 			return
@@ -312,6 +322,9 @@ func (s *Session) removeCall(callID string) {
 	}
 	if ac.bridge != nil {
 		ac.bridge.Close()
+	}
+	if a := ac.ai.Load(); a != nil {
+		a.bridge.Close()
 	}
 }
 

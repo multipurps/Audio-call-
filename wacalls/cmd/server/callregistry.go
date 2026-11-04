@@ -19,6 +19,10 @@ type activeCall struct {
 	// bridge WebRTC do browser existir — ver o comentário em
 	// orientedVideoSink (bridge.go) pra saber por quê.
 	videoSink *orientedVideoSink
+	// ai is the Pipecat assistant on this call (nil for a call that is not AI). Set by attachAI.
+	ai atomic.Pointer[aiAttachment]
+	// connectedAt is when the callee answered, in unix ms (0 until then).
+	connectedAt atomic.Int64
 	// held controla se bridge.OnBrowserPCM empurra pra src — enquanto true,
 	// os quadros do microfone do browser são descartados em vez de
 	// bufferizados, então o unhold retoma ao vivo em vez de tocar um atraso

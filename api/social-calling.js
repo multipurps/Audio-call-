@@ -3,9 +3,9 @@ import { minutesLeft, minutesGate } from '../lib/billing.js';
 import { resolveWhatsappStatus } from '../lib/whatsappStatus.js';
 import { attemptStateForProviderStatus } from '../lib/callAttempts.js';
 import { describeSocialCallEnd } from '../lib/socialCallEnd.js';
-import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsSessionExists, wacallsPlaceAICall, wacallsHangup } from '../lib/wacallsClient.js';
-import { flyEnabled } from '../lib/wacallsFly.js';
-import { startFlyWhatsappCall, relayFlyOffer, videoStartFly, videoAcceptFly, endFlyCall, stateFlyCall } from '../lib/wacallsFlyCalls.js';
+import { wacallsCreateSession, wacallsDetail, wacallsPairWithCode, wacallsDelete, wacallsSessionExists, wacallsPlaceAICall, wacallsHangup, resolveAIVoiceId } from '../lib/wacallsClient.js';
+import { flyEnabled, flyEndCall } from '../lib/wacallsFly.js';
+import { startFlyWhatsappCall, relayFlyOffer, videoStartFly, videoAcceptFly, endFlyCall, stateFlyCall, placeFlyAICall } from '../lib/wacallsFlyCalls.js';
 import { mpRelayRequest } from '../lib/mpRelayClient.js';
 import { signalStartLink, signalLinkStatus, signalRemoveAccount, signalPlaceCall, signalHangup } from '../lib/signalClient.js';
 import { hangupPipecatSession } from '../lib/pipecatHangup.js';
@@ -774,6 +774,14 @@ async function placeCall(req, res, supabase, userId) {
       mood,
     });
     try {
+      if (flyEnabled()) {
+        // WaCalls on Fly places the call and connects the assistant (audio and video both run on it).
+        const voiceId = await resolveAIVoiceId(userId);
+        const placed = await placeFlyAICall({
+          supabase, userId, dbCallId: dbCall.id, to, contactName: contactName || null, appSessionId: effectiveSession, voiceId,
+        });
+        return res.status(200).json({ callId: placed.callId, dbCallId: dbCall.id, platformCallId: placed.callId, aiAttached: true });
+      }
       // Place the call AND attach the assistant. This used to only start the
       // call, so a WhatsApp call placed through this action rang, was
       // answered, and nothing ever spoke.
@@ -942,7 +950,10 @@ async function hangupSocialCall(req, res, supabase, userId) {
       .eq('user_id', userId)
       .maybeSingle();
     if (waRow?.wacalls_session_id) {
-      await wacallsHangup(userId, waRow.wacalls_session_id, effectivePlatformCallId).catch((err) => {
+      const hangup = flyEnabled()
+        ? flyEndCall({ sid: waRow.wacalls_session_id, callId: effectivePlatformCallId, clientId: userId })
+        : wacallsHangup(userId, waRow.wacalls_session_id, effectivePlatformCallId);
+      await hangup.catch((err) => {
         console.error('[social-hangup] whatsapp relay hangup failed', { callId, error: err?.message });
       });
     }

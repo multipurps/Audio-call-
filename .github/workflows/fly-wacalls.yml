@@ -39,7 +39,11 @@ jobs:
             WACALLS_PUBLIC_IP="$IP" \
             WACALLS_API_KEY="${{ secrets.WACALLS_API_KEY }}" \
             SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
-            SUPABASE_SERVICE_ROLE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+            SUPABASE_SERVICE_ROLE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            ASSISTANT_BRIDGE_URL="${{ secrets.ASSISTANT_BRIDGE_URL }}" \
+            ASSISTANT_BRIDGE_SECRET="${{ secrets.ASSISTANT_BRIDGE_SECRET }}" \
+            APP_API_URL="${{ secrets.APP_API_URL }}" \
+            RELAY_CALLBACK_SECRET="${{ secrets.RELAY_CALLBACK_SECRET }}"
       - name: Persistent volume for the WhatsApp session file
         # The session database lives here. Without a volume it is wiped on every restart or deploy,
         # which logs WhatsApp out of WaCalls. Create the volume once; later runs skip it.
