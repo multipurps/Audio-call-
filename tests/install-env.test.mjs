@@ -19,8 +19,8 @@ const CASES = [
   ['Android Firefox', 'Mozilla/5.0 (Android 15; Mobile; rv:140.0) Gecko/140.0 Firefox/140.0', 5, 'android-firefox', 'Android phone · Android 15 · Firefox 140'],
   ['Android Edge', 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36 EdgA/140.0.0.0', 5, 'lib', 'Android phone · Android 15 · Edge 140'],
   ['Android Facebook web view', 'Mozilla/5.0 (Linux; Android 14; SM-A546B; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.0.0 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/450.0.0]', 5, 'inapp', 'Android phone · Android 14 · Facebook in-app browser'],
-  ['Windows Chrome', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36', 0, 'lib', 'Windows PC · Windows · Chrome 140'],
-  ['Windows Edge', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0', 0, 'lib', 'Windows PC · Windows · Edge 140'],
+  ['Windows Chrome', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36', 0, 'desktop-chromium', 'Windows PC · Windows · Chrome 140'],
+  ['Windows Edge', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0', 0, 'desktop-chromium', 'Windows PC · Windows · Edge 140'],
   ['Windows Firefox', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0', 0, 'desktop-unsupported', 'Windows PC · Windows · Firefox 140'],
 ];
 

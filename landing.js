@@ -198,6 +198,14 @@ async function install() {
     try { await prompt.prompt(); await prompt.userChoice; return; }
     catch { /* Use the guide below if the native event is no longer valid. */ }
   }
+  // 1b) Desktop Chrome, Edge, Brave and Opera without the native event: the library's Install button would do nothing,
+  // so give accurate steps, and check that the install file (manifest) actually loads, which is the usual reason.
+  if (E && env.route === 'desktop-chromium') {
+    const mf = await fetch('/manifest.json', { cache: 'no-store' }).then((r) => ({ ok: r.ok && /json/i.test(r.headers.get('content-type') || ''), status: r.status })).catch(() => ({ ok: false, status: 'no connection' }));
+    const g = E.guide(env);
+    return showFallback(g.intro, g.title, { chip: env.chip, steps: g.steps, copy: g.copy,
+      note: mf.ok ? g.note : `Emysa's install file did not load (HTTP ${mf.status}), so the browser will not offer install until that is fixed.` });
+  }
   // 2) The illustrated library guide, only for combinations it covers correctly (Safari, Chrome on iOS, Chrome and Edge on Android, desktop Chrome, Edge and Safari).
   if (env.route === 'lib' && installGuide) {
     try {

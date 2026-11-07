@@ -71,11 +71,12 @@
     const osApprox = ios && browser !== 'Safari' && osVersion >= 18;
 
     // route: 'lib' = the add-to-homescreen library has accurate, illustrated steps for this combination.
+    // 'desktop-chromium' = Chrome, Edge, Brave, Opera on a computer: the browser's own install prompt, or our steps (the library's Install button needs that prompt and does nothing without it).
     let route = 'generic';
     if (inApp) route = 'inapp';
     else if (ios) route = browser === 'Safari' || browser === 'Chrome' ? 'lib' : browser === 'Firefox' ? 'ios-firefox' : browser === 'Edge' ? 'ios-edge' : 'ios-other';
     else if (android) route = browser === 'Chrome' || browser === 'Brave' || browser === 'Edge' ? 'lib' : browser === 'Samsung Internet' ? 'android-samsung' : browser === 'Firefox' ? 'android-firefox' : 'android-other';
-    else route = browser === 'Chrome' || browser === 'Edge' || browser === 'Brave' || browser === 'Opera' ? 'lib' : browser === 'Safari' ? 'lib' : 'desktop-unsupported';
+    else route = browser === 'Chrome' || browser === 'Edge' || browser === 'Brave' || browser === 'Opera' ? 'desktop-chromium' : browser === 'Safari' ? 'lib' : 'desktop-unsupported';
 
     const osLabel = os ? os + (osVersion ? ' ' + osVersion + (osApprox ? ' or later' : '') : '') : '';
     const browserLabel = inApp ? (inApp === 'an in-app browser' ? 'in-app browser' : inApp + ' in-app browser') : browser + (browserVersion ? ' ' + browserVersion : '');
@@ -102,6 +103,12 @@
         return { title: 'Install with Firefox', steps: ['Tap the ⋮ menu.', 'Tap Install.', 'Confirm Add to Home screen.'], copy: false };
       case 'android-other':
         return { title: `Install with ${env.browser === 'Unknown browser' ? 'your browser' : env.browser}`, steps: ['Open the browser menu.', 'Choose Install app or Add to Home screen.', 'Confirm.'], copy: true, note: 'If you don\'t see it, open this page in Chrome.' };
+      case 'desktop-chromium':
+        return { title: 'Install Emysa', intro: `${env.browser} has not handed this page its install button, so use ${env.browser}'s own install option:`,
+          steps: ['Look at the right end of the address bar for the install icon (a screen with a down arrow) and click it, then click Install.',
+            env.browser === 'Edge' ? 'Or open the \u22EF menu, choose Apps, then Install this site as an app.' : 'Or open the \u22EE menu, choose Cast, save and share, then Install page as app.',
+            'No install option? Emysa may already be installed (check chrome://apps or edge://apps). Otherwise reload with Ctrl+Shift+R and try again.'],
+          copy: false, note: 'Browsers only offer install on the main site address, not in a private window.' };
       case 'desktop-unsupported':
         return { title: 'Open Emysa in a browser that installs apps', intro: `${env.browser} on a computer can't install web apps.`, steps: ['Open this page in Chrome, Edge or Safari.', 'Chrome and Edge: click the install icon in the address bar.', 'Safari on Mac: File, then Add to Dock.'], copy: true };
       default:
