@@ -1,5 +1,4 @@
-import { guardTwilioWebhook } from '../lib/twilioSignature.js';
-import { guardTelnyxWebhook, telephonyProvider } from '../lib/telephony.js';
+import { guardWebhook } from '../lib/telephony.js';
 import { getServiceClient } from '../lib/supabaseAdmin.js';
 import { maybeGenerateCallSummary } from '../lib/callSession.js';
 import { describeCallEnd } from '../lib/callOutcome.js';
@@ -7,19 +6,19 @@ import { describeCallEnd } from '../lib/callOutcome.js';
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const callId = req.query?.callId;
-  if (telephonyProvider() === 'telnyx' ? !guardTelnyxWebhook(req, res, `call:${callId}`) : !guardTwilioWebhook(req, res)) return;
+  if (!guardWebhook(req, res, `call:${callId}`)) return;
   const supabase = getServiceClient();
 
   const { CallStatus, CallDuration, RecordingUrl, SipResponseCode, ErrorCode, AnsweredBy } = req.body || {};
   if (!callId) return res.status(400).send('missing callId');
 
   const statusMap = {
-    // `initiated` only means Twilio accepted the request. Nothing is ringing
+    // `initiated` only means the carrier accepted the request. Nothing is ringing
     // yet, so it must not show as ringing.
     initiated: 'queued',
     ringing: 'ringing',
     'in-progress': 'in_progress',
-    answered: 'in_progress', // Telnyx's name for the callee picking up
+    answered: 'in_progress', // the carrier's name for the callee picking up
     completed: 'completed',
     busy: 'no_answer',
     'no-answer': 'no_answer',
@@ -65,7 +64,7 @@ export default async function handler(req, res) {
     await postAssistantFollowUp(supabase, call.user_id, call.contact_id, call.session_id, callId, update.status, CallDuration, update.outcome_summary);
   }
 
-  // Twilio calls are now terminal: run the shared summary + memory pass.
+  // Phone calls are now terminal: run the shared summary + memory pass.
   // Idempotent — if the relay's own onCallEnd already generated the summary,
   // this is a no-op.
   if (['no_answer', 'completed', 'failed', 'busy', 'canceled'].includes(status)) {

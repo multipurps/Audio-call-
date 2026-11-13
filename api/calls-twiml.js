@@ -1,4 +1,4 @@
-// Twilio hits this URL (as XML, not JSON) once the outbound call connects.
+// The phone carrier hits this URL (as XML, not JSON) once the outbound call connects.
 // <Connect><Stream> opens a bidirectional Media Stream WebSocket to the
 // relay server (server/relay.js), which is a persistent process — not this
 // serverless function — because real-time audio needs a long-lived
@@ -6,12 +6,11 @@
 // place the other single-file apps' backends run (Render).
 //
 // MachineDetection:'Enable' (set on the original Calls.create() request in
-// api/calls.js and api/assistant.js) makes Twilio hold the call, run its own
+// lib/phoneCalls.js) makes the carrier hold the call, run its own
 // audio-level detection, and pass the result here as AnsweredBy *before*
 // this webhook fires — so a voicemail never reaches the relay at all, it's
 // hung up right here instead.
-import { guardTwilioWebhook } from '../lib/twilioSignature.js';
-import { guardTelnyxWebhook, telephonyProvider } from '../lib/telephony.js';
+import { guardWebhook, telephonyProvider } from '../lib/telephony.js';
 import { getServiceClient } from '../lib/supabaseAdmin.js';
 import { describeCallEnd } from '../lib/callOutcome.js';
 
@@ -20,7 +19,7 @@ const xmlAttr = (v) => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').
 export default async function handler(req, res) {
   const telnyx = telephonyProvider() === 'telnyx';
   const callId = req.query?.callId || (req.body && req.body.callId) || '';
-  if (telnyx ? !guardTelnyxWebhook(req, res, `call:${callId}`) : !guardTwilioWebhook(req, res)) return;
+  if (!guardWebhook(req, res, `call:${callId}`)) return;
   const answeredBy = req.body?.AnsweredBy || '';
 
   if (answeredBy.startsWith('machine') || answeredBy === 'fax') {
@@ -46,12 +45,12 @@ export default async function handler(req, res) {
     );
   }
 
-  const streamUrl = `${relayUrl}?callId=${encodeURIComponent(callId)}`;
-  // Telnyx needs the audio mode spelled out: callee audio only, two-way, 8 kHz mu-law (PCMU), the same audio the
-  // relay already speaks to Twilio. Attribute values are XML, so & must be escaped.
+  // Telnyx needs the audio mode spelled out: callee audio only, two-way, 8 kHz mu-law (PCMU). Attribute values are
+  // XML, so & must be escaped. SignalWire rejects a query string on the stream URL, so it gets the call id as a
+  // <Parameter> instead; the relay reads it from the stream's start frame (customParameters.callId).
   const stream = telnyx
-    ? `<Stream url="${xmlAttr(streamUrl)}" track="inbound_track" bidirectionalMode="rtp" bidirectionalCodec="PCMU" bidirectionalSamplingRate="8000" />`
-    : `<Stream url="${streamUrl}" />`;
+    ? `<Stream url="${xmlAttr(`${relayUrl}?callId=${encodeURIComponent(callId)}`)}" track="inbound_track" bidirectionalMode="rtp" bidirectionalCodec="PCMU" bidirectionalSamplingRate="8000" />`
+    : `<Stream url="${xmlAttr(relayUrl)}"><Parameter name="callId" value="${xmlAttr(callId)}" /></Stream>`;
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>

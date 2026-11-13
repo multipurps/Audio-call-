@@ -1,3 +1,5 @@
+// LEGACY: this entry point drives calls through the Patter SDK's Twilio carrier, and Patter has no SignalWire carrier.
+// The deployed relay now starts server/relay.js (see package.json). Kept only because tests import helpers from here.
 import { assistantCallIdentity } from './callIdentity.js';
 import { briefLines, loadSpeakerProfile, representativeRules, speakerSituation, whereYouAreLine } from './representative.js';
 import {
@@ -17,7 +19,7 @@ import { transcribeAudioBuffer, DEFAULT_STT_MODEL } from '../lib/sttClient.js';
 import { isSpeechLikePcm16, resolvePatterLlmConfig } from './audioUtils.js';
 import { Patter, Twilio, CustomLLM } from 'getpatter';
 import { createClient } from '@supabase/supabase-js';
-import { isTelnyxSid, telnyxHangup } from '../lib/telephony.js';
+import { hangupCall } from '../lib/telephony.js';
 
 const FISH_API_KEY = process.env.FISH_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -291,22 +293,8 @@ export function contextToVariables(ctx) {
 }
 
 async function hangupTwilioCall(twilioCallSid) {
-  if (isTelnyxSid(twilioCallSid)) { try { await telnyxHangup(twilioCallSid); } catch { /* non-fatal */ } return; }
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  if (!accountSid || !authToken || !twilioCallSid) return;
-  try {
-    await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${twilioCallSid}.json`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({ Status: 'completed' }),
-    });
-  } catch {
-    // non-fatal
-  }
+  if (!twilioCallSid) return;
+  try { await hangupCall(twilioCallSid); } catch { /* non-fatal */ }
 }
 
 // Persist one turn: transcript always, status promoted to in_progress only

@@ -1,6 +1,6 @@
 # Telnyx as the phone provider
 
-Twilio is still the default. Phone calls go through Telnyx only when `TELEPHONY_PROVIDER=telnyx` is set (Vercel, and
+SignalWire is the default phone provider. Phone calls go through Telnyx only when `TELEPHONY_PROVIDER=telnyx` is set (Vercel, and
 on the relay host if you want its fallback hangup to use Telnyx env too). Nothing else changes: calls are placed
 from the user's own line, the callee's audio streams to the relay, the assistant talks, status comes back.
 

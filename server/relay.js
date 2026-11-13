@@ -20,7 +20,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { bridgeEnabled, handleTwilioViaPipecat } from './twilio-bridge.js';
 import { createClient } from '@supabase/supabase-js';
 import { streamStart, inboundAudio, mediaMessage, outboundFrameSize } from './streamProtocol.js';
-import { isTelnyxSid, telnyxHangup } from '../lib/telephony.js';
+import { hangupCall as hangupPhoneCall } from '../lib/telephony.js';
 
 const PORT = process.env.PORT || 8080;
 const FISH_API_KEY = process.env.FISH_API_KEY;
@@ -75,6 +75,8 @@ if (process.env.NODE_ENV !== 'test') {
         state.streamSid = start.streamId;
         state.provider = start.provider;
         state.accountId = start.accountId;
+        // SignalWire sends no query string on the stream URL: the call id arrives as a <Parameter> in this frame.
+        if (!state.callId) state.callId = start.customParameters?.callId || null;
         await loadCallContext(state);
         const initialGreeting = state.greetingOverride || greeting();
         state.history.push({ speaker: 'ai', content: initialGreeting });
@@ -302,7 +304,7 @@ async function speak(ws, state, text) {
   if (!resp.ok) return;
   const audioBuf = Buffer.from(await resp.arrayBuffer());
 
-  // Twilio expects base64 mulaw in ~20ms (160-byte) frames; Telnyx takes larger chunks.
+  // SignalWire expects base64 mulaw in ~20ms (160-byte) frames; Telnyx takes larger chunks.
   const frameSize = outboundFrameSize(state.provider);
   for (let i = 0; i < audioBuf.length; i += frameSize) {
     const frame = audioBuf.subarray(i, i + frameSize);
@@ -311,22 +313,8 @@ async function speak(ws, state, text) {
 }
 
 async function hangupCall(state) {
-  if (isTelnyxSid(state.twilioCallSid)) { try { await telnyxHangup(state.twilioCallSid, { accountId: state.accountId }); } catch { /* non-fatal */ } return; }
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  if (!accountSid || !authToken || !state.twilioCallSid) return;
-  try {
-    await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${state.twilioCallSid}.json`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({ Status: 'completed' }),
-    });
-  } catch {
-    // non-fatal
-  }
+  if (!state.twilioCallSid) return;
+  try { await hangupPhoneCall(state.twilioCallSid, { accountId: state.accountId }); } catch { /* non-fatal */ }
 }
 
 async function finalizeCall(state) {

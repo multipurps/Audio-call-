@@ -15,7 +15,7 @@
 // resolves the calls row from that id.
 
 import { streamStart, inboundAudio, mediaMessage, clearMessage } from './streamProtocol.js';
-import { isTelnyxSid, telnyxHangup } from '../lib/telephony.js';
+import { hangupCall } from '../lib/telephony.js';
 const MAGIC = Buffer.from('ACAF');
 const HEADER_LEN = 28;
 const TYPE_AUDIO_IN = 1;
@@ -84,8 +84,9 @@ export function pcm16ToMulaw(pcm) {
 
 export function handleTwilioViaPipecat(ws, req, { WS, env = process.env, log = console } = {}) {
   const url = new URL(req.url, 'http://localhost');
-  const callId = url.searchParams.get('callId');
-  const sessionId = `call-${callId}`;
+  // Telnyx puts the call id in the URL; SignalWire sends it as a <Parameter> in the start frame (no query string).
+  let callId = url.searchParams.get('callId');
+  let sessionId = `call-${callId}`;
   let streamSid = null;
   let callSid = null;
   let provider = 'twilio';
@@ -101,20 +102,8 @@ export function handleTwilioViaPipecat(ws, req, { WS, env = process.env, log = c
   };
 
   const hangupTwilio = async () => {
-    if (isTelnyxSid(callSid)) { try { await telnyxHangup(callSid, { accountId, env }); } catch { /* non-fatal */ } return; }
-    const sid = env.TWILIO_ACCOUNT_SID;
-    const tok = env.TWILIO_AUTH_TOKEN;
-    if (!sid || !tok || !callSid) return;
-    try {
-      await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Calls/${callSid}.json`, {
-        method: 'POST',
-        headers: {
-          Authorization: 'Basic ' + Buffer.from(`${sid}:${tok}`).toString('base64'),
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({ Status: 'completed' }),
-      });
-    } catch { /* non-fatal */ }
+    if (!callSid) return;
+    try { await hangupCall(callSid, { accountId, env }); } catch { /* non-fatal */ }
   };
 
   const shutdown = (why) => {
@@ -182,6 +171,10 @@ export function handleTwilioViaPipecat(ws, req, { WS, env = process.env, log = c
       callSid = start.callSid;
       provider = start.provider;
       accountId = start.accountId;
+      if (!callId && start.customParameters?.callId) {
+        callId = String(start.customParameters.callId);
+        sessionId = `call-${callId}`;
+      }
       connectUpstream();
     } else if (msg.event === 'media') {
       const audio = inboundAudio(msg);

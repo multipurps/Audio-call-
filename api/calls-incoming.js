@@ -1,10 +1,10 @@
-// Twilio hits this (as XML) the moment someone calls a number provisioned
+// The carrier hits this (as XML) the moment someone calls a number provisioned
 // via Profile -> Call Answering (see api/call-answering.js). Mirrors
 // api/calls-twiml.js's <Connect><Stream> setup for outbound calls, except
 // there's no pre-existing calls row yet — this creates one first, with
 // direction:'inbound' and to_number set to the *caller's* number (since
 // that's who Emysa is actually talking to here).
-import { guardTwilioWebhook } from '../lib/twilioSignature.js';
+import { guardWebhook } from '../lib/telephony.js';
 import { getServiceClient } from '../lib/supabaseAdmin.js';
 
 function xml(res, body) {
@@ -13,7 +13,7 @@ function xml(res, body) {
 }
 
 export default async function handler(req, res) {
-  if (!guardTwilioWebhook(req, res)) return;
+  if (!guardWebhook(req, res, 'incoming')) return;
   const to = req.body?.To || '';
   const from = req.body?.From || '';
   const callSid = req.body?.CallSid || '';
@@ -58,6 +58,7 @@ export default async function handler(req, res) {
   const relayUrl = process.env.RELAY_WS_URL;
   if (!relayUrl) return xml(res, `<Say>Sorry, this assistant isn't configured yet.</Say><Hangup/>`);
 
-  const streamUrl = `${relayUrl}?callId=${encodeURIComponent(call.id)}`;
-  return xml(res, `<Connect><Stream url="${streamUrl}" /></Connect>`);
+  // No query string on the stream URL (SignalWire rejects it): the call id goes in a <Parameter>.
+  const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  return xml(res, `<Connect><Stream url="${esc(relayUrl)}"><Parameter name="callId" value="${esc(call.id)}" /></Stream></Connect>`);
 }

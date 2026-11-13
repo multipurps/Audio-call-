@@ -1,4 +1,4 @@
-// Telnyx as the phone provider (TELEPHONY_PROVIDER=telnyx). Twilio stays the default; see lib/telephony.js.
+// Telnyx as the phone provider (TELEPHONY_PROVIDER=telnyx). SignalWire is the default; see lib/telephony.js.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { database, loadApi, response } from './helpers.mjs';
@@ -10,11 +10,11 @@ import { streamStart, inboundAudio, mediaMessage, clearMessage, outboundFrameSiz
 const ENV = { TELNYX_API_KEY: 'KEY-test', TELNYX_CONNECTION_ID: '1234567890', TELNYX_ACCOUNT_ID: 'acct-uuid' };
 const json = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body) });
 
-test('Twilio is the default provider; Telnyx only when asked for', () => {
-  assert.equal(telephonyProvider({}), 'twilio');
-  assert.equal(telephonyProvider({ TELEPHONY_PROVIDER: 'twilio' }), 'twilio');
+test('SignalWire is the default provider; Telnyx only when asked for', () => {
+  assert.equal(telephonyProvider({}), 'signalwire');
+  assert.equal(telephonyProvider({ TELEPHONY_PROVIDER: 'signalwire' }), 'signalwire');
   assert.equal(telephonyProvider({ TELEPHONY_PROVIDER: 'TELNYX' }), 'telnyx');
-  assert.equal(telephonyProvider({ TELEPHONY_PROVIDER: 'something-else' }), 'twilio');
+  assert.equal(telephonyProvider({ TELEPHONY_PROVIDER: 'something-else' }), 'signalwire');
 });
 
 test('Telnyx call ids are told apart from Twilio ones', () => {
@@ -166,13 +166,14 @@ async function twiml(env) {
   return { code: res.code, body, headers };
 }
 
-test('Telnyx gets <Connect><Stream> with two-way PCMU audio, Twilio keeps the plain stream', async () => {
+test('Telnyx gets <Connect><Stream> with two-way PCMU audio, SignalWire gets the call id as a <Parameter>', async () => {
   const t = await twiml({ TELEPHONY_PROVIDER: 'telnyx', TELNYX_API_KEY: 'KEY-test', TELNYX_WEBHOOK_VALIDATION: 'off' });
   assert.equal(t.code, 200);
   assert.equal(t.headers['Content-Type'], 'text/xml');
   assert.match(t.body, /<Connect>\s*<Stream url="wss:\/\/relay\.test\/stream\?callId=call-1" track="inbound_track" bidirectionalMode="rtp" bidirectionalCodec="PCMU" bidirectionalSamplingRate="8000" \/>\s*<\/Connect>/);
-  const w = await twiml({ TWILIO_WEBHOOK_VALIDATION: 'off' });
-  assert.match(w.body, /<Stream url="wss:\/\/relay\.test\/stream\?callId=call-1" \/>/);
+  const w = await twiml({ WEBHOOK_VALIDATION: 'off' });
+  assert.match(w.body, /<Stream url="wss:\/\/relay\.test\/stream"><Parameter name="callId" value="call-1" \/><\/Stream>/);
+  assert.doesNotMatch(w.body, /stream\?/, 'SignalWire rejects a query string on the stream URL');
   assert.doesNotMatch(w.body, /bidirectionalMode/);
 });
 
@@ -201,12 +202,12 @@ test('placeCall through Telnyx: dials from the user\'s own line, stores the Teln
     if (url.startsWith('https://api.telnyx.com/v2/texml/calls/')) return json(200, { call_sid: 'v3:live-1', status: 'queued' });
     throw new Error(`Unexpected external call: ${url}`);
   };
-  const { placeCall } = await loadApi('lib/phoneCalls.js', db, fetcher, { ...ENV, TELEPHONY_PROVIDER: 'telnyx', TWILIO_ACCOUNT_SID: '', TWILIO_AUTH_TOKEN: '' });
+  const { placeCall } = await loadApi('lib/phoneCalls.js', db, fetcher, { ...ENV, TELEPHONY_PROVIDER: 'telnyx', SIGNALWIRE_SPACE: '', SIGNALWIRE_PROJECT_ID: '', SIGNALWIRE_API_TOKEN: '' });
   const result = await placeCall(db, 'user-1', { toNumber: '+14155552671', objective: 'Confirm lunch.', contactId: null });
   assert.ok(result.call, JSON.stringify(result));
   assert.equal(network.length, 1);
   assert.equal(JSON.parse(network[0].opts.body).From, '+2348011112222');
-  assert.equal(network.filter((n) => n.url.includes('twilio.com')).length, 0);
+  assert.equal(network.filter((n) => n.url.includes('signalwire.com')).length, 0);
   const row = db.tables.calls[0];
   assert.equal(row.twilio_call_sid, 'v3:live-1');
   assert.equal(row.status, 'ringing');
@@ -310,7 +311,7 @@ test('bridge: when the assistant ends a Telnyx call, Telnyx is told to hang up (
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, opts) => { calls.push({ url, opts }); return json(200, {}); };
   try {
-    const { phone, upstreams } = startBridge({ TELNYX_API_KEY: 'KEY-test', TELNYX_ACCOUNT_ID: 'acct-uuid', TWILIO_ACCOUNT_SID: 'AC1', TWILIO_AUTH_TOKEN: 'tok' });
+    const { phone, upstreams } = startBridge({ TELNYX_API_KEY: 'KEY-test', TELNYX_ACCOUNT_ID: 'acct-uuid', SIGNALWIRE_SPACE: 'x.signalwire.com', SIGNALWIRE_PROJECT_ID: 'p1', SIGNALWIRE_API_TOKEN: 'tok' });
     phone.emit('message', JSON.stringify({ event: 'start', stream_id: 's', start: { user_id: 'u', call_control_id: 'v3:end-me', media_format: { encoding: 'PCMU', sample_rate: 8000, channels: 1 } } }));
     const up = upstreams[0];
     up.emit('open');
@@ -320,7 +321,7 @@ test('bridge: when the assistant ends a Telnyx call, Telnyx is told to hang up (
     // Twilio); the second is harmless. What matters: every request goes to Telnyx, none to Twilio.
     assert.ok(calls.length >= 1);
     for (const c of calls) assert.match(c.url, /^https:\/\/api\.telnyx\.com\/v2\/texml\/Accounts\/acct-uuid\/Calls\/v3%3Aend-me$/);
-    assert.equal(calls.filter((c) => c.url.includes('twilio.com')).length, 0);
+    assert.equal(calls.filter((c) => c.url.includes('signalwire.com')).length, 0);
   } finally {
     globalThis.fetch = realFetch;
   }

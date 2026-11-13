@@ -85,8 +85,8 @@ export function database(seed = {}, { funded = true } = {}) {
 export async function loadApi(file, db, fetcher, extraEnv = {}) {
   const context = vm.createContext({ console, URLSearchParams, Buffer, Date, Map, Set, AbortSignal,
     FormData, Blob, setTimeout, clearTimeout,
-    fetch: fetcher, process: { env: { OPENAI_API_KEY: 'test-only', TWILIO_ACCOUNT_SID: 'test-only',
-      TWILIO_AUTH_TOKEN: 'test-only', TWILIO_FROM_NUMBER: '+14155550000', PUBLIC_APP_URL: 'https://example.test', SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key', ...extraEnv } },
+    fetch: fetcher, process: { env: { OPENAI_API_KEY: 'test-only', SIGNALWIRE_SPACE: 'test.signalwire.com', SIGNALWIRE_PROJECT_ID: 'test-project',
+      SIGNALWIRE_API_TOKEN: 'test-only', PUBLIC_APP_URL: 'https://example.test', SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key', ...extraEnv } },
   });
   const cache = new Map();
   const builtins = new Map();

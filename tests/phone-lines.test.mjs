@@ -23,13 +23,13 @@ function chatFixture({ lines = [], whatsapp = [], intentChannel = null } = {}) {
       return { ok: true, json: async () => ({ choices: [{ message: { content: body.response_format ? JSON.stringify(intent) : 'Sure, I will confirm lunch.' } }] }) };
     }
     if (url.includes('wacalls.test')) return { ok: false, status: 500, json: async () => ({ error: 'relay down in test' }) };
-    if (url.includes('twilio.com')) return { ok: true, json: async () => ({ sid: 'CA-test' }) };
+    if (url.includes('signalwire.com')) return { ok: true, json: async () => ({ sid: 'CA-test' }) };
     throw new Error(`Unexpected external call: ${url}`);
   };
   return { db, network, fetcher };
 }
 const rows = (f, t) => f.db.tables[t] || [];
-const twilioCalls = (f) => f.network.filter((r) => r.url.includes('twilio.com'));
+const twilioCalls = (f) => f.network.filter((r) => r.url.includes('signalwire.com'));
 const waCalls = (f) => f.network.filter((r) => r.url.includes('wacalls.test'));
 async function say(f, extra = {}) {
   const { default: handler } = await loadApi('api/assistant.js', f.db, f.fetcher, ENV);
@@ -58,7 +58,7 @@ test('a pending (unverified) line is not usable either', async () => {
 
 test('calls go out from the user\'s own number, never the shared env number', async () => {
   const f = chatFixture({ lines: [LINE] });
-  const { placeCall } = await loadApi('lib/phoneCalls.js', f.db, f.fetcher, { TWILIO_FROM_NUMBER: '+19990000000' });
+  const { placeCall } = await loadApi('lib/phoneCalls.js', f.db, f.fetcher, {});
   const result = await placeCall(f.db, 'user-1', { toNumber: '+14155552671', objective: 'x', contactId: null });
   assert.ok(result.call, JSON.stringify(result));
   assert.equal(twilioCalls(f)[0].options.body.get('From'), '+2348011112222');

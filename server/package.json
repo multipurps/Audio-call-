@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "main": "patter-relay.js",
+  "main": "relay.js",
   "scripts": {
-    "start": "node patter-relay.js",
+    "start": "node relay.js",
     "postinstall": "cd .. && npm install --omit=dev --no-audit --no-fund"
   },
   "dependencies": {
