@@ -11,12 +11,16 @@
 // this webhook fires — so a voicemail never reaches the relay at all, it's
 // hung up right here instead.
 import { guardTwilioWebhook } from '../lib/twilioSignature.js';
+import { guardTelnyxWebhook, telephonyProvider } from '../lib/telephony.js';
 import { getServiceClient } from '../lib/supabaseAdmin.js';
 import { describeCallEnd } from '../lib/callOutcome.js';
 
+const xmlAttr = (v) => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
 export default async function handler(req, res) {
-  if (!guardTwilioWebhook(req, res)) return;
+  const telnyx = telephonyProvider() === 'telnyx';
   const callId = req.query?.callId || (req.body && req.body.callId) || '';
+  if (telnyx ? !guardTelnyxWebhook(req, res, `call:${callId}`) : !guardTwilioWebhook(req, res)) return;
   const answeredBy = req.body?.AnsweredBy || '';
 
   if (answeredBy.startsWith('machine') || answeredBy === 'fax') {
@@ -43,10 +47,15 @@ export default async function handler(req, res) {
   }
 
   const streamUrl = `${relayUrl}?callId=${encodeURIComponent(callId)}`;
+  // Telnyx needs the audio mode spelled out: callee audio only, two-way, 8 kHz mu-law (PCMU), the same audio the
+  // relay already speaks to Twilio. Attribute values are XML, so & must be escaped.
+  const stream = telnyx
+    ? `<Stream url="${xmlAttr(streamUrl)}" track="inbound_track" bidirectionalMode="rtp" bidirectionalCodec="PCMU" bidirectionalSamplingRate="8000" />`
+    : `<Stream url="${streamUrl}" />`;
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="${streamUrl}" />
+    ${stream}
   </Connect>
 </Response>`;
 

@@ -17,6 +17,7 @@ import { transcribeAudioBuffer, DEFAULT_STT_MODEL } from '../lib/sttClient.js';
 import { isSpeechLikePcm16, resolvePatterLlmConfig } from './audioUtils.js';
 import { Patter, Twilio, CustomLLM } from 'getpatter';
 import { createClient } from '@supabase/supabase-js';
+import { isTelnyxSid, telnyxHangup } from '../lib/telephony.js';
 
 const FISH_API_KEY = process.env.FISH_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -290,6 +291,7 @@ export function contextToVariables(ctx) {
 }
 
 async function hangupTwilioCall(twilioCallSid) {
+  if (isTelnyxSid(twilioCallSid)) { try { await telnyxHangup(twilioCallSid); } catch { /* non-fatal */ } return; }
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   if (!accountSid || !authToken || !twilioCallSid) return;

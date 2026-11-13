@@ -1,14 +1,15 @@
 import { guardTwilioWebhook } from '../lib/twilioSignature.js';
+import { guardTelnyxWebhook, telephonyProvider } from '../lib/telephony.js';
 import { getServiceClient } from '../lib/supabaseAdmin.js';
 import { maybeGenerateCallSummary } from '../lib/callSession.js';
 import { describeCallEnd } from '../lib/callOutcome.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  if (!guardTwilioWebhook(req, res)) return;
+  const callId = req.query?.callId;
+  if (telephonyProvider() === 'telnyx' ? !guardTelnyxWebhook(req, res, `call:${callId}`) : !guardTwilioWebhook(req, res)) return;
   const supabase = getServiceClient();
 
-  const callId = req.query?.callId;
   const { CallStatus, CallDuration, RecordingUrl, SipResponseCode, ErrorCode, AnsweredBy } = req.body || {};
   if (!callId) return res.status(400).send('missing callId');
 
@@ -18,6 +19,7 @@ export default async function handler(req, res) {
     initiated: 'queued',
     ringing: 'ringing',
     'in-progress': 'in_progress',
+    answered: 'in_progress', // Telnyx's name for the callee picking up
     completed: 'completed',
     busy: 'no_answer',
     'no-answer': 'no_answer',

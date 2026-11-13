@@ -14,6 +14,8 @@
 // ASSISTANT_BRIDGE_SECRET. Session id is `call-{calls.id}`; the service
 // resolves the calls row from that id.
 
+import { streamStart, inboundAudio, mediaMessage, clearMessage } from './streamProtocol.js';
+import { isTelnyxSid, telnyxHangup } from '../lib/telephony.js';
 const MAGIC = Buffer.from('ACAF');
 const HEADER_LEN = 28;
 const TYPE_AUDIO_IN = 1;
@@ -86,6 +88,8 @@ export function handleTwilioViaPipecat(ws, req, { WS, env = process.env, log = c
   const sessionId = `call-${callId}`;
   let streamSid = null;
   let callSid = null;
+  let provider = 'twilio';
+  let accountId = null;
   let seq = 0;
   let upstream = null;
   let ready = false;
@@ -97,6 +101,7 @@ export function handleTwilioViaPipecat(ws, req, { WS, env = process.env, log = c
   };
 
   const hangupTwilio = async () => {
+    if (isTelnyxSid(callSid)) { try { await telnyxHangup(callSid, { accountId, env }); } catch { /* non-fatal */ } return; }
     const sid = env.TWILIO_ACCOUNT_SID;
     const tok = env.TWILIO_AUTH_TOKEN;
     if (!sid || !tok || !callSid) return;
@@ -140,9 +145,9 @@ export function handleTwilioViaPipecat(ws, req, { WS, env = process.env, log = c
         const frame = parseFrame(Buffer.from(data));
         if (!frame) return;
         if (frame.type === TYPE_AUDIO_OUT && frame.encoding === ENC_PCM16 && streamSid) {
-          twilioSend({ event: 'media', streamSid, media: { payload: pcm16ToMulaw(frame.payload).toString('base64') } });
+          twilioSend(mediaMessage(provider, streamSid, pcm16ToMulaw(frame.payload).toString('base64')));
         } else if (frame.type === TYPE_INTERRUPT && streamSid) {
-          twilioSend({ event: 'clear', streamSid });
+          twilioSend(clearMessage(provider, streamSid));
         }
         return;
       }
@@ -156,7 +161,7 @@ export function handleTwilioViaPipecat(ws, req, { WS, env = process.env, log = c
           for (const f of pending.splice(0)) upstream.send(f);
           break;
         case 'ping': upstream.send(JSON.stringify({ type: 'pong' })); break;
-        case 'interrupt': if (streamSid) twilioSend({ event: 'clear', streamSid }); break;
+        case 'interrupt': if (streamSid) twilioSend(clearMessage(provider, streamSid)); break;
         case 'hangup':
         case 'stopped':
           hangupTwilio().finally(() => shutdown(`service ${msg.type}`));
@@ -172,16 +177,21 @@ export function handleTwilioViaPipecat(ws, req, { WS, env = process.env, log = c
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (msg.event === 'start') {
-      streamSid = msg.start.streamSid;
-      callSid = msg.start.callSid || null;
+      const start = streamStart(msg);
+      streamSid = start.streamId;
+      callSid = start.callSid;
+      provider = start.provider;
+      accountId = start.accountId;
       connectUpstream();
-    } else if (msg.event === 'media' && msg.media?.payload) {
+    } else if (msg.event === 'media') {
+      const audio = inboundAudio(msg);
+      if (!audio) return;
       const frame = packFrame({
         type: TYPE_AUDIO_IN,
         encoding: ENC_MULAW,
         sampleRate: SAMPLE_RATE,
         sequence: seq++,
-        payload: Buffer.from(msg.media.payload, 'base64'),
+        payload: audio,
       });
       if (ready && upstream?.readyState === 1) upstream.send(frame);
       else if (pending.length < 100) pending.push(frame);

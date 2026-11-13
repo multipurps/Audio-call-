@@ -19,6 +19,8 @@ import { isSpeechLikePcm16 } from './audioUtils.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import { bridgeEnabled, handleTwilioViaPipecat } from './twilio-bridge.js';
 import { createClient } from '@supabase/supabase-js';
+import { streamStart, inboundAudio, mediaMessage, outboundFrameSize } from './streamProtocol.js';
+import { isTelnyxSid, telnyxHangup } from '../lib/telephony.js';
 
 const PORT = process.env.PORT || 8080;
 const FISH_API_KEY = process.env.FISH_API_KEY;
@@ -49,6 +51,8 @@ if (process.env.NODE_ENV !== 'test') {
     const state = {
       callId,
       streamSid: null,
+      provider: 'twilio',
+      accountId: null,
       objective: '',
       instructions: '',
       personality: '',
@@ -67,7 +71,10 @@ if (process.env.NODE_ENV !== 'test') {
       const msg = JSON.parse(raw.toString());
 
       if (msg.event === 'start') {
-        state.streamSid = msg.start.streamSid;
+        const start = streamStart(msg);
+        state.streamSid = start.streamId;
+        state.provider = start.provider;
+        state.accountId = start.accountId;
         await loadCallContext(state);
         const initialGreeting = state.greetingOverride || greeting();
         state.history.push({ speaker: 'ai', content: initialGreeting });
@@ -77,7 +84,9 @@ if (process.env.NODE_ENV !== 'test') {
       }
 
       if (msg.event === 'media') {
-        state.audioChunks.push(Buffer.from(msg.media.payload, 'base64'));
+        const audio = inboundAudio(msg);
+        if (!audio) return;
+        state.audioChunks.push(audio);
         resetSilenceTimer(ws, state);
         return;
       }
@@ -293,21 +302,16 @@ async function speak(ws, state, text) {
   if (!resp.ok) return;
   const audioBuf = Buffer.from(await resp.arrayBuffer());
 
-  // Twilio expects base64 mulaw in ~20ms (160-byte) frames.
-  const frameSize = 160;
+  // Twilio expects base64 mulaw in ~20ms (160-byte) frames; Telnyx takes larger chunks.
+  const frameSize = outboundFrameSize(state.provider);
   for (let i = 0; i < audioBuf.length; i += frameSize) {
     const frame = audioBuf.subarray(i, i + frameSize);
-    ws.send(
-      JSON.stringify({
-        event: 'media',
-        streamSid: state.streamSid,
-        media: { payload: frame.toString('base64') },
-      })
-    );
+    ws.send(JSON.stringify(mediaMessage(state.provider, state.streamSid, frame.toString('base64'))));
   }
 }
 
 async function hangupCall(state) {
+  if (isTelnyxSid(state.twilioCallSid)) { try { await telnyxHangup(state.twilioCallSid, { accountId: state.accountId }); } catch { /* non-fatal */ } return; }
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   if (!accountSid || !authToken || !state.twilioCallSid) return;
