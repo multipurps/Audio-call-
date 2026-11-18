@@ -11,7 +11,7 @@ import { callSessionId } from '../lib/callNote.js';
 import { maybeGenerateCallSummary, waitForCallSummary, recoverMissingSummaries } from '../lib/callSession.js';
 import {
   availableChannels, checkVerification, getPhoneLine, isApproved, publicLine,
-  removeLine, rentNumber, rentSettings, searchNumbers, startVerification, submitVerificationCode,
+  removeLine, rentNumber, rentSettings, searchNumbers, startVerification, submitVerificationCode, resendVerification,
 } from '../lib/phoneLines.js';
 
 export default async function handler(req, res) {
@@ -35,7 +35,7 @@ export default async function handler(req, res) {
     case 'app-call-brief': return appCallBrief(req, res, supabase, userId);
     case 'summarize': return summarizeCall(req, res, supabase, userId);
     // Phone line (Twilio): bring your own number, or rent one.
-    case 'line-get': case 'line-verify-start': case 'line-verify-code': case 'line-verify-status':
+    case 'line-get': case 'line-verify-start': case 'line-verify-code': case 'line-verify-resend': case 'line-verify-status':
     case 'line-rent-search': case 'line-rent-buy': case 'line-remove':
       return lineAction(action, req, res, supabase, userId);
     default: return res.status(400).json({ error: 'Unknown or missing action' });
@@ -403,6 +403,8 @@ async function lineAction(action, req, res, supabase, userId) {
     }
     case 'line-verify-start':
       return needPost() || send(await startVerification(supabase, userId, req.body?.phone));
+    case 'line-verify-resend':
+      return needPost() || send(await resendVerification(supabase, userId));
     case 'line-verify-code':
       return needPost() || send(await submitVerificationCode(supabase, userId, req.body?.code));
     case 'line-verify-status':

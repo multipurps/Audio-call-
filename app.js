@@ -115,6 +115,50 @@ async function authedFetch(url, options = {}) {
   return fetch(url, { ...options, headers });
 }
 
+// ---------- local copy: show what we last knew at once, then refresh ----------
+// Lists, balance and profile are kept in localStorage per signed-in user. Screens draw from that copy the moment
+// they open (so the app is instant and still shows data with no connection), then replace it with fresh data as
+// soon as the server answers. Nothing here is ever the source of truth: a successful fetch always wins.
+const CACHE_PREFIX = 'emysa.cache.';
+const LAST_USER_KEY = 'emysa.lastUser';
+function cacheKey(name) {
+  const id = currentUser?.id || currentSession?.user?.id;
+  return id ? `${CACHE_PREFIX}${id}.${name}` : null;
+}
+function cacheRead(name) {
+  try {
+    const key = cacheKey(name);
+    const raw = key ? localStorage.getItem(key) : null;
+    return raw ? JSON.parse(raw).d : null;
+  } catch { return null; }
+}
+function cacheWrite(name, data) {
+  try {
+    const key = cacheKey(name);
+    if (key) localStorage.setItem(key, JSON.stringify({ t: Date.now(), d: data }));
+  } catch { /* storage full or blocked: just skip the local copy */ }
+}
+// Signing out wipes every saved copy so the next person on this device never sees someone else's data.
+function cacheClearAll() {
+  try {
+    Object.keys(localStorage).filter((k) => k.startsWith(CACHE_PREFIX) || k === LAST_USER_KEY).forEach((k) => localStorage.removeItem(k));
+  } catch { /* ignore */ }
+}
+// GET + remember. Returns null on any failure (offline, 401, 5xx) so callers keep what is already on screen.
+async function fetchJsonCached(url) {
+  const resp = await authedFetch(url).catch(() => null);
+  if (!resp?.ok) return null;
+  const data = await resp.json().catch(() => null);
+  if (data) cacheWrite(url, data);
+  return data;
+}
+async function fetchProfileCached(columns, name) {
+  const { data, error } = await supabase.from('profiles').select(columns).eq('user_id', currentUser.id).maybeSingle();
+  if (error) return cacheRead(name); // offline or server error: the last known profile
+  cacheWrite(name, data || {});
+  return data;
+}
+
 // ---------- tabs ----------
 // Home / Chat / Recent / Profile are the bottom tabs. Contacts is a screen
 // reached from Home (People > See all, More, Call someone) and from Profile; it
@@ -324,9 +368,26 @@ async function ensureNotificationsEnabled({ fromTap = false } = {}) {
   }
 }
 
+// Remember who is signed in so the app can still open (from its saved copy) when there is no connection.
+function rememberUser(user) {
+  try { localStorage.setItem(LAST_USER_KEY, JSON.stringify({ id: user.id, email: user.email || '' })); } catch { /* ignore */ }
+}
+function rememberedUser() {
+  try { return JSON.parse(localStorage.getItem(LAST_USER_KEY) || 'null'); } catch { return null; }
+}
+// No connection and no live session: open as the remembered user with an empty token. Fetches fail quietly and
+// the saved copies are shown; once the network is back Supabase refreshes the session and the app re-enters.
+function enterOffline() {
+  const user = rememberedUser();
+  if (!user?.id || currentUser) return false;
+  enterApp({ user, access_token: '', offline: true });
+  return true;
+}
+
 async function enterApp(session) {
   currentSession = session;
   currentUser = session.user;
+  if (!session.offline) rememberUser(session.user);
   // Preload Connected accounts so the sheet opens with the data already there.
   loadSocialAccounts().catch(() => {});
   if (TRAINER_URL && !window.__trainerGateShown) { window.__trainerGateShown = true; setTimeout(showTrainerGate, 900); }
@@ -395,7 +456,9 @@ function setNavAvatar(url) {
 
 async function loadNavAvatar() {
   if (!currentUser) return;
-  const { data } = await supabase.from('profiles').select('avatar_url').eq('user_id', currentUser.id).maybeSingle();
+  const saved = cacheRead('profile.avatar');
+  if (saved) renderAvatar(saved.avatar_url || null);
+  const data = await fetchProfileCached('avatar_url', 'profile.avatar');
   renderAvatar(data?.avatar_url || null);
 }
 
@@ -414,18 +477,25 @@ function renderAvatar(url) {
 
 async function renderProfileHeader() {
   if (!currentUser) return;
-  const { data } = await supabase.from('profiles').select('avatar_url, name, language').eq('user_id', currentUser.id).maybeSingle();
-  const displayName = data?.name || (currentUser.email || '').split('@')[0] || 'You';
-  $('profileEmailDisplay').textContent = displayName;
-  renderAvatar(data?.avatar_url || null);
-  if (data?.name && !$('profileName').value) $('profileName').value = data.name;
-  if (data?.language) $('profileLanguage').value = data.language;
+  const apply = (data) => {
+    const displayName = data?.name || (currentUser.email || '').split('@')[0] || 'You';
+    $('profileEmailDisplay').textContent = displayName;
+    renderAvatar(data?.avatar_url || null);
+    if (data?.name && !$('profileName').value) $('profileName').value = data.name;
+    if (data?.language) $('profileLanguage').value = data.language;
+  };
+  const saved = cacheRead('profile.header');
+  if (saved) apply(saved);
+  apply(await fetchProfileCached('avatar_url, name, language', 'profile.header'));
 }
 
 supabase.auth.onAuthStateChange((_event, session) => {
   if (session?.user) {
     enterApp(session);
   } else {
+    // A session that cannot refresh because the phone is offline is not a sign-out: keep the app open.
+    if (_event !== 'SIGNED_OUT' && !navigator.onLine && !currentUser && enterOffline()) return;
+    if (_event === 'SIGNED_OUT') cacheClearAll();
     currentUser = null;
     currentSession = null;
     homeChatInitializedFor = null;
@@ -446,6 +516,7 @@ supabase.auth.onAuthStateChange((_event, session) => {
 supabase.auth.getSession()
   .then(({ data }) => {
     if (data.session?.user && !currentUser) enterApp(data.session);
+    else if (!data.session && !navigator.onLine && enterOffline()) return;
     else if (!data.session && $('authBoot').style.display !== 'none') {
       $('authBoot').style.display = 'none';
       revealAuthScreen();
@@ -454,6 +525,7 @@ supabase.auth.getSession()
   })
   .catch((err) => {
     console.error('getSession failed:', err);
+    if (!navigator.onLine && enterOffline()) return;
     $('authBoot').style.display = 'none';
     revealAuthScreen();
     startAuthFlow();
@@ -502,7 +574,7 @@ async function initHomeChat() {
   clearPreCallContext();
   savedContacts = [];
   contactsLoaded = false;
-  const { data } = await supabase.from('profiles').select('name').eq('user_id', currentUser.id).maybeSingle();
+  const data = await fetchProfileCached('name', 'profile.name');
   const displayName = data?.name || (currentUser.email || '').split('@')[0];
   $('homeIdleGreeting').textContent = greetingForNow(displayName);
 
@@ -1786,22 +1858,22 @@ let contactsLoaded = false;
 const PHONE_ICON = '<svg class="phoneIc" viewBox="0 0 24 24"><use href="#ic-phone"/></svg>';
 async function loadContacts() {
   const list = $('contactsList');
-  list.textContent = 'Loading contacts…';
-  try {
-    const resp = await authedFetch('/api/contacts');
-    if (!resp.ok) throw new Error('Could not load contacts. Tap Contacts to retry.');
-    const { contacts } = await resp.json();
+  const apply = (contacts, resetSearch) => {
     savedContacts = contacts || [];
     contactsLoaded = true;
-    $('contactsSearch').value = '';
+    if (resetSearch) $('contactsSearch').value = '';
     renderContactsList(savedContacts);
     updateDialMatch();
-  } catch (err) {
-    contactsLoaded = false;
-    savedContacts = [];
-    updateDialMatch();
-    list.textContent = err.message || 'Could not load contacts. Tap Contacts to retry.';
-  }
+  };
+  const hit = cacheRead('/api/contacts');
+  if (hit) apply(hit.contacts, true); else list.textContent = 'Loading contacts…';
+  const fresh = await fetchJsonCached('/api/contacts');
+  if (fresh) { apply(fresh.contacts, !hit); return; }
+  if (hit) return; // offline: keep showing the saved copy
+  contactsLoaded = false;
+  savedContacts = [];
+  updateDialMatch();
+  list.textContent = 'Could not load contacts. Tap Contacts to retry.';
 }
 
 function renderContactRow(c) {
@@ -3775,11 +3847,13 @@ let recentChatSessions = [];
 let recentChatMenuTargetId = null;
 
 async function loadRecentChats() {
-  const resp = await authedFetch('/api/assistant?action=sessions&callRelated=true').catch(() => null);
-  if (!resp?.ok) { $('recentChatsList').textContent = 'Couldn\'t load chats.'; return; }
-  const { sessions } = await resp.json();
-  recentChatSessions = sessions || [];
-  renderRecentChatsList(recentChatSessions);
+  const url = '/api/assistant?action=sessions&callRelated=true';
+  const apply = (data) => { recentChatSessions = data.sessions || []; renderRecentChatsList(recentChatSessions); };
+  const hit = cacheRead(url);
+  if (hit) apply(hit);
+  const fresh = await fetchJsonCached(url);
+  if (fresh) apply(fresh);
+  else if (!hit) $('recentChatsList').textContent = 'Couldn\'t load chats.';
 }
 
 // One row per session is already one row per person now — chat_sessions
@@ -3910,11 +3984,12 @@ $('recentSelectDelete').addEventListener('click', async () => {
 
 async function loadCalls() {
   if (!currentSession) return;
-  const resp = await authedFetch('/api/calls?action=list').catch(() => null);
-  if (!resp?.ok) { $('callsList').textContent = 'Couldn\'t load calls.'; return; }
-  const { calls } = await resp.json();
-  lastLoadedCalls = calls || [];
-  renderCallsList(lastLoadedCalls);
+  const apply = (data) => { lastLoadedCalls = data.calls || []; renderCallsList(lastLoadedCalls); };
+  const hit = cacheRead('/api/calls?action=list');
+  if (hit) apply(hit);
+  const fresh = await fetchJsonCached('/api/calls?action=list');
+  if (fresh) apply(fresh);
+  else if (!hit) $('callsList').textContent = 'Couldn\'t load calls.';
 }
 
 
@@ -3945,9 +4020,12 @@ function renderBalance() {
 }
 
 async function loadBalance() {
-  const resp = await authedFetch('/api/referrals?action=billing').catch(() => null);
-  if (!resp?.ok) return;
-  homeBalance = await resp.json();
+  const url = '/api/referrals?action=billing';
+  const hit = cacheRead(url);
+  if (hit && !homeBalance) { homeBalance = hit; renderBalance(); }
+  const fresh = await fetchJsonCached(url);
+  if (!fresh) return;
+  homeBalance = fresh;
   renderBalance();
 }
 
@@ -3992,15 +4070,15 @@ async function loadHomeHero() {
 }
 
 async function loadHomePeople() {
-  const [contactsResp, callsResp] = await Promise.all([
-    authedFetch('/api/contacts').catch(() => null),
-    authedFetch('/api/calls?action=list').catch(() => null),
-  ]);
-  if (!contactsResp?.ok) return;
-  const { contacts } = await contactsResp.json();
-  const calls = callsResp?.ok ? ((await callsResp.json()).calls || []) : [];
-  homeContacts = contacts || [];
-  renderHomePeople(homeContacts, calls);
+  const contactsUrl = '/api/contacts';
+  const callsUrl = '/api/calls?action=list';
+  const savedPeople = cacheRead(contactsUrl);
+  const savedCalls = cacheRead(callsUrl);
+  if (savedPeople) { homeContacts = savedPeople.contacts || []; renderHomePeople(homeContacts, savedCalls?.calls || []); }
+  const [fresh, freshCalls] = await Promise.all([fetchJsonCached(contactsUrl), fetchJsonCached(callsUrl)]);
+  if (!fresh) return;
+  homeContacts = fresh.contacts || [];
+  renderHomePeople(homeContacts, freshCalls?.calls || savedCalls?.calls || []);
 }
 
 // Only people saved inside Emysa (never device contacts). Most recently called
@@ -6392,10 +6470,13 @@ $('lineCodeSubmit').addEventListener('click', async () => {
   finally { $('lineCodeSubmit').disabled = false; }
 });
 $('lineCodeResend').addEventListener('click', async () => {
-  const phone = lineState.line?.phoneNumber || $('lineNumInput').value.trim();
   $('lineCodeResend').disabled = true;
-  try { await startOwnVerification(phone); } catch (err) { hint('lineCodeHint', err.message); }
-  finally { $('lineCodeResend').disabled = false; }
+  hint('lineCodeHint', '');
+  try {
+    await lineApi('line-verify-resend', { method: 'POST', body: {} });
+    hint('lineCodeHint', 'Calling you again. Answer it and listen for the code.');
+  } catch (err) { hint('lineCodeHint', err.message); }
+  finally { setTimeout(() => { $('lineCodeResend').disabled = false; }, 8000); }
 });
 $('lineCodeBack').addEventListener('click', () => { stopLinePolls(); showLineSetup(); });
 
@@ -6669,8 +6750,28 @@ $('profileLanguage').addEventListener('change', async () => {
 });
 
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+    // Once the app has loaded, hand the service worker the list of files it used so the whole app can open offline.
+    navigator.serviceWorker.ready.then((reg) => {
+      setTimeout(() => {
+        try {
+          const urls = performance.getEntriesByType('resource').map((r) => r.name).filter((u) => u.startsWith(location.origin));
+          urls.push(location.href);
+          reg.active?.postMessage({ type: 'cache-shell', urls });
+        } catch { /* ignore */ }
+      }, 4000);
+    }).catch(() => {});
+  });
 }
+
+// Connection is back: pick up a refreshed session and reload whatever the saved copy was standing in for.
+window.addEventListener('online', async () => {
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (data.session) { currentSession = data.session; loadHome(true); loadCalls(); loadRecentChats(); }
+  } catch { /* the next focus or poll retries */ }
+});
 
 // ---------- admin ----------
 // The tab only appears if the admin-only endpoint actually accepts this

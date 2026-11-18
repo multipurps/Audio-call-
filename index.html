@@ -31,7 +31,7 @@
 </script>
 <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-10-30.1">
+<link rel="stylesheet" href="styles.css?v=2026-11-18.1">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -154,7 +154,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-10-30.1').catch(function (err) {
+        import('./app.js?v=2026-11-18.1').catch(function (err) {
           showBootError('Something went wrong. Check your connection and try again.', 'Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -294,7 +294,10 @@
       <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
       <div class="authTitle authTitleLg">Verify Your Number</div>
       <div class="authSub" id="lineCodeSub">You will get a call. Answer it, listen for the 6-digit code, and enter it below.</div>
-      <div class="inputWrap"><input type="text" id="lineCodeInput" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="6-digit code" autocomplete="one-time-code"></div>
+      <div class="field">
+        <label>Verification Code</label>
+        <div class="inputWrap"><svg class="inputIconSvg" viewBox="0 0 24 24" fill="none"><rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M8 10V7a4 4 0 1 1 8 0v3" stroke="currentColor" stroke-width="1.6"/></svg><input type="text" id="lineCodeInput" inputmode="numeric" pattern="[0-9]*" maxlength="7" placeholder="Enter The 6-Digit Code" autocomplete="one-time-code"></div>
+      </div>
       <button class="primaryBtn" id="lineCodeSubmit" style="margin-top:6px;">Verify</button>
       <div class="authHint" id="lineCodeHint"></div>
       <button class="secondaryBtn" id="lineCodeResend" style="margin-top:14px;">Call me again</button>
