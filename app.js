@@ -6401,7 +6401,7 @@ function showOnboardingStep(step) {
   return showLineSetup();
 }
 
-function showLineSetup() {
+function showLineSetup({ restore = true } = {}) {
   stopLinePolls();
   $('lineSetupBack').classList.toggle('hidden', !lineSetupVoluntary);
   hint('lineNumHint', '');
@@ -6412,8 +6412,9 @@ function showLineSetup() {
   $('lineCurrentRow').classList.toggle('hidden', !(lineSetupVoluntary && usable));
   if (usable) $('lineCurrentNum').textContent = lineState.line.phoneNumber;
   showSetupPanel('panelLineSetup');
-  // A verification call may still be waiting from before a reload.
-  if (!lineSetupVoluntary && lineState.line?.status === 'pending' && lineState.line.mode === 'own') showLineCode(lineState.line);
+  // A verification call may still be waiting from before a reload or from leaving the app to answer the call,
+  // whether setup was opened on first run or from the profile.
+  if (restore && lineState.line?.status === 'pending' && lineState.line.mode === 'own') showLineCode(lineState.line);
 }
 
 // Required step finished: re-evaluate (may lead on to the profile step).
@@ -6478,7 +6479,7 @@ $('lineCodeResend').addEventListener('click', async () => {
   } catch (err) { hint('lineCodeHint', err.message); }
   finally { setTimeout(() => { $('lineCodeResend').disabled = false; }, 8000); }
 });
-$('lineCodeBack').addEventListener('click', () => { stopLinePolls(); showLineSetup(); });
+$('lineCodeBack').addEventListener('click', () => { stopLinePolls(); showLineSetup({ restore: false }); });
 
 // -- rent
 $('lineRentBtn').addEventListener('click', () => {
@@ -6493,7 +6494,7 @@ $('lineRentBtn').addEventListener('click', () => {
   hint('rentHint', '');
   showSetupPanel('panelRent');
 });
-$('rentBack').addEventListener('click', showLineSetup);
+$('rentBack').addEventListener('click', () => showLineSetup({ restore: false }));
 $('rentSearchBtn').addEventListener('click', async () => {
   $('rentSearchBtn').disabled = true;
   hint('rentHint', '');
