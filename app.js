@@ -918,7 +918,7 @@ async function sendChatMessage(text, onReply, source = 'text', channel = null) {
     scrollHomeChatToBottom();
     clearPreCallContext();
     if (t.mode === 'live') showNotice({ kind: 'info', title: 'Coming soon', message: 'Live video calls aren’t available yet. They turn on once a provider is connected.' });
-    else openVideoCall({ contactName: t.name, toNumber: t.toNumber, brief: text });
+    else startFlyVideoCall({ contactName: t.name, toNumber: t.toNumber, mode: 'avatar', brief: text });
     return;
   }
   const revision = chatRevision;
@@ -2215,6 +2215,7 @@ function setVcMuted(muted) {
 // Every video call screen: the callee's PiP is there from the start (person icon until their video shows),
 // and the main area shows the app background until its first frame plays.
 function vcShowStage() {
+  $('videoCallScreen').classList.remove('chrome-off'); // the name card and buttons show when a call starts
   const box = $('vcSelfWrap'); if (box) box.style.display = '';
   const init = $('vcMainPhInit'); if (init) init.textContent = ($('vcAvatar').textContent || '?').trim() || '?';
   $('vcMainPh')?.classList.remove('hidden');
@@ -2228,7 +2229,6 @@ async function openVideoCall({ contactName = '', toNumber = '', brief = '', call
   setVcLayout('pip'); setVcMuted(false); resetVcSelfBox();
   // The avatar call never uses your camera or microphone. The PiP is the callee's.
   vcShowStage();
-  const glow = $('vcGlowImg'); if (glow && !glow.src) glow.src = 'assets/call/call-glow.webp';
   $('videoCallScreen').classList.remove('hidden');
   setVcStatus('Starting…');
   const fail = (title, message) => { closeVideoCall(); showNotice({ kind: 'error', title, message }); };
@@ -2253,7 +2253,7 @@ async function openVideoCall({ contactName = '', toNumber = '', brief = '', call
     const silentIn = calleeInput || vcSilentCtx.createMediaStreamDestination().stream;
     await vcClient.streamToVideoElement('vcMain', silentIn);
     try { vcClient.muteInputAudio(); } catch (_) {}
-    setVcStatus('Live', true);
+    setVcStatus('Connected', true);
   } catch (e) {
     fail('Avatar call', e.message || 'The avatar could not start.');
   }
@@ -2338,7 +2338,7 @@ async function openLiveSwap({ contactName = '', stream = null } = {}) {
     if (!remoteTrack) throw new Error('Xmax returned no video');
     $('vcMain').srcObject = new MediaStream([remoteTrack]);
     $('vcMain').play?.().catch(() => {});
-    setVcStatus('Live', true);
+    setVcStatus('Connected', true);
   } catch (e) {
     const cameraDenied = /NotAllowed|Permission|denied/i.test(String(e && (e.name || e.message)));
     fail('Live Swap', cameraDenied ? 'Allow camera access to use Live Swap.' : plainLiveSwapError(e.message));
@@ -2376,6 +2376,11 @@ function closeVideoCall() {
   $('videoCallScreen').classList.add('hidden');
 }
 $('vcHangBtn')?.addEventListener('click', closeVideoCall);
+// Tap the video to hide or show the name card and the buttons. Taps on the buttons or the resize handle do nothing.
+$('videoCallScreen')?.addEventListener('click', (e) => {
+  if (e.target.closest('.vcControls, .vcHeader, .vcResize')) return;
+  $('videoCallScreen').classList.toggle('chrome-off');
+});
 // ---- WhatsApp video call through WaCalls on Fly. The avatar (or your Live Swap picture) goes to the callee,
 // and the callee's video comes back into the picture-in-picture. The avatar listens to the callee from the
 // start but stays silent until they pick up, then greets them 5 seconds later (WaCallsMediaCore.greetingWaitMs).
@@ -2434,7 +2439,7 @@ function flyOnUpdate(u) {
     showNotice({ kind: 'info', title: 'WhatsApp video', message: reason });
   }
 }
-async function startFlyVideoCall({ contactName = '', toNumber = '', mode = 'avatar' } = {}) {
+async function startFlyVideoCall({ contactName = '', toNumber = '', mode = 'avatar', brief = '' } = {}) {
   if (!window.WaCallsFlyCall || !window.WaCallsMedia || !window.WaCallsMediaCore) {
     return showNotice({ kind: 'error', title: 'WhatsApp video', message: 'The call engine did not load. Reload the app and try again.' });
   }
@@ -2470,7 +2475,7 @@ async function startFlyVideoCall({ contactName = '', toNumber = '', mode = 'avat
     if (mode === 'live') {
       await openLiveSwap({ contactName: party.name, stream: liveStream });
     } else {
-      await openVideoCall({ contactName: party.name, toNumber, brief: FLY_CALL_BRIEF, calleeInput: calleeIn });
+      await openVideoCall({ contactName: party.name, toNumber, brief: brief || FLY_CALL_BRIEF, calleeInput: calleeIn });
     }
     if (flyCall) flyCall.avatarReady = true;
   } catch (e) {

@@ -1568,3 +1568,13 @@ body::before{content:""; position:absolute; top:0; left:0; right:0; height:var(-
 #videoCallScreen .vcPeerPh svg{width:46%; height:46%; display:block;}
 #videoCallScreen .vcSelfWrap{z-index:3;}
 #videoCallScreen .vcResize{z-index:2;}
+
+/* Video call screen: full screen. The caller fills it, the callee is the small picture, and the name card and
+   buttons sit over the video. A tap on the video hides or shows them (.chrome-off). */
+#videoCallScreen .vcStage{position:absolute; inset:0; flex:none; z-index:1;}
+#videoCallScreen .vcHeader{padding-bottom:28px; background:linear-gradient(to bottom, rgba(0,0,0,.45), rgba(0,0,0,0));}
+#videoCallScreen .vcControls{position:absolute; left:0; right:0; bottom:0; z-index:4; overflow:visible; padding:28px 0 calc(env(safe-area-inset-bottom) + 18px); background:linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0));}
+#videoCallScreen .vcControls .callGlow{display:none;}
+#videoCallScreen .vcSelfWrap{bottom:calc(env(safe-area-inset-bottom) + 120px);}
+#videoCallScreen .vcHeader, #videoCallScreen .vcControls{transition:opacity .2s ease;}
+#videoCallScreen.chrome-off .vcHeader, #videoCallScreen.chrome-off .vcControls{opacity:0; pointer-events:none;}
