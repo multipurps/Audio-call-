@@ -31,7 +31,7 @@
 </script>
 <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-11-18.2">
+<link rel="stylesheet" href="styles.css?v=2026-10-19.1">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -154,7 +154,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-11-18.2').catch(function (err) {
+        import('./app.js?v=2026-10-19.1').catch(function (err) {
           showBootError('Something went wrong. Check your connection and try again.', 'Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -1243,8 +1243,9 @@
     <div class="sectionLabel" style="margin-top:18px;">Calling lines</div>
     <div class="profileCard linkCard" id="callingLinesBtn">
       <div class="cIcon"><svg class="phoneIc" viewBox="0 0 24 24"><use href="#ic-phone"/></svg></div>
-      <div class="cBody"><div class="cValue">Calling lines</div><div class="hint" id="callingLinesSub">Phone number and WhatsApp</div></div>
-      <div class="cChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="cBody"><div class="cValue" id="callingLinesTitle">Calling lines</div><div class="hint" id="callingLinesSub">Not set up yet</div></div>
+      <button class="secondaryBtn hidden" id="callingLinesActionBtn" style="width:auto; flex:none; padding:9px 16px;">Remove</button>
+      <div class="cChevron" id="callingLinesChevron"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     </div>
 
     <div class="sectionLabel" style="margin-top:24px;">Telegram</div>
@@ -1660,11 +1661,11 @@
     <p class="callDetailAgainStatus" id="callDetailAgainStatus" role="status"></p>
   </div>
 </dialog>
-  <script src="btnLoading.js?v=2026-10-18.1" defer></script>
-  <script src="callWakeLock.js?v=2026-10-17.1" defer></script>
-  <script src="tabpill.js?v=2026-10-12.6" defer></script>
-  <script src="wacalls-media-core.js?v=2026-11-03.1" defer></script>
-  <script src="wacalls-media.js?v=2026-11-03.1" defer></script>
-  <script src="wacalls-call.js?v=2026-11-03.1" defer></script>
+  <script src="btnLoading.js?v=2026-10-19.1" defer></script>
+  <script src="callWakeLock.js?v=2026-10-19.1" defer></script>
+  <script src="tabpill.js?v=2026-10-19.1" defer></script>
+  <script src="wacalls-media-core.js?v=2026-10-19.1" defer></script>
+  <script src="wacalls-media.js?v=2026-10-19.1" defer></script>
+  <script src="wacalls-call.js?v=2026-10-19.1" defer></script>
 </body>
 </html>

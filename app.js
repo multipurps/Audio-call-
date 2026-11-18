@@ -4,6 +4,7 @@ import { createMicDownsampler, decodeAppCallFrame, describeAppCallMessage, descr
 import { primeAudioSession, createCallOutput, watchLifecycle, pickOutputMode, micNeedsRestart } from './lib/appCallOutput.js';
 import { createPlayback } from './lib/appCallPlayback.js';
 import { describeMonitorMessage, describeMonitorClose, noAudioMessage, MONITOR_NO_AUDIO_MS } from './lib/monitorStatus.js';
+import { callingLineCardView, removeLineConfirm } from './lib/callingLineCard.js';
 import { DEFAULT_MOOD, selectMood, toggleArgue, argueVisible, moodButtonLabel, moodPayload, moodChipVisible } from './lib/moodPicker.js';
 import { answeredCallPill, assistantCallPill, listenInPill, liveCallView, endedCallLabel, formatCallTimer, formatCallMinutes, TERMINAL_STATUSES } from './lib/callStatus.js';
 import { mountCreatorEmbed } from './lib/tiktokEmbed.js';
@@ -6003,7 +6004,7 @@ $('voiceApplyBtn').addEventListener('click', async () => {
 });
 
 $('voiceBtn').addEventListener('click', () => { openSheet('sheet-voice'); loadVoicePrefs(); });
-$('socialCallingBtn').addEventListener('click', () => { openSheet('sheet-social-calling'); loadSocialAccounts(); });
+$('socialCallingBtn').addEventListener('click', () => { openSheet('sheet-social-calling'); loadSocialAccounts(); loadLineState(); });
 
 // ---------- Connected accounts (Telegram / WhatsApp) ----------
 let whatsappLinking = false;
@@ -6366,10 +6367,19 @@ function applyChannelAvailability() {
     $('channelBadge').classList.remove('visible');
     $('briefInput').placeholder = CHANNEL_META.phone.placeholder;
   }
-  const parts = [];
-  if (phone) parts.push(lineState.line?.mode === 'rent' ? 'Rented number' : 'Your number');
-  if (whatsapp) parts.push('WhatsApp');
-  $('callingLinesSub').textContent = parts.length ? parts.join(' and ') : 'Not set up yet';
+  renderCallingLineCard();
+}
+
+// A connected number is shown on this row itself, like Telegram and WhatsApp: no trip to the setup page.
+function renderCallingLineCard() {
+  const view = callingLineCardView({ line: lineState.line, channels: lineState.channels || {} });
+  $('callingLinesTitle').textContent = view.title;
+  $('callingLinesSub').textContent = view.sub;
+  const btn = $('callingLinesActionBtn');
+  btn.classList.toggle('hidden', !view.action);
+  if (view.action) btn.textContent = view.action;
+  $('callingLinesChevron').classList.toggle('hidden', view.connected);
+  $('callingLinesBtn').classList.toggle('linkCard', !view.connected); // only a row that leads somewhere looks tappable
 }
 
 async function lineApi(action, { method = 'GET', body, query = '' } = {}) {
@@ -6429,7 +6439,21 @@ async function lineStepDone() {
 }
 
 function openLineSetup() { lineSetupVoluntary = true; loadLineState().then(showLineSetup); }
-$('callingLinesBtn').addEventListener('click', openLineSetup);
+$('callingLinesBtn').addEventListener('click', () => {
+  if (callingLineCardView({ line: lineState.line, channels: lineState.channels || {} }).connected) return; // already connected: nothing to open
+  openLineSetup();
+});
+// Remove/release from the row itself or from the setup page: one routine.
+async function removeCallingLine() {
+  if (!(await confirmSheet(removeLineConfirm(lineState.line)))) return false;
+  await lineApi('line-remove', { method: 'POST', body: {} });
+  await loadLineState(); // re-renders the row
+  return true;
+}
+$('callingLinesActionBtn').addEventListener('click', async (e) => {
+  e.stopPropagation();
+  try { await removeCallingLine(); } catch (err) { showToast(err.message); }
+});
 $('lineSetupBack').addEventListener('click', () => {
   stopLinePolls();
   authScreen.classList.add('hidden');
@@ -6438,9 +6462,7 @@ $('lineSetupBack').addEventListener('click', () => {
   if (lineSetupVoluntary) openSheet('sheet-social-calling');
 });
 $('lineRemoveLink').addEventListener('click', async () => {
-  const rented = lineState.line?.mode === 'rent';
-  if (!(await confirmSheet({ title: rented ? 'Release your rented number?' : 'Remove your verified number?', message: rented ? 'You will lose it.' : '', confirmLabel: rented ? 'Release' : 'Remove', destructive: true }))) return;
-  try { await lineApi('line-remove', { method: 'POST', body: {} }); await loadLineState(); showLineSetup(); }
+  try { if (await removeCallingLine()) showLineSetup(); }
   catch (err) { hint('lineNumHint', err.message); }
 });
 
