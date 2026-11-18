@@ -6409,7 +6409,10 @@ function showLineSetup({ restore = true } = {}) {
   $('lineRentBtn').disabled = !rent.enabled;
   $('lineRentTag').textContent = rent.enabled ? 'Highly recommended' : 'Coming soon';
   const usable = lineState.line && ['verified', 'rented'].includes(lineState.line.status);
-  $('lineCurrentRow').classList.toggle('hidden', !(lineSetupVoluntary && usable));
+  // A number is already set up: show it with Remove, and no form to add another one (Remove comes first).
+  $('lineFormBlock').classList.toggle('hidden', !!usable);
+  $('lineSetupSub').textContent = usable ? 'Your number is set up.' : 'Choose one to continue.';
+  $('lineCurrentRow').classList.toggle('hidden', !usable);
   if (usable) $('lineCurrentNum').textContent = lineState.line.phoneNumber;
   showSetupPanel('panelLineSetup');
   // A verification call may still be waiting from before a reload or from leaving the app to answer the call,
