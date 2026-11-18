@@ -293,9 +293,9 @@
       <button class="authBack" id="lineCodeBack" aria-label="Back"><svg viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <div class="authLogo"><img src="icon-192.png" alt="" style="width:100%;height:100%;border-radius:20px;object-fit:cover;"></div>
       <div class="authTitle authTitleLg">Verify Your Number</div>
-      <div class="authSub" id="lineCodeSub">You will get a call. Answer it and enter this code on your keypad.</div>
-      <div class="codeCardValue authCode" id="lineCodeValue">------</div>
-      <button class="secondaryBtn pairCopyBtn" id="lineCodeCopy" type="button" data-copy-from="lineCodeValue" disabled style="margin-top:12px;"><svg viewBox="0 0 24 24" fill="none" width="18" height="18"><rect x="9" y="9" width="11" height="11" rx="2.5" stroke="currentColor" stroke-width="1.8"/><path d="M5 15V6.5A2.5 2.5 0 0 1 7.5 4H15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span>Copy code</span></button>
+      <div class="authSub" id="lineCodeSub">You will get a call. Answer it, listen for the 6-digit code, and enter it below.</div>
+      <div class="inputWrap"><input type="text" id="lineCodeInput" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="6-digit code" autocomplete="one-time-code"></div>
+      <button class="primaryBtn" id="lineCodeSubmit" style="margin-top:6px;">Verify</button>
       <div class="authHint" id="lineCodeHint"></div>
       <button class="secondaryBtn" id="lineCodeResend" style="margin-top:14px;">Call me again</button>
     </div>

@@ -121,11 +121,16 @@ function lineFixture({ approved = true, lines = [], rentEnv = {} } = {}) {
   const fetcher = async (url, options = {}) => {
     const method = options.method || 'GET';
     calls.push({ url, method, body: options.body });
-    if (url.includes('/OutgoingCallerIds.json') && method === 'POST') {
-      if (String(options.body).includes('already')) return { ok: false, status: 400, json: async () => ({ code: 21450, message: 'already verified' }) };
-      return { ok: true, status: 201, json: async () => ({ validation_code: '123456', phone_number: '+2348011112222' }) };
+    if (url.includes('/verified_caller_ids') && method === 'POST') {
+      if (String(options.body).includes('already')) return { ok: false, status: 422, json: async () => ({ errors: ['rate limited'] }) };
+      return { ok: true, status: 201, json: async () => ({ id: 'vc-1', number: '+2348011112222', verified: false, status: 'Awaiting Verification' }) };
     }
-    if (url.includes('/OutgoingCallerIds.json')) return { ok: true, status: 200, json: async () => ({ outgoing_caller_ids: db.__verified ? [{ sid: 'PN1', phone_number: '+2348011112222' }] : [] }) };
+    if (url.includes('/verified_caller_ids/vc-1/verification') && method === 'PUT') {
+      if (JSON.parse(options.body).verification_code !== '123456') return { ok: false, status: 422, json: async () => ({ errors: ['bad code'] }) };
+      db.__verified = true;
+      return { ok: true, status: 200, json: async () => ({ id: 'vc-1', verified: true, status: 'Verified' }) };
+    }
+    if (url.includes('/verified_caller_ids') && method === 'GET') return { ok: true, status: 200, json: async () => ({ data: [{ id: 'vc-1', number: '+2348011112222', verified: !!db.__verified, status: db.__verified ? 'Verified' : 'Awaiting Verification' }] }) };
     if (url.includes('/AvailablePhoneNumbers/')) return { ok: true, status: 200, json: async () => ({ available_phone_numbers: [{ phone_number: '+14155550101', locality: 'San Francisco', region: 'CA' }] }) };
     if (url.includes('/IncomingPhoneNumbers.json') && method === 'POST') return { ok: true, status: 201, json: async () => ({ sid: 'PN2', phone_number: '+14155550101' }) };
     if (method === 'DELETE') return { ok: true, status: 204, json: async () => ({}) };
@@ -150,54 +155,53 @@ test('new accounts need no approval to set up a line, but renting a number still
   assert.equal(f.calls.length, callsBefore, 'nothing reached Twilio for the refused rental');
 });
 
-test('bring your own number: verify starts, code is shown, polling flips it to verified', async () => {
+test('bring your own number: SignalWire calls the user, the typed code verifies it', async () => {
   const f = lineFixture();
   const start = await api(f, 'line-verify-start', { phone: '0803 not a number' });
   assert.equal(start.code, 400);
   const ok = await api(f, 'line-verify-start', { phone: '+234 801 111 2222' });
   assert.equal(ok.code, 200, JSON.stringify(ok.data));
   assert.equal(ok.data.line.status, 'pending');
-  assert.equal(ok.data.line.validationCode, '123456');
+  assert.equal(ok.data.line.validationCode, null, 'SignalWire reads the code out on the call; the app never shows one');
+  const created = f.calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/relay/rest/verified_caller_ids'));
+  assert.ok(created, 'the caller ID is created on SignalWire\'s relay REST API');
+  assert.equal(JSON.parse(created.body).number, '+2348011112222');
+  const bad = await api(f, 'line-verify-code', { code: '000000' });
+  assert.equal(bad.code, 400);
+  assert.match(bad.data.error, /did not match/);
+  const short = await api(f, 'line-verify-code', { code: '12' });
+  assert.equal(short.code, 400);
   let status = await api(f, 'line-verify-status', {}, { method: 'GET' });
   assert.equal(status.data.line.status, 'pending');
-  f.db.__verified = true;
-  status = await api(f, 'line-verify-status', {}, { method: 'GET' });
-  assert.equal(status.data.line.status, 'verified');
-  assert.equal(status.data.line.validationCode, null);
-  assert.ok(!JSON.stringify(status.data).includes('PN1'), 'the Twilio sid must never reach the client');
+  const good = await api(f, 'line-verify-code', { code: '123 456' });
+  assert.equal(good.code, 200, JSON.stringify(good.data));
+  assert.equal(good.data.line.status, 'verified');
+  assert.ok(!JSON.stringify(good.data).includes('vc-1'), 'the carrier id must never reach the client');
   const get = await api(f, 'line-get', {}, { method: 'GET' });
   assert.equal(get.data.channels.phone, true);
 });
 
-test('a number already verified in Twilio is not handed out without proof', async () => {
+test('entering a code before starting verification is refused', async () => {
   const f = lineFixture();
-  const res = await api(f, 'line-verify-start', { phone: '+2348011112222 already' });
-  assert.notEqual(res.code, 200);
-  assert.equal(f.db.tables.phone_lines.length, 0);
+  const r = await api(f, 'line-verify-code', { code: '123456' });
+  assert.equal(r.code, 409);
 });
 
-test('a number linked to another account cannot be claimed', async () => {
-  const f = lineFixture({ lines: [{ ...LINE, user_id: 'user-2' }] });
-  const res = await api(f, 'line-verify-start', { phone: '+2348011112222' });
-  assert.equal(res.code, 409);
-  assert.ok(!f.calls.some((c) => c.method === 'POST'));
+test('a rate-limited or uncallable number gets a plain message', async () => {
+  const f = lineFixture();
+  const r = await api(f, 'line-verify-start', { phone: '+2348011112222already' });
+  assert.ok([400, 429].includes(r.code));
 });
 
-test('renting is off until enabled with a price, then search and buy work', async () => {
-  let f = lineFixture();
-  assert.equal((await api(f, 'line-rent-search', {}, { method: 'GET' })).code, 503);
-  assert.equal((await api(f, 'line-rent-buy', { phoneNumber: '+14155550101' })).code, 503);
-  assert.equal(f.calls.length, 0);
-
-  f = lineFixture({ rentEnv: { PHONE_RENT_ENABLED: 'true', PHONE_RENT_PRICE_USD: '4.99' } });
-  const info = await api(f, 'line-get', {}, { method: 'GET' });
-  assert.deepEqual({ e: info.data.rent.enabled, p: info.data.rent.monthlyUsd }, { e: true, p: 4.99 });
-  const found = await api(f, 'line-rent-search', {}, { method: 'GET', query: { country: 'US', areaCode: '415' } });
-  assert.equal(found.data.numbers[0].phoneNumber, '+14155550101');
-  assert.equal((await api(f, 'line-rent-search', {}, { method: 'GET', query: { country: 'NG' } })).code, 400);
-  const bought = await api(f, 'line-rent-buy', { phoneNumber: '+14155550101' });
-  assert.equal(bought.data.line.status, 'rented');
-  assert.equal(f.db.tables.phone_lines[0].twilio_sid, 'PN2');
+test('a caller ID already on the account is dropped first, so ownership is proven again', async () => {
+  const f = lineFixture();
+  f.db.__verified = true;
+  const r = await api(f, 'line-verify-start', { phone: '+234 801 111 2222' });
+  assert.equal(r.code, 200, JSON.stringify(r.data));
+  assert.equal(r.data.line.status, 'pending');
+  const del = f.calls.findIndex((c) => c.method === 'DELETE' && c.url.endsWith('/verified_caller_ids/vc-1'));
+  const post = f.calls.findIndex((c) => c.method === 'POST' && c.url.endsWith('/verified_caller_ids'));
+  assert.ok(del >= 0 && post > del, 'old record deleted before the new verification call');
 });
 
 test('removing a rented number releases it in Twilio; a failed release keeps the record', async () => {

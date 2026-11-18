@@ -6364,22 +6364,11 @@ $('lineRemoveLink').addEventListener('click', async () => {
 
 // -- own number: submit, then a separate page shows the code
 function showLineCode(line) {
-  $('lineCodeSub').textContent = `You will get a call on ${line.phoneNumber}. Answer it and enter this code on your keypad.`;
-  $('lineCodeValue').textContent = (line.validationCode || '').split('').join(' ') || '------';
-  $('lineCodeValue').dataset.code = line.validationCode || '';
-  $('lineCodeCopy').disabled = !line.validationCode;
-  hint('lineCodeHint', 'Waiting for you to enter the code…');
+  $('lineCodeSub').textContent = `We are calling ${line.phoneNumber}. Answer it, listen for the 6-digit code, and enter it below.`;
+  $('lineCodeInput').value = '';
+  hint('lineCodeHint', '');
   showSetupPanel('panelLineCode');
   clearInterval(lineVerifyTimer);
-  let tries = 0;
-  lineVerifyTimer = setInterval(async () => {
-    tries += 1;
-    try {
-      const r = await lineApi('line-verify-status');
-      if (r.line?.status === 'verified') { clearInterval(lineVerifyTimer); lineStepDone(); }
-      else if (tries >= 45) { clearInterval(lineVerifyTimer); hint('lineCodeHint', 'No code received. Tap "Call me again".'); }
-    } catch (err) { clearInterval(lineVerifyTimer); hint('lineCodeHint', err.message); }
-  }, 4000);
 }
 async function startOwnVerification(phone) {
   const { line } = await lineApi('line-verify-start', { method: 'POST', body: { phone } });
@@ -6392,6 +6381,15 @@ $('lineNumSubmit').addEventListener('click', async () => {
   hint('lineNumHint', '');
   try { await startOwnVerification(phone); } catch (err) { hint('lineNumHint', err.message); }
   finally { $('lineNumSubmit').disabled = false; }
+});
+$('lineCodeSubmit').addEventListener('click', async () => {
+  const code = $('lineCodeInput').value.replace(/\D/g, '');
+  if (code.length !== 6) { hint('lineCodeHint', 'Enter the 6-digit code from the call.'); return; }
+  $('lineCodeSubmit').disabled = true;
+  hint('lineCodeHint', 'Checking…');
+  try { await lineApi('line-verify-code', { method: 'POST', body: { code } }); hint('lineCodeHint', ''); lineStepDone(); }
+  catch (err) { hint('lineCodeHint', err.message); }
+  finally { $('lineCodeSubmit').disabled = false; }
 });
 $('lineCodeResend').addEventListener('click', async () => {
   const phone = lineState.line?.phoneNumber || $('lineNumInput').value.trim();
