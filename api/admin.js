@@ -379,7 +379,7 @@ async function overview(req, res, supabase) {
     const sold = splitByWindow(paid, 'paid_at', sinceMs);
     const soldPrev = splitByWindow(paid, 'paid_at', prevSinceMs, sinceMs);
     // Two windows in one read: this period and the one before it, so every card can show a real trend.
-    const callsBoth = await fetchAll(() => supabase.from('calls').select('user_id, duration_seconds, created_at, platform').gte('created_at', new Date(prevSinceMs).toISOString()).order('created_at'));
+    const callsBoth = await fetchAll(() => supabase.from('calls').select('user_id, duration_seconds, created_at, platform, is_video').gte('created_at', new Date(prevSinceMs).toISOString()).order('created_at'));
     const calls = splitByWindow(callsBoth, 'created_at', sinceMs);
     const callsPrev = splitByWindow(callsBoth, 'created_at', prevSinceMs, sinceMs);
     const { count: totalUsers } = await supabase.from('profiles').select('user_id', { count: 'exact', head: true });
@@ -387,7 +387,7 @@ async function overview(req, res, supabase) {
     const { count: newUsersPrev } = await supabase.from('profiles').select('user_id', { count: 'exact', head: true }).gte('created_at', new Date(prevSinceMs).toISOString()).lt('created_at', since);
     const rates = await getRates(supabase);
 
-    const minutesOf = (rows) => rows.reduce((a, c) => a + Math.ceil((c.duration_seconds || 0) / 60), 0); // same rounding the billing code uses
+    const minutesOf = (rows) => rows.reduce((a, c) => a + Math.ceil((c.duration_seconds || 0) / 60) * (c.is_video ? 2 : 1), 0); // credits: whole minutes, video at 2 a minute (sql/046)
     const minutesUsed = minutesOf(calls);
     const ratePerMin = rates.twilio + rates.xai + rates.openai;
     const revenue = sold.reduce((a, p) => a + Number(p.amount), 0);

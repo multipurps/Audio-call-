@@ -203,7 +203,7 @@ const skeleton = (n = 4) => Array.from({ length: n }, () => '<div class="skel"><
 const shortDay = (d) => new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
 
 let ov = null, chartTab = 'calls';
-const TABS = [['calls', 'Calls'], ['minutes', 'Minutes'], ['users', 'Active users'], ['revenue', 'Revenue']];
+const TABS = [['calls', 'Calls'], ['minutes', 'Credits'], ['users', 'Active users'], ['revenue', 'Revenue']];
 const SERIES_KEY = { calls: 'calls', minutes: 'minutes', users: 'activeUsers', revenue: 'revenue' };
 
 function lineChart(o) {
@@ -237,7 +237,7 @@ function drawOverview() {
     <div class="panel" id="liveCard"><div class="liveBig"><b id="liveActive">–</b><span>calls happening now</span></div><div class="liveSub" id="liveSub"></div></div>` : ''}
     <div class="kpiGrid">
       ${kpi('blue', 'Calls', num(o.calls), o.trends.calls)}
-      ${kpi('dark', 'Minutes used', num(o.minutesUsed), o.trends.minutes)}
+      ${kpi('dark', 'Credits used', num(o.minutesUsed), o.trends.minutes)}
       ${kpi('dark', 'New users', num(o.newUsers), o.trends.newUsers)}
       ${kpi('blue', 'Active users', num(o.activeUsers), o.trends.activeUsers)}
     </div>
@@ -246,8 +246,8 @@ function drawOverview() {
     <div class="grp">
       <div class="gr"><span class="k">Revenue</span><span class="v">${money(o.revenue, o.currency)} <small>${pctLabel(o.trends.revenue)}</small></span></div>
       <div class="gr"><span class="k">Est. profit</span><span class="v">${hasRates ? `<span class="${profit < 0 ? 'aNeg' : 'aPos'}">${money(profit, o.currency)}</span>` : 'set provider rates in Costs'}</span></div>
-      <div class="gr"><span class="k">Minutes sold</span><span class="v">${num(o.minutesSold)} · ${o.payingUsers} paying</span></div>
-      <div class="gr"><span class="k">Avg per call</span><span class="v">${o.calls ? `${num(o.minutesUsed / o.calls)}m` : '—'}</span></div>
+      <div class="gr"><span class="k">Credits sold</span><span class="v">${num(o.minutesSold)} · ${o.payingUsers} paying</span></div>
+      <div class="gr"><span class="k">Avg per call</span><span class="v">${o.calls ? `${num(o.minutesUsed / o.calls)} cr` : '—'}</span></div>
       <div class="gr"><span class="k">All-time revenue</span><span class="v">${money(o.allTimeRevenue, o.currency)}</span></div>
       <div class="gr"><span class="k">Total users</span><span class="v">${num(o.totalUsers)}</span></div>
     </div>
@@ -399,7 +399,7 @@ async function renderAlertsCard(el) {
   box.className = 'aCard wide';
   box.style.marginTop = '12px';
   box.innerHTML = `<div class="l">Purchase alerts</div>
-    <div class="s" style="margin:6px 0 10px;">${on ? 'On for this device. You get a notification whenever someone pays for minutes.' : 'Get a notification on this device whenever someone pays for minutes.'}</div>
+    <div class="s" style="margin:6px 0 10px;">${on ? 'On for this device. You get a notification whenever someone pays for credits.' : 'Get a notification on this device whenever someone pays for credits.'}</div>
     ${on ? '' : '<button class="aBtn" id="alertsBtn">Turn on purchase alerts</button>'}<div class="aHint" id="alertsHint"></div>`;
   el.appendChild(box);
   const btn = box.querySelector('#alertsBtn');
@@ -426,7 +426,7 @@ async function loadUsers({ quiet = false } = {}) {
     $('userCount').textContent = `${list.length} of ${usersCache.length} users`;
     $('userRows').innerHTML = list.map((u) => {
       const total = Math.max(1, u.minutes_limit + u.bonus_minutes);
-      return `<button class="person" data-id="${u.id}">${avatar(u.email)}<span class="who"><div class="t">${esc(u.email)}</div><div class="m">${num(minutesLeft(u))} min left · used ${num(u.minutes_used)}</div><div class="meter"><i style="width:${Math.min(100, (minutesLeft(u) / total) * 100)}%"></i></div></span>${ICON.chev}</button>`;
+      return `<button class="person" data-id="${u.id}">${avatar(u.email)}<span class="who"><div class="t">${esc(u.email)}</div><div class="m">${num(minutesLeft(u))} credits left · used ${num(u.minutes_used)}</div><div class="meter"><i style="width:${Math.min(100, (minutesLeft(u) / total) * 100)}%"></i></div></span>${ICON.chev}</button>`;
     }).join('') || '<div class="empty">No users.</div>';
   };
   draw();
@@ -444,22 +444,22 @@ async function openDetail(id) {
   const row = (k, v) => `<div class="gr"><span class="k">${k}</span><span class="v">${v}</span></div>`;
   $('dBody').innerHTML = `<div class="dHero">${avatar(u.email)}<div class="nm">${esc(u.email)}</div></div>
     <div class="grp">${row('Email', esc(u.email))}${row('Joined', u.created_at ? new Date(u.created_at).toLocaleDateString() : '—')}${row('Number rental', u.approved ? 'Allowed' : 'Not allowed')}</div>
-    <div class="grp">${row('Minutes left', num(minutesLeft(u)))}${row('Used this period', num(u.minutes_used))}${row('Monthly limit', num(u.minutes_limit))}${row('Credit minutes', num(u.bonus_minutes))}</div>
+    <div class="grp">${row('Credits left', num(minutesLeft(u)))}${row('Used this period', num(u.minutes_used))}${row('Monthly limit', num(u.minutes_limit))}${row('Bonus credits', num(u.bonus_minutes))}</div>
     <div class="dActions"><button class="aBtn ghost" id="dLimit">Set limit</button><button class="aBtn ghost" id="dCredit">Add credit</button><button class="aBtn ghost" id="dRent">${u.approved ? 'Stop rental' : 'Allow rental'}</button></div>
     <div class="sectionT">RECENT CALLS</div><div class="grp" id="dCalls"><div class="gr"><span class="k">Loading…</span></div></div>`;
   $('dLimit').onclick = async () => {
-    const v = await promptSheet({ title: 'Monthly limit', message: 'Call minutes per month for this account.', value: String(u.minutes_limit), placeholder: 'Minutes', multiline: false, confirmLabel: 'Save' });
+    const v = await promptSheet({ title: 'Monthly limit', message: 'Credits per month for this account. A video minute costs 2 credits, an audio minute 1.', value: String(u.minutes_limit), placeholder: 'Credits', multiline: false, confirmLabel: 'Save' });
     if (v === null || v === undefined) return;
     const n = Number(v);
-    if (!Number.isFinite(n) || n < 0) return errorSheet('Enter minutes of 0 or more.');
+    if (!Number.isFinite(n) || n < 0) return errorSheet('Enter credits of 0 or more.');
     await act(() => api('set-approval', { method: 'POST', body: { targetUserId: u.id, monthlyMinuteLimit: n } }), 'Limit saved.', id);
   };
   $('dCredit').onclick = async () => {
-    const v = await promptSheet({ title: 'Add credit', message: `Minutes to add for ${u.email}. Use a negative number to remove.`, placeholder: 'Minutes', multiline: false, confirmLabel: 'Apply' });
+    const v = await promptSheet({ title: 'Add credit', message: `Credits to add for ${u.email}. Use a negative number to remove.`, placeholder: 'Credits', multiline: false, confirmLabel: 'Apply' });
     if (v === null || v === undefined) return;
     const n = Number(v);
-    if (!Number.isFinite(n) || n === 0) return errorSheet('Enter minutes, not 0.');
-    await act(() => api('grant-credit', { method: 'POST', body: { targetUserId: u.id, minutes: n, note: 'Admin' } }), `${n > 0 ? '+' : ''}${n} min applied.`, id);
+    if (!Number.isFinite(n) || n === 0) return errorSheet('Enter credits, not 0.');
+    await act(() => api('grant-credit', { method: 'POST', body: { targetUserId: u.id, minutes: n, note: 'Admin' } }), `${n > 0 ? '+' : ''}${n} credits applied.`, id);
   };
   $('dRent').onclick = async () => {
     const ok = await confirmSheet({ title: u.approved ? 'Stop number rental?' : 'Allow number rental?', message: 'New accounts do not need approval. This only controls renting a phone number.', confirmLabel: u.approved ? 'Stop' : 'Allow', destructive: !!u.approved });
@@ -491,7 +491,7 @@ async function loadUsage({ quiet = false } = {}) {
     if (!users.length) { el.innerHTML = `<div class="empty">No calls in the last ${range} days.</div>`; return; }
     const max = Math.max(...users.map((u) => u.minutes), 1);
     el.innerHTML = `<div class="liveBar"><span>${users.length} user${users.length === 1 ? '' : 's'} on calls · last ${range} days</span></div>` + users.map((u) => `<div class="person" style="cursor:default">${avatar(u.email)}<span class="who"><div class="t">${esc(u.email)}</div>
-      <div class="m">${u.calls} call${u.calls === 1 ? '' : 's'}${u.lastActive ? ' · last ' + esc(relTime(u.lastActive)) : ''}</div><div class="meter"><i style="width:${(u.minutes / max) * 100}%"></i></div></span><b>${num(u.minutes)}m</b></div>`).join('');
+      <div class="m">${u.calls} call${u.calls === 1 ? '' : 's'}${u.lastActive ? ' · last ' + esc(relTime(u.lastActive)) : ''}</div><div class="meter"><i style="width:${(u.minutes / max) * 100}%"></i></div></span><b>${num(u.minutes)} cr</b></div>`).join('');
   } catch (err) { if (!quiet) fail(el, err); }
 }
 
@@ -504,17 +504,17 @@ async function loadCredits() {
     <div class="aField"><select id="creditUser">${usersCache.map((u) => `<option value="${u.id}">${esc(u.email)} (${num(Math.max(0, u.minutes_limit + u.bonus_minutes - u.minutes_used))} left)</option>`).join('')}</select></div>
     <div class="aField"><input type="number" id="creditMin" placeholder="Minutes" min="1" step="1"></div>
     <div class="aField"><input type="text" id="creditNote" placeholder="Note (optional)" maxlength="200"></div>
-    <div class="aFlex"><button class="aBtn" id="creditAdd" style="flex:1">Add minutes</button><button class="aBtn ghost" id="creditSub" style="flex:1">Remove</button></div>
+    <div class="aFlex"><button class="aBtn" id="creditAdd" style="flex:1">Add credits</button><button class="aBtn ghost" id="creditSub" style="flex:1">Remove</button></div>
     <div class="aHint" id="creditHint">Purchases are credited automatically after payment. Use this for gifts, refunds and fixes.</div></div>
     <div class="l" style="margin:16px 4px 8px;color:var(--muted);font-size:13px;">Recent credits</div><div id="ledger"><div class="aHint">Loading…</div></div>`;
   if (keep) $('creditUser').value = keep;
   const apply = async (sign) => {
     const m = Number($('creditMin').value);
-    if (!Number.isFinite(m) || m <= 0) { $('creditHint').textContent = 'Enter minutes above 0.'; return; }
+    if (!Number.isFinite(m) || m <= 0) { $('creditHint').textContent = 'Enter credits above 0.'; return; }
     $('creditHint').textContent = 'Applying…';
     try {
       const r = await api('grant-credit', { method: 'POST', body: { targetUserId: $('creditUser').value, minutes: sign * m, note: $('creditNote').value } });
-      $('creditHint').textContent = `Done. Credit balance is now ${num(r.bonus_minutes)} min.`;
+      $('creditHint').textContent = `Done. Credit balance is now ${num(r.bonus_minutes)} credits.`;
       $('creditMin').value = ''; $('creditNote').value = '';
       loadLedger();
     } catch (err) { $('creditHint').textContent = err.message; }
@@ -527,7 +527,7 @@ async function loadLedger() {
   const el = $('ledger');
   try {
     const { entries } = await api('credit-ledger');
-    el.innerHTML = entries.map((e) => `<div class="aRow"><div class="aFlex"><div class="t" style="min-width:0">${esc(emailOf(e.user_id))}</div><b class="${e.minutes < 0 ? 'aNeg' : 'aPos'}">${e.minutes > 0 ? '+' : ''}${num(e.minutes)}m</b></div>
+    el.innerHTML = entries.map((e) => `<div class="aRow"><div class="aFlex"><div class="t" style="min-width:0">${esc(emailOf(e.user_id))}</div><b class="${e.minutes < 0 ? 'aNeg' : 'aPos'}">${e.minutes > 0 ? '+' : ''}${num(e.minutes)} cr</b></div>
       <div class="m">${e.source === 'purchase' ? 'Purchase' : 'Admin'}${e.note ? ' · ' + esc(e.note) : ''} · ${new Date(e.at).toLocaleString()}</div></div>`).join('') || '<div class="aHint">No credits yet.</div>';
   } catch (err) { fail(el, err); }
 }
