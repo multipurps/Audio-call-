@@ -16,7 +16,7 @@ function fixture() {
       const body = JSON.parse(options.body);
       return { ok: true, json: async () => ({ choices: [{ message: { content: body.response_format ? JSON.stringify(intent) : "I'll confirm lunch at noon and keep it friendly." } }] }) };
     }
-    if (url.includes('twilio.com')) return { ok: true, json: async () => ({ sid: 'CA-test' }) };
+    if (url.includes('signalwire.com')) return { ok: true, json: async () => ({ sid: 'CA-test' }) };
     throw new Error(`Unexpected external call: ${url}`);
   };
   return { db, network, fetcher, setIntent(value) { intent = value; } };
@@ -27,7 +27,7 @@ async function setup() {
   const { default: handler } = await loadApi('api/assistant.js', f.db, f.fetcher);
   return { ...f, handler };
 }
-const twilioCount = (f) => f.network.filter((r) => r.url.includes('twilio.com')).length;
+const twilioCount = (f) => f.network.filter((r) => r.url.includes('signalwire.com')).length;
 const script = 'Confirm lunch at noon. Please keep it friendly and mention the window table.';
 async function prepare(f, target = { contactId: 'contact-1' }, sessionId) {
   const result = await request(f.handler, 'prepareCall', { text: script, target, sessionId });
@@ -55,7 +55,7 @@ test('prepare persists raw script and summary without dialing; confirm uses immu
   assert.equal(twilioCount(f), 1);
   assert.equal(f.db.tables.calls[0].objective, script);
   assert.equal(f.db.tables.calls[0].session_id, data.sessionId);
-  assert.equal(f.network.find((r) => r.url.includes('twilio.com')).options.body.get('To'), '+14155552671');
+  assert.equal(f.network.find((r) => r.url.includes('signalwire.com')).options.body.get('To'), '+14155552671');
 });
 
 test('two concurrent Call Now requests make exactly one Twilio request', async () => {
@@ -135,7 +135,7 @@ test('resumed chat exposes persisted confirmation and Recent Chat filters unrela
 
 test('provider errors consume the plan instead of enabling accidental redial', async () => {
   const f = fixture();
-  const failureFetch = async (url, options) => url.includes('twilio.com')
+  const failureFetch = async (url, options) => url.includes('signalwire.com')
     ? { ok: false, status: 500, text: async () => 'Provider test failure' } : f.fetcher(url, options);
   const { default: handler } = await loadApi('api/assistant.js', f.db, failureFetch);
   f.handler = handler;
@@ -219,7 +219,7 @@ test('lost provider response is marked uncertain and cannot be redialed with the
   const f = fixture();
   let attempts = 0;
   const { default: handler } = await loadApi('api/assistant.js', f.db, async (url, options) => {
-    if (url.includes('twilio.com')) { attempts++; throw new Error('simulated connection reset'); }
+    if (url.includes('signalwire.com')) { attempts++; throw new Error('simulated connection reset'); }
     return f.fetcher(url, options);
   });
   f.handler = handler;

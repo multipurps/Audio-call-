@@ -56,6 +56,9 @@ test('assistant link: hello, caller audio up, speech down (paced), interrupt, pi
   assert.deepEqual([h.type, h.sessionId, h.platform, h.sampleRate, h.channels, h.encoding, h.secret, h.userId],
     ['hello', 'call-4242', 'signal', 16000, 1, 'pcm_s16le', 's3', 'user-1']);
   assert.equal(link._state().ready, true);
+  // the callee answered (the link opened on CONNECTED): the assistant must be told, or it never greets
+  await sleep(50);
+  assert.equal(mock.seen.controls.filter((c) => c.type === 'call_active').length, 1);
 
   // 100 ms of caller audio at 48k -> five 20 ms frames of 640 bytes at 16k
   audio.fromCaller.write(pcm(4800));

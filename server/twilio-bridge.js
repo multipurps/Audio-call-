@@ -15,7 +15,7 @@
 // resolves the calls row from that id.
 
 import { streamStart, inboundAudio, mediaMessage, clearMessage } from './streamProtocol.js';
-import { hangupCall } from '../lib/telephony.js';
+import { hangupCall, pipecatPhoneEnabled } from '../lib/telephony.js';
 const MAGIC = Buffer.from('ACAF');
 const HEADER_LEN = 28;
 const TYPE_AUDIO_IN = 1;
@@ -26,11 +26,7 @@ const ENC_MULAW = 2;
 const SAMPLE_RATE = 8000;
 
 export function bridgeEnabled(env = process.env) {
-  return (
-    String(env.TWILIO_VIA_PIPECAT || '').toLowerCase() === 'true' &&
-    !!env.ASSISTANT_BRIDGE_URL &&
-    !!env.ASSISTANT_BRIDGE_SECRET
-  );
+  return pipecatPhoneEnabled(env);
 }
 
 export function packFrame({ type, encoding, sampleRate, sequence, payload, now = Date.now() }) {

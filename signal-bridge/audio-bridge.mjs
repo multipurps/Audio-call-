@@ -147,6 +147,7 @@ export function connectAssistant({ url, secret, callId, userId, audio, onHangup,
   const down = new Downsampler48to16();
   const up = new Upsampler16to48();
   let ws = null, ready = false, closed = false, seq = 0;
+  let answerSent = false; // call_active goes once per call, like the WhatsApp and phone bridges
   let inBuf = Buffer.alloc(0);
   let outQueue = Buffer.alloc(0);
   let reconnectSince = 0, reconnectTimer = null;
@@ -210,6 +211,9 @@ export function connectAssistant({ url, secret, callId, userId, audio, onHangup,
       case 'ready':
         ready = true; reconnectSince = 0;
         log('ready');
+        // The Pipecat service holds the greeting until it knows the callee answered. This link opens only
+        // once the Signal call is CONNECTED, so announce that answer here (the other bridges do the same).
+        if (!answerSent) { answerSent = true; sendControl({ type: 'call_active' }); }
         break;
       case 'ping': sendControl({ type: 'pong' }); break;
       case 'interrupt': clearPlayout(); break;

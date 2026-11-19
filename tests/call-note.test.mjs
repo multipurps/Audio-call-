@@ -32,7 +32,8 @@ import { pcm16ToMulawSample, packFrame, parseFrame } from '../server/twilio-brid
 test('session id: social uses provider id, phone uses calls.id only when bridged', () => {
   assert.equal(callSessionId({ platform: 'whatsapp', platform_call_id: 'w1', id: 'u' }, {}), 'call-w1');
   assert.equal(callSessionId({ platform: 'phone', id: 'u1', platform_call_id: 'CA1' }, {}), null);
-  assert.equal(callSessionId({ platform: 'phone', id: 'u1' }, { TWILIO_VIA_PIPECAT: 'true' }), 'call-u1');
+  assert.equal(callSessionId({ platform: 'phone', id: 'u1' }, { ASSISTANT_BRIDGE_URL: 'wss://a.test/stream', ASSISTANT_BRIDGE_SECRET: 's' }), 'call-u1');
+  assert.equal(callSessionId({ platform: 'phone', id: 'u1' }, { ASSISTANT_BRIDGE_URL: 'wss://a.test/stream', ASSISTANT_BRIDGE_SECRET: 's', TWILIO_VIA_PIPECAT: 'false' }), null);
 });
 
 test('mu-law encode round-trips against known G.711 values', () => {
