@@ -2158,6 +2158,8 @@ async function startVideoOnWhatsApp(contact) {
   contactPickMode = null;
   const mode = await chooseVideoCallType();
   if (!mode) return;
+  // Avatar takes instructions first, like an audio call: nothing is dialled until they are sent.
+  if (mode === 'avatar') { beginPreCall({ contactId: contact.id, toNumber: contact.phone_number, name: contact.name, kind: 'contact' }, 'whatsapp', 'avatar'); return; }
   startFlyVideoCall({ contactName: contact.name, toNumber: contact.phone_number, mode });
 }
 function positionActionSheet(dialog, anchorEl) {
@@ -2188,7 +2190,8 @@ document.querySelectorAll('[data-method]').forEach((btn) => btn.addEventListener
   const wasVideo = contactPickMode === 'video';
   contactPickMode = null;
   // WhatsApp video goes through WaCalls on Fly: the avatar or Live Swap goes to the callee.
-  if (wasVideo && btn.dataset.method === 'whatsapp') { startFlyVideoCall({ contactName: contact.name, toNumber: contact.phone_number, mode }); return; }
+  // Avatar waits for instructions (below); only Live Swap, which needs no brief, dials on the tap.
+  if (wasVideo && btn.dataset.method === 'whatsapp' && mode !== 'avatar') { startFlyVideoCall({ contactName: contact.name, toNumber: contact.phone_number, mode }); return; }
   // Live Swap needs no brief: it opens on the tap.
   if (mode === 'live') { openLiveSwap({ contactName: contact.name }); return; }
   beginPreCall(target, btn.dataset.method, mode);
@@ -2278,7 +2281,13 @@ const LIVE_PERMISSION_MSG = 'Allow the camera and microphone for this app in you
 // Live Swap's own messages can be in another language or refer to model names. Show one plain sentence instead.
 function plainLiveSwapError(message = '') {
   const m = String(message || '');
-  if (!m || /[\u3400-\u9fff]/.test(m) || /model|resolution|quota|credit|limit/i.test(m)) return 'Live Swap is not available right now. Please try again in a little while.';
+  const generic = 'Live Swap is not available right now. Please try again in a little while.';
+  if (!m || /[\u3400-\u9fff]/.test(m)) return generic;
+  if (/model|resolution|quota|credit|limit/i.test(m)) {
+    // The provider's own words, short, so the real reason (credit, limit, model) can be reported.
+    console.warn('[live-swap] provider message:', m);
+    return `${generic} (${m.replace(/\s+/g, ' ').slice(0, 120)})`;
+  }
   return m;
 }
 async function openLiveSwap({ contactName = '', stream = null } = {}) {
