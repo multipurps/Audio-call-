@@ -87,6 +87,9 @@
     },
 
     // --- audio up ---------------------------------------------------------
+    // The avatar's voice can arrive after the media leg opened. startAudio runs only once at open, so the
+    // app calls this when the avatar's audio stream starts, and the callee starts hearing it.
+    refreshOutgoingAudio() { if (this.active) this.startAudio(); },
     startAudio() {
       this.stopAudioCapture();
       const stream = deps.getOutgoingAudio ? deps.getOutgoingAudio() : null;
@@ -360,5 +363,5 @@
     return PeerPlayout.calleeDest ? PeerPlayout.calleeDest.stream : null;
   }
 
-  root.WaCallsMedia = { prepareAudio, calleeStream: () => (PeerPlayout.calleeDest ? PeerPlayout.calleeDest.stream : null), configure: (n) => Leg.configure(n), open: (o) => Leg.open(o), leg: Leg, close: () => Leg.close(), setMuted: (m) => Leg.setMuted(m), upgradeToVideo: () => Leg.upgradeToVideo(), keyframeBurst: () => Leg.keyframeBurst(), supported: () => Leg.supported() };
+  root.WaCallsMedia = { refreshOutgoingAudio: () => Leg.refreshOutgoingAudio(), prepareAudio, calleeStream: () => (PeerPlayout.calleeDest ? PeerPlayout.calleeDest.stream : null), configure: (n) => Leg.configure(n), open: (o) => Leg.open(o), leg: Leg, close: () => Leg.close(), setMuted: (m) => Leg.setMuted(m), upgradeToVideo: () => Leg.upgradeToVideo(), keyframeBurst: () => Leg.keyframeBurst(), supported: () => Leg.supported() };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

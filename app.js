@@ -2244,7 +2244,13 @@ async function openVideoCall({ contactName = '', toNumber = '', brief = '', call
     vcClient = sdk.createClient(data.sessionToken);
     vcTranscript = []; vcAvatarAudio = null;
     // The avatar's own voice (sent to the callee) and the conversation so far (kept for the call summary).
-    try { vcClient.addListener(sdk.AnamEvent.AUDIO_STREAM_STARTED, (st) => { vcAvatarAudio = st || null; }); } catch (_) {}
+    try {
+      vcClient.addListener(sdk.AnamEvent.AUDIO_STREAM_STARTED, (st) => {
+        vcAvatarAudio = st || null;
+        // On a WhatsApp avatar call, the callee hears the avatar from now on (the media leg is already open).
+        if (flyCall) window.WaCallsMedia?.refreshOutgoingAudio?.();
+      });
+    } catch (_) {}
     try { vcClient.addListener(sdk.AnamEvent.MESSAGE_HISTORY_UPDATED, (msgs) => { vcTranscript = (msgs || []).map((m) => ({ role: m.role, content: m.content })); }); } catch (_) {}
     // The callee talks, not you: the avatar gets silence as its input (no microphone prompt, nothing of yours is sent).
     // On a WhatsApp call the avatar's input is the callee's voice, held silent until they pick up.
