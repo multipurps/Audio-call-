@@ -11,7 +11,6 @@ import (
 	"wacalls/internal/voip/media"
 
 	"github.com/polymorfa/hypermeow/types"
-	meowcaller "github.com/purpshell/meowcaller"
 )
 
 func (s *server) routes() http.Handler {
@@ -506,6 +505,9 @@ func (s *server) doWebRTC(sess *Session, w http.ResponseWriter, r *http.Request)
 		if ac.held.Load() {
 			return // em hold: não bufferiza áudio do microfone que o peer não está ouvindo
 		}
+		if ac.ai.Load() != nil {
+			return // the assistant is this call's voice; the browser mic is not sent to the callee
+		}
 		ac.src.push(pcm)
 	}
 	bridge.OnBrowserVideo = func(f media.VideoFrame) {
@@ -544,7 +546,8 @@ func (s *server) doWebRTC(sess *Session, w http.ResponseWriter, r *http.Request)
 	sess.setBridge(callID, bridge)
 
 	ac.call.Play(ac.src)
-	ac.call.Receive(meowcaller.SinkFunc(func(pcm []float32) { _ = bridge.WritePCM(pcm) }))
+	ac.browser.Store(bridge)
+	installCalleeSink(ac)
 	// ac.videoSink já está plugado em Call.ReceiveVideo desde wireCall — só
 	// falta dar o bridge do browser a ele agora que existe (ver
 	// orientedVideoSink em bridge.go pra saber por quê não recriar o sink

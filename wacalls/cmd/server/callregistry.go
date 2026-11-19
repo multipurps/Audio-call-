@@ -23,6 +23,8 @@ type activeCall struct {
 	ai atomic.Pointer[aiAttachment]
 	// connectedAt is when the callee answered, in unix ms (0 until then).
 	connectedAt atomic.Int64
+	// browser is the browser's media or listening leg on this call (nil until its webrtc offer arrives).
+	browser atomic.Pointer[Bridge]
 	// held controla se bridge.OnBrowserPCM empurra pra src — enquanto true,
 	// os quadros do microfone do browser são descartados em vez de
 	// bufferizados, então o unhold retoma ao vivo em vez de tocar um atraso

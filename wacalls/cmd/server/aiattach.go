@@ -61,6 +61,20 @@ func (a *aiAttachment) reportEnd(reason string) {
 	go reportRelayOutcome(a.log, a.info, sd)
 }
 
+// installCalleeSink sends the callee's voice to every listener on the call: the assistant (when attached)
+// and the browser's leg (when its webrtc offer has arrived). meowcaller takes one receive sink per call,
+// so both listeners share this one. Calling it again replaces the sink with an equivalent one.
+func installCalleeSink(ac *activeCall) {
+	ac.call.Receive(meowcaller.SinkFunc(func(pcm []float32) {
+		if a := ac.ai.Load(); a != nil && a.bridge != nil {
+			_ = a.bridge.WritePCM(pcm)
+		}
+		if b := ac.browser.Load(); b != nil {
+			_ = b.WritePCM(pcm)
+		}
+	}))
+}
+
 // attachAI connects the assistant to a call. It returns false when the call already has one.
 func (s *Session) attachAI(ac *activeCall, callID string, bridge *AIBridge, info *aiReportInfo) bool {
 	a := &aiAttachment{bridge: bridge, info: info, ac: ac, log: s.log}
@@ -77,8 +91,8 @@ func (s *Session) attachAI(ac *activeCall, callID string, bridge *AIBridge, info
 		s.log.Info("aibridge: assistant ended the call", "call_id", callID)
 		go s.terminateCall(callID, string(core.EndCallReasonUserEnded))
 	}
-	// The callee's voice goes to the assistant. Browser audio is not used on an AI call.
-	ac.call.Receive(meowcaller.SinkFunc(func(pcm []float32) { _ = bridge.WritePCM(pcm) }))
+	// The callee's voice goes to the assistant and to the browser's listening leg, if one is open.
+	installCalleeSink(ac)
 	ac.call.Play(ac.src)
 	// The call may already be ringing or answered by the time the assistant connects.
 	a.onPhase(ac.call.State())

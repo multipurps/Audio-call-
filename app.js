@@ -3699,6 +3699,8 @@ async function callAgainFromDetail() {
       openCallScreen(data.callId, data.toNumber, data.contactName);
       return;
     }
+    // Browsers allow audio only inside the tap, so unlock the callee's voice before the first await.
+    if (platform === 'whatsapp' && window.WaCallsMedia) WaCallsMedia.prepareAudio();
     const resp = await authedFetch('/api/social-calling?action=call', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3726,6 +3728,8 @@ async function callAgainFromDetail() {
     }
     if (!resp.ok) throw new Error(userError(data.error, 'Could not place the call.'));
     const dbCallId = data.dbCallId || data.callId;
+    // The assistant is in the call on WaCalls; open the browser's listening leg so the user hears the callee.
+    if (data.aiAttached && data.callId) listenWhatsappAudio(data.callId);
     trackActiveCall(dbCallId, c.to_number, name);
     $('callDetailDialog').close();
     openCallScreen(dbCallId, c.to_number, name);
@@ -3735,6 +3739,45 @@ async function callAgainFromDetail() {
     callAgainInFlight = false;
     if (btn) btn.disabled = false;
   }
+}
+
+// WhatsApp audio calls: the server places the call and the assistant joins it on WaCalls. This opens the
+// browser's listening leg (callee audio only; the browser sends silence) once the call is answered.
+// prepareAudio() must already have run inside the tap that started the call.
+function listenWhatsappAudio(callId) {
+  if (!window.WaCallsMedia || !callId) return;
+  const deadline = Date.now() + 180000; // stop waiting after three minutes
+  let stopped = false;
+  const stop = () => { stopped = true; try { WaCallsMedia.close(); } catch (e) { /* already closed */ } };
+  const fail = (message) => { stop(); showNotice({ kind: 'error', title: 'WhatsApp call', message }); };
+  WaCallsMedia.configure({
+    signal: {
+      webrtc: async (id, sdp) => ({ sdpAnswer: (await flyCallApi('whatsapp-fly-webrtc', { body: { callId: id, sdp_offer: sdp } })).sdp_answer }),
+      renegotiate: async (id, sdp) => ({ sdpAnswer: (await flyCallApi('whatsapp-fly-renegotiate', { body: { callId: id, sdp_offer: sdp } })).sdp_answer }),
+      videoStart: async () => ({}),
+      videoAccept: async () => ({}),
+    },
+    getOutgoingAudio: () => null, // no microphone: the browser sends silence, the assistant speaks for the user
+    onStatus: () => {},
+    onFailed: (reason) => fail(reason || 'Could not connect the call audio.'),
+  });
+  const tick = async () => {
+    if (stopped) return;
+    if (Date.now() > deadline) return;
+    let state = '';
+    try {
+      state = (await flyCallApi('whatsapp-fly-state', { method: 'GET', query: { callId } })).state;
+    } catch (e) {
+      return setTimeout(tick, 1500); // a failed poll is not a hang-up: try again
+    }
+    if (state === 'ended') return stop();
+    if (state === 'active') {
+      try { await WaCallsMedia.open({ callId, video: false }); } catch (e) { fail('Could not connect the call audio: ' + (e.message || 'unknown error')); }
+      return;
+    }
+    setTimeout(tick, 1500);
+  };
+  tick();
 }
 
 // A finished call with a transcript but no summary (generation failed, or
