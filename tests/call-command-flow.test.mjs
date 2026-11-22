@@ -208,3 +208,27 @@ test('conversationPlatform reads calls and phone plans by recency, mapping old t
   assert.equal(mixed.platform, 'phone');
   assert.deepEqual(conversationPlatform([], []), { platform: null, unsupported: null });
 });
+
+test('"try again" keeps the instructions already given, never storing "try again" as the instruction', async () => {
+  const prior = { ...ended('c1', 'phone'), objective: "Ask if he is coming\nUser's instructions: Tell John the meeting moved to 3pm" };
+  const f = await setup({ calls: [prior], phoneLine: true });
+  f.setIntent({ action: 'retry', reply: 'Trying again.', channel: null });
+  const res = await request(f.handler, 'send', { text: 'Try again', sessionId: 'chat-john', channel: 'phone' });
+  assert.equal(res.code, 200, JSON.stringify(res.data));
+  const plan = f.db.tables.call_plans[0];
+  assert.match(plan.script, /Tell John the meeting moved to 3pm/);
+  assert.doesNotMatch(plan.script, /try again/i);
+  assert.doesNotMatch(plan.objective, /User's instructions: Try again/i);
+  assert.match(plan.objective, /Tell John the meeting moved to 3pm/);
+  assert.equal(plan.contact_id, 'contact-john');
+});
+
+test('a number that belongs to a saved contact is called by that contact\'s name', async () => {
+  const f = await setup({ phoneLine: true });
+  f.setIntent({ action: 'call', reply: 'Calling.', channel: 'phone', phoneNumber: '+1 (555) 000-1111', objective: 'Say hello' });
+  const res = await request(f.handler, 'send', { text: 'Call +1 555 000 1111 and say hello', sessionId: 'chat-john', channel: 'phone' });
+  assert.equal(res.code, 200, JSON.stringify(res.data));
+  const plan = f.db.tables.call_plans[0];
+  assert.equal(plan.contact_id, 'contact-john');
+  assert.equal(plan.label, 'John');
+});

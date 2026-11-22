@@ -28,6 +28,7 @@ import { anamVoiceRoute, anamLlmRoute } from '../lib/anamLink.js';
 import { sendCallNote, callNoteReply } from '../lib/callNote.js';
 import { availableChannels } from '../lib/phoneLines.js';
 import { createCallRecord, markCallPlaced, markCallFailed, findDuplicateActiveCall } from '../lib/callSession.js';
+import { sameNumber } from '../lib/phoneNumbers.js';
 import { classifyPlacementError, isRetryCommand, ownerMessageFor, planRetry } from '../lib/callAttempts.js';
 import { transcribeAudioBuffer, resolveSttApiKey } from '../lib/sttClient.js';
 import { readVapid } from '../lib/vapid.js';
@@ -591,7 +592,7 @@ async function sendMessage(req, res, supabase, userId) {
     const [{ data: sessionCalls }, { data: sessionPlans }] = await Promise.all([
       supabase.from('calls').select('id,contact_id,to_number,objective,instructions,platform,status,retry_of,attempt_number,created_at')
         .eq('user_id', userId).eq('session_id', sessionId).order('created_at', { ascending: false }).limit(10),
-      supabase.from('call_plans').select('to_number,contact_id,objective,created_at')
+      supabase.from('call_plans').select('to_number,contact_id,objective,script,created_at')
         .eq('user_id', userId).eq('session_id', sessionId).order('created_at', { ascending: false }).limit(1),
     ]);
     priorCalls = sessionCalls || [];
@@ -699,6 +700,9 @@ async function sendMessage(req, res, supabase, userId) {
     }
 
     const toNumber = intent.phoneNumber || contact?.phone_number || retryToNumber || null;
+    // A number that belongs to a saved contact is that contact: the call screen, the history and the
+    // messages use the name, never the bare number.
+    if (!contact && toNumber) contact = (contacts || []).find((c) => sameNumber(c.phone_number, toNumber)) || null;
     const label = contact?.name || intent.phoneNumber || retryToNumber;
 
     if (!toNumber) {
@@ -896,10 +900,16 @@ async function sendMessage(req, res, supabase, userId) {
       return respond();
     }
 
+    // "Try again" is a command to the app, never an instruction for the call: a retry carries the instructions
+    // the user already gave (kept inside the earlier objective and plan), plus any words they add.
+    const retryRun = intent.action === 'retry';
+    const userWords = retryRun && isRetryCommand(text) ? '' : text.trim();
+    const originalScript = retryRun ? (priorPlans[0]?.script || /User's instructions: ([\s\S]*)$/.exec(retryObjective || '')?.[1] || '') : '';
+    const planScript = [originalScript, userWords].filter(Boolean).join('\n') || text.trim();
     try {
       const message = await saveCallPlan(supabase, userId, {
         sessionId, toNumber, contactId: contact?.id || null,
-        objective: `${objective}\nUser's instructions: ${text.trim()}`, script: text.trim(),
+        objective: userWords ? `${objective}\nUser's instructions: ${userWords}` : objective, script: planScript,
         summary: `I'll call ${label}. ${objective}`, label, mood,
       });
       newMessages.push(message);

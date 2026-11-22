@@ -76,3 +76,32 @@ test('the SignalWire start frame carries the call id in customParameters', () =>
 test('SignalWire is the default provider', () => {
   assert.equal(telephonyProvider({}), 'signalwire');
 });
+
+test('signalwireDial sends one StatusCallbackEvent per event, never one space-joined value', async () => {
+  let body;
+  const fetchImpl = async (_u, opts) => { body = opts.body; return { ok: true, status: 201, json: async () => ({ sid: 'x' }) }; };
+  await signalwireDial({ to: '+1', from: '+2', callId: 'c', appUrl: 'https://app.test' }, ENV, fetchImpl);
+  assert.deepEqual(body.getAll('StatusCallbackEvent'), ['initiated', 'ringing', 'answered', 'completed']);
+});
+
+test('if SignalWire still refuses the event list (21626), the call is placed without it', async () => {
+  const bodies = [];
+  const fetchImpl = async (_u, opts) => {
+    bodies.push(opts.body);
+    return bodies.length === 1
+      ? { ok: false, status: 422, text: async () => JSON.stringify({ code: 21626, message: 'x is not a valid callback event.' }) }
+      : { ok: true, status: 201, json: async () => ({ sid: 'sw-2', status: 'queued' }) };
+  };
+  const r = await signalwireDial({ to: '+1', from: '+2', callId: 'c', appUrl: 'https://app.test' }, ENV, fetchImpl);
+  assert.deepEqual(r, { ok: true, sid: 'sw-2', status: 'queued' });
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[1].getAll('StatusCallbackEvent').length, 0);
+});
+
+test('an unrelated refusal is not retried', async () => {
+  let n = 0;
+  const fetchImpl = async () => { n += 1; return { ok: false, status: 401, text: async () => '{"error":"Unauthorized"}' }; };
+  const r = await signalwireDial({ to: '+1', from: '+2', callId: 'c', appUrl: 'https://app.test' }, ENV, fetchImpl);
+  assert.equal(r.ok, false);
+  assert.equal(n, 1);
+});
