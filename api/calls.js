@@ -2,7 +2,8 @@ import { confirmCallPlan, saveCallPlan } from '../lib/callPlans.js';
 import { minutesLeft, minutesGate } from '../lib/billing.js';
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { endCallRow } from '../lib/callHangup.js';
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { fabricRequest, signalwireConfigured } from '../lib/telephony.js';
 import { resolveVoiceChoice, agentIsOn } from '../lib/voiceChoice.js';
 import { createChatCompletion, hasConfiguredLlm } from '../lib/llmClient.js';
 import { resolvePersonSession } from '../lib/personSession.js';
@@ -14,7 +15,29 @@ import {
   removeLine, rentNumber, rentSettings, searchNumbers, startVerification, submitVerificationCode, resendVerification,
 } from '../lib/phoneLines.js';
 
+// Temporary, read-only check of what this SignalWire account allows for browser calling. Open only with the
+// SW_DIAG_TOKEN secret; never prints a token or key. Remove once live calling is confirmed.
+async function signalwireDiag(req, res) {
+  const want = String(process.env.SW_DIAG_TOKEN || '');
+  const got = String(req.query?.k || '');
+  const a = Buffer.from(want), b = Buffer.from(got);
+  if (!want || a.length !== b.length || !timingSafeEqual(a, b)) return res.status(404).json({ error: 'Not found' });
+  if (!signalwireConfigured()) return res.status(200).json({ error: 'SignalWire is not configured' });
+  const brief = (r) => ({ status: r.status, ok: r.ok, keys: Object.keys(r.data || {}).slice(0, 12), error: r.ok ? undefined : JSON.stringify(r.data).slice(0, 300) });
+  const out = {};
+  const sat = await fabricRequest('subscribers/tokens', { method: 'POST', body: { reference: 'emysa-probe' } });
+  out.subscriberToken = { ...brief(sat), hasToken: Boolean(sat.data?.token) };
+  const resources = await fabricRequest('resources?page_size=10');
+  out.resources = { ...brief(resources), count: (resources.data?.data || []).length, types: [...new Set((resources.data?.data || []).map((x) => x.type))] };
+  const addresses = await fabricRequest('addresses?page_size=10');
+  out.addresses = { ...brief(addresses), count: (addresses.data?.data || []).length };
+  const subs = await fabricRequest('subscribers?page_size=5');
+  out.subscribers = { ...brief(subs), count: (subs.data?.data || []).length };
+  return res.status(200).json(out);
+}
+
 export default async function handler(req, res) {
+  if ((req.query?.action) === 'sw-diag') return signalwireDiag(req, res);
   const supabase = getServiceClient();
   const userId = await getAuthedUserId(req, supabase);
   if (!userId) return res.status(401).json({ error: 'Not signed in' });
