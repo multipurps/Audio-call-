@@ -18,7 +18,10 @@ export default async function handler(req, res) {
     initiated: 'queued',
     ringing: 'ringing',
     'in-progress': 'in_progress',
-    answered: 'in_progress', // the carrier's name for the callee picking up
+    // The carrier's name for the callee picking up. Voicemail also "answers", and that is only known a moment
+    // later (calls-twiml.js), so this must not show as connected. The call becomes in_progress there, once a
+    // person is confirmed on the line.
+    answered: 'ringing',
     completed: 'completed',
     busy: 'no_answer',
     'no-answer': 'no_answer',
@@ -27,7 +30,17 @@ export default async function handler(req, res) {
   };
   const status = statusMap[CallStatus] || CallStatus;
 
-  const { data: call } = await supabase.from('calls').select('user_id, contact_id, session_id, status').eq('id', callId).maybeSingle();
+  const { data: call } = await supabase.from('calls').select('user_id, contact_id, session_id, status, outcome_summary').eq('id', callId).maybeSingle();
+
+  // The outcome was already decided when the call was answered (voicemail, fax). The carrier's final `completed`
+  // is just the hang-up we did ourselves: keep that outcome, and tell the chat once.
+  if (CallStatus === 'completed' && call && ['no_answer', 'failed'].includes(call.status) && call.outcome_summary) {
+    if (CallDuration) await supabase.from('calls').update({ duration_seconds: parseInt(CallDuration, 10), ended_at: new Date().toISOString() }).eq('id', callId);
+    if (call.user_id && call.session_id) {
+      await postAssistantFollowUp(supabase, call.user_id, call.contact_id, call.session_id, callId, call.status, CallDuration, call.outcome_summary);
+    }
+    return res.status(200).send('ok');
+  }
 
   const update = { status };
   const terminal = ['busy', 'no-answer', 'failed', 'canceled'].includes(CallStatus);
@@ -111,6 +124,9 @@ async function postAssistantFollowUp(supabase, userId, contactId, sessionId, cal
   }
 
   if (!sessionId) return; // call wasn't started from a saved chat thread — nowhere to post this
+  // One message per call: the carrier can report the same ending more than once.
+  const { data: already } = await supabase.from('assistant_messages').select('id').eq('call_id', callId).eq('role', 'assistant').limit(1);
+  if (already?.length) return;
   await supabase.from('assistant_messages').insert({ user_id: userId, session_id: sessionId, role: 'assistant', content, call_id: callId });
   await supabase.from('chat_sessions').update({ updated_at: new Date().toISOString() }).eq('id', sessionId);
 }

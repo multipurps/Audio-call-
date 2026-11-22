@@ -36,6 +36,12 @@ export default async function handler(req, res) {
     return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>`);
   }
 
+  // A person (not a machine) is on the line: only now is the call connected.
+  if (callId) {
+    const supabase = getServiceClient();
+    await supabase.from('calls').update({ status: 'in_progress' }).eq('id', callId).in('status', ['queued', 'ringing']);
+  }
+
   const relayUrl = process.env.RELAY_WS_URL; // e.g. wss://audio-call-relay.onrender.com/stream
 
   if (!relayUrl) {
