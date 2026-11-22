@@ -19,6 +19,9 @@ test('voicemail is named and says the call was ended', () => {
 test('failed calls give the real reason, not a generic failure', () => {
   assert.match(d({ twilioStatus: 'failed', sipResponseCode: 404 }).summary, /doesn't exist/);
   assert.match(d({ twilioStatus: 'failed', errorCode: 21215 }).summary, /aren't enabled/);
+  assert.match(d({ twilioStatus: 'failed', errorCode: 21219 }).summary, /trial/);
+  assert.match(d({ twilioStatus: 'failed', errorCode: 99999 }).summary, /provider code 99999/);
+  assert.doesNotMatch(d({ twilioStatus: 'failed' }).summary, /provider code/);
   assert.match(d({ twilioStatus: 'failed' }).summary, /nothing rang/);
 });
 
