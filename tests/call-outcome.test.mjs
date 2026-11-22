@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { describeCallEnd } from '../lib/callOutcome.js';
+import { describeCallEnd, describeDialRejection } from '../lib/callOutcome.js';
 
 const d = (o) => describeCallEnd({ name: 'Sam', ...o });
 
@@ -33,4 +33,14 @@ test('connected calls are left to the transcript summary', () => {
 
 test('user cancel is not called a failure of the number', () => {
   assert.match(d({ twilioStatus: 'canceled', byUser: true }).summary, /You ended the call/);
+});
+
+test('a refused dial request says why, not that the carrier could not connect', () => {
+  assert.match(describeDialRejection({ status: 401 }).summary, /refused our login \(HTTP 401\)/);
+  assert.match(describeDialRejection({ status: 404 }).summary, /could not be found/);
+  assert.match(describeDialRejection({ status: 503 }).summary, /problem on its side/);
+  assert.match(describeDialRejection({ status: 422, code: 21219 }).summary, /trial/);
+  const q = describeDialRejection({ status: 422, detail: 'Invalid  caller id' }).summary;
+  assert.match(q, /provider said: Invalid caller id \(HTTP 422\)/);
+  assert.doesNotMatch(q, /nothing rang/);
 });
