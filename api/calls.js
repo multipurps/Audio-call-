@@ -37,6 +37,29 @@ async function signalwireDiag(req, res) {
     }
     return res.status(200).json(out);
   }
+  if (req.query?.relayCheck) {
+    const raw = process.env.RELAY_WS_URL || '';
+    let u = null; try { u = new URL(raw); } catch { /* not a URL */ }
+    const info = { set: Boolean(raw), protocol: u?.protocol, host: u?.host, path: u?.pathname, hasQuery: Boolean(u?.search) };
+    if (u) {
+      const httpUrl = `https://${u.host}/`;
+      const t0 = Date.now();
+      try { const r = await fetch(httpUrl, { signal: AbortSignal.timeout(25_000) }); info.http = { status: r.status, ms: Date.now() - t0 }; }
+      catch (err) { info.http = { error: err.message, ms: Date.now() - t0 }; }
+      const t1 = Date.now();
+      info.ws = await new Promise((resolve) => {
+        let done = false; const finish = (v) => { if (!done) { done = true; resolve({ ...v, ms: Date.now() - t1 }); } };
+        try {
+          const ws = new WebSocket(raw);
+          const timer = setTimeout(() => { try { ws.close(); } catch { /* */ } finish({ result: 'timeout' }); }, 20_000);
+          ws.onopen = () => { clearTimeout(timer); try { ws.close(); } catch { /* */ } finish({ result: 'open' }); };
+          ws.onerror = (e) => { clearTimeout(timer); finish({ result: 'error', message: String(e?.message || e?.error?.message || '').slice(0, 120) }); };
+          ws.onclose = (e) => finish({ result: 'closed', code: e.code });
+        } catch (err) { finish({ result: 'throw', message: err.message }); }
+      });
+    }
+    return res.status(200).json(info);
+  }
   if (req.query?.latest) {
     const db = getServiceClient();
     const { data } = await db.from('calls').select('id,status,outcome_summary,twilio_call_sid,duration_seconds,created_at').order('created_at', { ascending: false }).limit(3);
