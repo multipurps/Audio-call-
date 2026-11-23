@@ -5,7 +5,7 @@ import { readVapid, classifyPushFailure, summarizeFailures } from '../lib/vapid.
 import { getServiceClient, getAdminAccess, normEmail, maskEmail } from '../lib/supabaseAdmin.js';
 import { AI_ACTIONS, handleAiAction } from '../lib/aiBehaviorAdmin.js';
 import { keysStatus, keysSave } from '../lib/secrets.js';
-import { STARTING_MINUTES } from '../lib/billing.js';
+import { STARTING_MINUTES, premiumState } from '../lib/billing.js';
 
 // Every admin-only action lives here behind ?action=..., instead of one
 // file per action — Vercel's Hobby plan caps a deployment at 12 serverless
@@ -63,6 +63,7 @@ export default async function handler(req, res) {
     case 'user-calls': return userCalls(req, res, supabase);
     case 'credit-ledger': return creditLedger(req, res, supabase);
     case 'grant-credit': return grantCredit(req, res, supabase);
+    case 'set-premium': return setPremium(req, res, supabase);
     case 'rates': return rates(req, res, supabase);
     case 'admin-list': return listAdmins(req, res, supabase, access);
     case 'admin-decide': return decideAdmin(req, res, supabase, access);
@@ -136,7 +137,7 @@ async function listUsers(req, res, supabase) {
   const appUserIds = new Set((profileRows || []).map((p) => p.user_id));
 
   const { data: approvals } = await supabase.from('user_approvals').select('user_id, approved');
-  const { data: usage } = await supabase.from('user_usage').select('user_id, call_minutes_used, monthly_minute_limit, bonus_minutes');
+  const { data: usage } = await supabase.from('user_usage').select('*');
 
   const approvalMap = new Map((approvals || []).map((a) => [a.user_id, a.approved]));
   const usageMap = new Map((usage || []).map((u) => [u.user_id, u]));
@@ -151,6 +152,7 @@ async function listUsers(req, res, supabase) {
       minutes_used: usageMap.get(u.id)?.call_minutes_used ?? 0,
       minutes_limit: usageMap.get(u.id)?.monthly_minute_limit ?? STARTING_MINUTES,
       bonus_minutes: Number(usageMap.get(u.id)?.bonus_minutes ?? 0),
+      premium_until: premiumState(usageMap.get(u.id)).premiumUntil,
     }));
 
   return res.status(200).json({ users });
@@ -493,6 +495,27 @@ async function grantCredit(req, res, supabase) {
   const { data, error } = await supabase.rpc('admin_grant_minutes', { p_user: targetUserId, p_minutes: m, p_note: String(note || '').slice(0, 200) });
   if (error) return res.status(500).json({ error: error.message });
   return res.status(200).json({ ok: true, bonus_minutes: Number(data) });
+}
+
+// Manual premium: days > 0 adds that many days (from the current end if still active, otherwise from
+// now); days = 0 with clear = true removes it. Same column a paid plan extends (sql/037).
+async function setPremium(req, res, supabase) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { targetUserId, days, clear } = req.body || {};
+  if (!targetUserId) return res.status(400).json({ error: 'targetUserId required' });
+  const now = Date.now();
+  let until = null;
+  if (!clear) {
+    const d = Number(days);
+    if (!Number.isFinite(d) || d <= 0 || d > 3660) return res.status(400).json({ error: 'days must be between 1 and 3660' });
+    const { data: cur, error: readErr } = await supabase.from('user_usage').select('premium_until').eq('user_id', targetUserId).maybeSingle();
+    if (readErr) return res.status(500).json({ error: readErr.message });
+    const curMs = cur?.premium_until ? Date.parse(cur.premium_until) : 0;
+    until = new Date(Math.max(now, Number.isFinite(curMs) ? curMs : 0) + d * 86400000).toISOString();
+  }
+  const { error } = await supabase.from('user_usage').upsert({ user_id: targetUserId, premium_until: until, updated_at: new Date().toISOString() });
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ ok: true, premium_until: until });
 }
 
 async function rates(req, res, supabase) {

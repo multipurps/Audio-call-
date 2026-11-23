@@ -444,8 +444,8 @@ async function openDetail(id) {
   const row = (k, v) => `<div class="gr"><span class="k">${k}</span><span class="v">${v}</span></div>`;
   $('dBody').innerHTML = `<div class="dHero">${avatar(u.email)}<div class="nm">${esc(u.email)}</div></div>
     <div class="grp">${row('Email', esc(u.email))}${row('Joined', u.created_at ? new Date(u.created_at).toLocaleDateString() : '—')}${row('Number rental', u.approved ? 'Allowed' : 'Not allowed')}</div>
-    <div class="grp">${row('Credits left', num(minutesLeft(u)))}${row('Used this period', num(u.minutes_used))}${row('Monthly limit', num(u.minutes_limit))}${row('Bonus credits', num(u.bonus_minutes))}</div>
-    <div class="dActions"><button class="aBtn ghost" id="dLimit">Set limit</button><button class="aBtn ghost" id="dCredit">Add credit</button><button class="aBtn ghost" id="dRent">${u.approved ? 'Stop rental' : 'Allow rental'}</button></div>
+    <div class="grp">${row('Credits left', num(minutesLeft(u)))}${row('Used this period', num(u.minutes_used))}${row('Monthly limit', num(u.minutes_limit))}${row('Bonus credits', num(u.bonus_minutes))}${row('Premium', u.premium_until ? 'Until ' + new Date(u.premium_until).toLocaleDateString() : 'Not premium')}</div>
+    <div class="dActions"><button class="aBtn ghost" id="dPremium">Premium</button><button class="aBtn ghost" id="dLimit">Set limit</button><button class="aBtn ghost" id="dCredit">Add credit</button><button class="aBtn ghost" id="dRent">${u.approved ? 'Stop rental' : 'Allow rental'}</button></div>
     <div class="sectionT">RECENT CALLS</div><div class="grp" id="dCalls"><div class="gr"><span class="k">Loading…</span></div></div>`;
   $('dLimit').onclick = async () => {
     const v = await promptSheet({ title: 'Monthly limit', message: 'Credits per month for this account. A video minute costs 2 credits, an audio minute 1.', value: String(u.minutes_limit), placeholder: 'Credits', multiline: false, confirmLabel: 'Save' });
@@ -460,6 +460,13 @@ async function openDetail(id) {
     const n = Number(v);
     if (!Number.isFinite(n) || n === 0) return errorSheet('Enter credits, not 0.');
     await act(() => api('grant-credit', { method: 'POST', body: { targetUserId: u.id, minutes: n, note: 'Admin' } }), `${n > 0 ? '+' : ''}${n} credits applied.`, id);
+  };
+  $('dPremium').onclick = async () => {
+    const v = await promptSheet({ title: 'Premium', message: `Days of premium to add for ${u.email}. 30 = 1 month, 90 = 3, 180 = 6, 365 = 12. Type 0 to remove premium.`, placeholder: 'Days', multiline: false, confirmLabel: 'Apply' });
+    if (v === null || v === undefined) return;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return errorSheet('Enter days, or 0 to remove.');
+    await act(() => api('set-premium', { method: 'POST', body: n === 0 ? { targetUserId: u.id, clear: true } : { targetUserId: u.id, days: n } }), n === 0 ? 'Premium removed.' : `${n} days of premium added.`, id);
   };
   $('dRent').onclick = async () => {
     const ok = await confirmSheet({ title: u.approved ? 'Stop number rental?' : 'Allow number rental?', message: 'New accounts do not need approval. This only controls renting a phone number.', confirmLabel: u.approved ? 'Stop' : 'Allow', destructive: !!u.approved });
