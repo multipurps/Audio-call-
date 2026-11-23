@@ -105,3 +105,11 @@ test('an unrelated refusal is not retried', async () => {
   assert.equal(r.ok, false);
   assert.equal(n, 1);
 });
+
+test('streamUrl turns an https relay address into the wss address the carrier needs', async () => {
+  const { streamUrl } = await import('../lib/telephony.js');
+  assert.equal(streamUrl('https://audio-call-relay.onrender.com/'), 'wss://audio-call-relay.onrender.com/');
+  assert.equal(streamUrl('http://relay.local:8080/s'), 'ws://relay.local:8080/s');
+  assert.equal(streamUrl('wss://relay.example/stream'), 'wss://relay.example/stream');
+  assert.equal(streamUrl(undefined), '');
+});

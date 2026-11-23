@@ -10,7 +10,7 @@
 // audio-level detection, and pass the result here as AnsweredBy *before*
 // this webhook fires — so a voicemail never reaches the relay at all, it's
 // hung up right here instead.
-import { guardWebhook, telephonyProvider } from '../lib/telephony.js';
+import { guardWebhook, streamUrl, telephonyProvider } from '../lib/telephony.js';
 import { getServiceClient } from '../lib/supabaseAdmin.js';
 import { describeCallEnd } from '../lib/callOutcome.js';
 
@@ -42,7 +42,7 @@ export default async function handler(req, res) {
     await supabase.from('calls').update({ status: 'in_progress' }).eq('id', callId).in('status', ['queued', 'ringing']);
   }
 
-  const relayUrl = process.env.RELAY_WS_URL; // e.g. wss://audio-call-relay.onrender.com/stream
+  const relayUrl = streamUrl(process.env.RELAY_WS_URL); // e.g. wss://audio-call-relay.onrender.com/stream
 
   if (!relayUrl) {
     res.setHeader('Content-Type', 'text/xml');
