@@ -3,7 +3,7 @@ import { minutesLeft, minutesGate } from '../lib/billing.js';
 import { getServiceClient, getAuthedUserId } from '../lib/supabaseAdmin.js';
 import { endCallRow } from '../lib/callHangup.js';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import { fabricRequest, signalwireConfigured } from '../lib/telephony.js';
+import { fabricRequest, lamlRequest, signalwireConfigured } from '../lib/telephony.js';
 import { resolveVoiceChoice, agentIsOn } from '../lib/voiceChoice.js';
 import { createChatCompletion, hasConfiguredLlm } from '../lib/llmClient.js';
 import { resolvePersonSession } from '../lib/personSession.js';
@@ -25,6 +25,23 @@ async function signalwireDiag(req, res) {
   if (!signalwireConfigured()) return res.status(200).json({ error: 'SignalWire is not configured' });
   const brief = (r) => ({ status: r.status, ok: r.ok, keys: Object.keys(r.data || {}).slice(0, 12), error: r.ok ? undefined : JSON.stringify(r.data).slice(0, 300) });
   const out = {};
+  if (req.query?.callId) {
+    const db = getServiceClient();
+    const { data: row } = await db.from('calls').select('id,status,outcome_summary,twilio_call_sid,duration_seconds,created_at,ended_at,direction,objective').eq('id', String(req.query.callId)).maybeSingle();
+    out.call = row ? { ...row, objective: String(row.objective || '').slice(0, 60) } : null;
+    if (row?.twilio_call_sid) {
+      try {
+        const sw = await lamlRequest(`Calls/${encodeURIComponent(row.twilio_call_sid)}.json`);
+        out.signalwire = { status: sw.status, answered_by: sw.answered_by, duration: sw.duration, start_time: sw.start_time, end_time: sw.end_time, direction: sw.direction, price: sw.price, sip_response_code: sw.sip_response_code, parent: sw.parent_call_sid };
+      } catch (err) { out.signalwire = { error: err.message, statusCode: err.statusCode }; }
+    }
+    return res.status(200).json(out);
+  }
+  if (req.query?.latest) {
+    const db = getServiceClient();
+    const { data } = await db.from('calls').select('id,status,outcome_summary,twilio_call_sid,duration_seconds,created_at').order('created_at', { ascending: false }).limit(3);
+    return res.status(200).json({ latest: data });
+  }
   const sat = await fabricRequest('subscribers/tokens', { method: 'POST', body: { reference: 'emysa-probe' } });
   out.subscriberToken = { ...brief(sat), hasToken: Boolean(sat.data?.token) };
   const resources = await fabricRequest('resources?page_size=10');
