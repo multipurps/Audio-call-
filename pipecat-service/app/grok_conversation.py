@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
+from app.audio import PCM16Resampler
 from app.call_context import _Rest
 from app.config import Settings
 from app.conversation import PacedAudioSender
@@ -192,6 +193,7 @@ class GrokAgentConversation:
         self._task: asyncio.Task[None] | None = None
         self._stopped = False
         self._warned_rate = False
+        self._upsampler: PCM16Resampler | None = None
         # Reply timing: from the moment the caller stops talking to the first agent audio.
         self._turn_ended_at: float | None = None
         self._opened_at: float | None = None
@@ -252,15 +254,25 @@ class GrokAgentConversation:
         if self._client is None or self._stopped:
             return
         rate = getattr(frame, "sample_rate", None)
-        if rate != self._settings.bridge_sample_rate:
-            if not self._warned_rate:
-                self._warned_rate = True
-                logger.warning("agent needs %s Hz caller audio, got %s; dropping", self._settings.bridge_sample_rate, rate)
-            return
+        audio = frame.audio
+        target = self._settings.bridge_sample_rate
+        if rate != target:
+            # Phone carriers send 8 kHz; the agent wants the bridge rate. Resample instead of dropping.
+            if not rate or rate > target:
+                if not self._warned_rate:
+                    self._warned_rate = True
+                    logger.warning("agent needs %s Hz caller audio, got %s; dropping", target, rate)
+                return
+            if self._upsampler is None or self._upsampler.in_rate != rate:
+                self._upsampler = PCM16Resampler(rate, target)
+                logger.info("agent upsampling caller audio %s->%s Hz session=%s", rate, target, self._session_id)
+            audio = self._upsampler.process(audio)
+            if not audio:
+                return
         if self._hold_caller_audio and not self._greeting_finished():
             return
-        get_hub().publish(self._session_id, DIRECTION_CALLER, rate, frame.audio)
-        await self._client.send_caller_audio(frame.audio)
+        get_hub().publish(self._session_id, DIRECTION_CALLER, target, audio)
+        await self._client.send_caller_audio(audio)
 
     async def note_call_active(self, source: str) -> bool:
         self.call_active = True
