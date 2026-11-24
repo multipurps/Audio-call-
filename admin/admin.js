@@ -426,7 +426,7 @@ async function loadUsers({ quiet = false } = {}) {
     $('userCount').textContent = `${list.length} of ${usersCache.length} users`;
     $('userRows').innerHTML = list.map((u) => {
       const short = (u.email || '').split('@')[0];
-      return `<button class="pTile" data-id="${u.id}" title="${esc(u.email)}">${avatar(u.email)}<span class="pn">${esc(short)}</span><span class="pc">${num(minutesLeft(u))} left${u.premium_until ? ' · ★' : ''}</span></button>`;
+      return `<button class="pTile${u.premium_until ? ' prem' : ''}" data-id="${u.id}" title="${esc(u.email)}">${avatar(u.email)}<span class="pn">${esc(short)}</span><span class="pc">${num(minutesLeft(u))} left</span>${u.premium_until ? '<span class="gold">PREMIUM</span>' : ''}</button>`;
     }).join('') || '<div class="empty">No users.</div>';
   };
   draw();
@@ -444,7 +444,7 @@ async function openDetail(id) {
   const row = (k, v) => `<div class="gr"><span class="k">${k}</span><span class="v">${v}</span></div>`;
   $('dBody').innerHTML = `<div class="dHero">${avatar(u.email)}<div class="nm">${esc(u.email)}</div></div>
     <div class="grp">${row('Email', esc(u.email))}${row('Joined', u.created_at ? new Date(u.created_at).toLocaleDateString() : '—')}${row('Number rental', u.approved ? 'Allowed' : 'Not allowed')}</div>
-    <div class="grp">${row('Credits left', num(minutesLeft(u)))}${row('Used this period', num(u.minutes_used))}${row('Monthly limit', num(u.minutes_limit))}${row('Bonus credits', num(u.bonus_minutes))}${row('Premium', u.premium_until ? 'Until ' + new Date(u.premium_until).toLocaleDateString() : 'Not premium')}</div>
+    <div class="grp">${row('Credits left', num(minutesLeft(u)))}${row('Used this period', num(u.minutes_used))}${row('Monthly limit', num(u.minutes_limit))}${row('Bonus credits', num(u.bonus_minutes))}${row('Premium', u.premium_until ? '<span class="gold">PREMIUM</span> until ' + new Date(u.premium_until).toLocaleDateString() : 'Not premium')}</div>
     <div class="dActions"><button class="aBtn ghost" id="dPremium">Premium</button><button class="aBtn ghost" id="dLimit">Set limit</button><button class="aBtn ghost" id="dCredit">Add credit</button><button class="aBtn ghost" id="dRent">${u.approved ? 'Stop rental' : 'Allow rental'}</button></div>
     <div class="sectionT">RECENT CALLS</div><div class="grp" id="dCalls"><div class="gr"><span class="k">Loading…</span></div></div>`;
   $('dLimit').onclick = async () => {

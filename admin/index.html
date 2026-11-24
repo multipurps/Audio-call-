@@ -134,6 +134,10 @@
   .sectionT{font-size:13px; color:var(--muted); margin:16px 4px 8px; font-weight:600; letter-spacing:.02em;}
 
   .person{display:flex; align-items:center; gap:12px; width:100%; text-align:left; background:var(--a-card); border-radius:22px; padding:12px 14px; margin-bottom:10px;}
+  .gold{display:inline-block; padding:2px 8px; border-radius:999px; font-size:9.5px; font-weight:800; letter-spacing:.08em; color:#4a3000; background:linear-gradient(110deg,#b8860b 0%,#ffd700 25%,#fff6b0 45%,#ffd700 60%,#c8960c 100%); background-size:250% 100%; animation:goldShimmer 2.6s linear infinite; box-shadow:0 0 8px rgba(255,200,40,.45);}
+  @keyframes goldShimmer{0%{background-position:150% 0}100%{background-position:-100% 0}}
+  .pTile.prem .av{box-shadow:0 0 0 2px #0b0b0b,0 0 0 4px #e6b422,0 0 14px rgba(255,200,40,.55);}
+  @media (prefers-reduced-motion:reduce){.gold{animation:none}}
   .pGrid{display:grid; grid-template-columns:repeat(4,1fr); gap:14px 6px;}
   .pTile{display:flex; flex-direction:column; align-items:center; gap:4px; min-width:0; background:none; padding:4px 0; text-align:center;}
   .pTile .av{width:56px; height:56px; font-size:22px;}
