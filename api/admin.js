@@ -1,5 +1,6 @@
 import { LIVE_STATUSES, maskNumber, pctChange, summariseChannels, dailySeries, splitByWindow } from '../lib/adminLive.js';
 import { randomUUID } from 'crypto';
+import { sendWelcomeOnce } from '../lib/welcome.js';
 import webpush from 'web-push';
 import { readVapid, classifyPushFailure, summarizeFailures } from '../lib/vapid.js';
 import { getServiceClient, getAdminAccess, normEmail, maskEmail } from '../lib/supabaseAdmin.js';
@@ -494,6 +495,7 @@ async function grantCredit(req, res, supabase) {
   if (!Number.isFinite(m) || m === 0 || Math.abs(m) > 100000) return res.status(400).json({ error: 'minutes must be a non-zero number up to 100000' });
   const { data, error } = await supabase.rpc('admin_grant_minutes', { p_user: targetUserId, p_minutes: m, p_note: String(note || '').slice(0, 200) });
   if (error) return res.status(500).json({ error: error.message });
+  if (m > 0) await sendWelcomeOnce(supabase, targetUserId);
   return res.status(200).json({ ok: true, bonus_minutes: Number(data) });
 }
 
@@ -515,6 +517,7 @@ async function setPremium(req, res, supabase) {
   }
   const { error } = await supabase.from('user_usage').upsert({ user_id: targetUserId, premium_until: until, updated_at: new Date().toISOString() });
   if (error) return res.status(500).json({ error: error.message });
+  if (until) await sendWelcomeOnce(supabase, targetUserId);
   return res.status(200).json({ ok: true, premium_until: until });
 }
 

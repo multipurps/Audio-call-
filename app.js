@@ -617,6 +617,17 @@ async function initHomeChat() {
   startMessagePolling();
   resumeActiveCallIfAny();
   recoverCallSummaries();
+  maybeOpenWelcome();
+}
+
+// A new person's first screen after paying: the welcome chat the server wrote for them (lib/welcome.js).
+function maybeOpenWelcome() {
+  const id = homeBalance?.welcomeSessionId;
+  if (!id || !currentUser) return;
+  const key = `emysa.welcomeShown.${currentUser.id}`;
+  try { if (localStorage.getItem(key)) return; localStorage.setItem(key, '1'); } catch { /* still show it once per load */ }
+  openChatSession(id);
+  showTab('chat');
 }
 
 // Finished calls that never got their summary are filled in on the server

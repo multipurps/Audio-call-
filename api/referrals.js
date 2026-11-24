@@ -1,3 +1,4 @@
+import { sendWelcomeOnce, welcomeSessionFor } from '../lib/welcome.js';
 import { getServiceClient, getAuthedUser } from '../lib/supabaseAdmin.js';
 import {
   getPacks, priceFor, planFor, planList, premiumState, expireFreeCredits, remainingMinutes, createCheckoutSession, getCheckout,
@@ -226,6 +227,7 @@ async function settlePurchase(supabase, purchase, deps, known = null) {
     const { data, error } = await supabase.rpc('credit_minute_purchase', { p_reference: purchase.reference });
     if (error) throw new Error(error.message);
     const credited = Number(data) || 0;
+    if (credited > 0) await sendWelcomeOnce(supabase, purchase.user_id);
     // Only the call that actually credits gets a positive number back, so each
     // purchase alerts the admins exactly once. Never allowed to fail the credit.
     if (credited > 0) {
@@ -324,6 +326,7 @@ async function billingStatus(req, res, supabase, userId, deps) {
     pending: settled.inProgress,
     credited: settled.credited,
     outcome: settled.outcome,
+    welcomeSessionId: await welcomeSessionFor(supabase, userId),
   });
 }
 
@@ -331,7 +334,7 @@ async function verifyPending(req, res, supabase, userId, deps) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const settled = await reconcileUser(supabase, userId, deps);
   const balance = await balanceFor(supabase, userId);
-  return res.status(200).json({ ...balance, credited: settled.credited, planActivated: settled.planActivated || 0, pending: settled.inProgress, outcome: settled.outcome });
+  return res.status(200).json({ ...balance, credited: settled.credited, planActivated: settled.planActivated || 0, pending: settled.inProgress, outcome: settled.outcome, welcomeSessionId: await welcomeSessionFor(supabase, userId) });
 }
 
 // The provider's cancel page sends the person here (see pay-return.html), so a
