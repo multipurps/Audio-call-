@@ -130,6 +130,8 @@ async function balanceFor(supabase, userId) {
   const bonusLeft = Math.min(Number(usage?.bonus_minutes ?? 0), bal.remaining);
   return {
     ...bal, ...prem,
+    // Has this account ever been funded (credit, a past call, or premium)? New accounts are not, and see the paywall.
+    funded: bal.limit > 0 || bal.used > 0 || Boolean(usage?.premium_until),
     // When the free user's current credits lapse (null for premium or when there are none).
     creditExpiresAt: !prem.premium && bonusLeft > 0 ? (usage?.credit_expires_at || null) : null,
   };

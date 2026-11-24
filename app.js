@@ -385,6 +385,31 @@ function enterOffline() {
   return true;
 }
 
+// New accounts must buy credit (or Premium) before they reach the home screen. There is no free trial.
+// Accounts that were ever funded (credit, a past call, premium) go straight in. If billing cannot be read or
+// payments are not set up, nobody is locked out: calls are still refused server-side without credit.
+let paywallOpen = false;
+function setPaywallUi(on) {
+  paywallOpen = on;
+  $('addTimeClose').classList.toggle('hidden', on);
+  document.querySelectorAll('#addTimeScreen .gateOnly').forEach((el) => el.classList.toggle('hidden', !on));
+  $('addTimeTitle').textContent = on ? 'Get started' : 'Add credits';
+}
+async function passPaywall() {
+  try { await Promise.race([loadBalance(), new Promise((r) => setTimeout(r, 6000))]); } catch { /* fail open */ }
+  const b = homeBalance;
+  if (!b || !b.payments || b.funded === undefined) return true;
+  if (b.funded || b.premium || Number(b.remaining) > 0) return true;
+  setPaywallUi(true);
+  $('addTimeStatus').textContent = '';
+  $('addTimeOpen').classList.add('hidden');
+  $('addTimeCopy').classList.add('hidden');
+  $('addTimeScreen').classList.remove('hidden');
+  renderAddTime();
+  $('addTimeLead').textContent = 'Buy credits to start using Emysa.\nYour assistant makes the calls for you.';
+  return false;
+}
+
 async function enterApp(session) {
   currentSession = session;
   currentUser = session.user;
@@ -412,6 +437,7 @@ async function enterApp(session) {
   $('authBoot').style.display = 'none';
   document.querySelectorAll('.authPanel').forEach((p) => p.classList.remove('active'));
   if (step) { showOnboardingStep(step); return; }
+  if (!(await passPaywall())) return;
   $('pendingBox').style.display = 'none';
   authScreen.classList.add('hidden');
   ensureNotificationsEnabled();
@@ -4475,8 +4501,8 @@ function renderAddTime() {
   // the price shown here is only ever the server's.
   const packs = homeBalance?.packs;
   const ready = Boolean(homeBalance?.payments && Array.isArray(packs) && packs.length);
-  const out = homeBalance && homeBalance.remaining < 1;
-  $('addTimeLead').textContent = out ? "You're out of credits.\nTop up to keep Emysa making calls for you." : 'Top up to keep Emysa making calls for you.';
+  const out = homeBalance && homeBalance.remaining < 1 && !paywallOpen;
+  if (!paywallOpen) $('addTimeLead').textContent = out ? "You're out of credits.\nTop up to keep Emysa making calls for you." : 'Top up to keep Emysa making calls for you.';
   if (!ready) {
     $('addTimeQty').textContent = '';
     $('addTimeMinus').disabled = true;
@@ -4507,7 +4533,7 @@ async function openAddTime() {
   renderAddTime();
   if (!homeBalance?.packs) { await loadBalance(); renderAddTime(); }
 }
-function closeAddTime() { $('addTimeScreen').classList.add('hidden'); }
+function closeAddTime(force = false) { if (paywallOpen && force !== true) return; $('addTimeScreen').classList.add('hidden'); }
 
 // One payment launcher for both add-time and premium: the server decides the price from
 // the quantity or plan it is given, and credits only after Bachs confirms.
@@ -4618,7 +4644,8 @@ $('addTimeUpgrade').addEventListener('click', openPremium);
 $('addTimeMinus').addEventListener('click', () => { if (addTimeQty > 1) { addTimeQty -= 1; renderAddTime(); } });
 $('addTimePlus').addEventListener('click', () => { if (homeBalance?.packs && addTimeQty < homeBalance.packs.length) { addTimeQty += 1; renderAddTime(); } });
 $('addTimeBuy').addEventListener('click', startCheckout);
-$('addTimeClose').addEventListener('click', closeAddTime);
+$('addTimeClose').addEventListener('click', () => closeAddTime());
+$('addTimeSignOut').addEventListener('click', () => { setPaywallUi(false); closeAddTime(true); supabase.auth.signOut(); });
 $('addTimeTerms').addEventListener('click', () => openSheet('sheet-terms'));
 $('addTimePrivacy').addEventListener('click', () => openSheet('sheet-privacy'));
 
@@ -4630,13 +4657,18 @@ async function verifyPayment() {
   const before = homeBalance?.remaining;
   homeBalance = { ...(homeBalance || {}), ...data, payments: true };
   renderBalance();
+  const wasGate = paywallOpen;
   if (data.planActivated) {
     successSheet('Premium is on.');
+    setPaywallUi(false);
     closePremium();
-    closeAddTime();
+    closeAddTime(true);
+    if (wasGate) enterApp(currentSession);
   } else if (before != null && data.remaining > before) {
     successSheet(`${formatMinutes(data.remaining - before)} added to your balance.`);
-    closeAddTime();
+    setPaywallUi(false);
+    closeAddTime(true);
+    if (wasGate) enterApp(currentSession);
   }
   if (!data.pending) localStorage.removeItem(PAY_FLAG);
   return data;

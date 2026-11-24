@@ -1583,3 +1583,5 @@ body::before{content:""; position:absolute; top:0; left:0; right:0; height:var(-
 .goldBadge.hidden{display:none;}
 @keyframes goldShimmer{0%{background-position:150% 0}100%{background-position:-100% 0}}
 @media (prefers-reduced-motion:reduce){.goldBadge{animation:none;}}
+
+.gateOnly.hidden{display:none;}
