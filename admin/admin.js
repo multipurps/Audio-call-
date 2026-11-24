@@ -419,19 +419,19 @@ async function loadUsers({ quiet = false } = {}) {
   const el = $('sec-users');
   if (!quiet) el.innerHTML = skeleton(5);
   try { usersCache = (await api('list-users')).users; } catch (err) { return fail(el, err); }
-  el.innerHTML = `<div class="aField"><input type="search" id="userSearch" placeholder="Search email"></div><div class="liveBar"><span id="userCount"></span></div><div id="userRows"></div>`;
+  el.innerHTML = `<div class="aField"><input type="search" id="userSearch" placeholder="Search email"></div><div class="liveBar"><span id="userCount"></span></div><div id="userRows" class="pGrid"></div>`;
   const draw = () => {
     const q = $('userSearch').value.trim().toLowerCase();
     const list = usersCache.filter((u) => (u.email || '').toLowerCase().includes(q));
     $('userCount').textContent = `${list.length} of ${usersCache.length} users`;
     $('userRows').innerHTML = list.map((u) => {
-      const total = Math.max(1, u.minutes_limit + u.bonus_minutes);
-      return `<button class="person" data-id="${u.id}">${avatar(u.email)}<span class="who"><div class="t">${esc(u.email)}</div><div class="m">${num(minutesLeft(u))} credits left · used ${num(u.minutes_used)}</div><div class="meter"><i style="width:${Math.min(100, (minutesLeft(u) / total) * 100)}%"></i></div></span>${ICON.chev}</button>`;
+      const short = (u.email || '').split('@')[0];
+      return `<button class="pTile" data-id="${u.id}" title="${esc(u.email)}">${avatar(u.email)}<span class="pn">${esc(short)}</span><span class="pc">${num(minutesLeft(u))} left${u.premium_until ? ' · ★' : ''}</span></button>`;
     }).join('') || '<div class="empty">No users.</div>';
   };
   draw();
   $('userSearch').oninput = draw;
-  $('userRows').onclick = (e) => { const b = e.target.closest('.person'); if (b) openDetail(b.dataset.id); };
+  $('userRows').onclick = (e) => { const b = e.target.closest('.pTile'); if (b) openDetail(b.dataset.id); };
 }
 
 // ---- one person: opens over the list like a page, edits through the app's own sheets ----
