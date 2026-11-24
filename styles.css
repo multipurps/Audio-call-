@@ -1578,3 +1578,8 @@ body::before{content:""; position:absolute; top:0; left:0; right:0; height:var(-
 #videoCallScreen .vcSelfWrap{bottom:calc(env(safe-area-inset-bottom) + 120px);}
 #videoCallScreen .vcHeader, #videoCallScreen .vcControls{transition:opacity .2s ease;}
 #videoCallScreen.chrome-off .vcHeader, #videoCallScreen.chrome-off .vcControls{opacity:0; pointer-events:none;}
+
+.goldBadge{display:inline-block; margin-left:8px; padding:2px 8px; border-radius:999px; font-size:9.5px; font-weight:800; letter-spacing:.08em; vertical-align:middle; color:#4a3000; background:linear-gradient(110deg,#b8860b 0%,#ffd700 25%,#fff6b0 45%,#ffd700 60%,#c8960c 100%); background-size:250% 100%; animation:goldShimmer 2.6s linear infinite; box-shadow:0 0 8px rgba(255,200,40,.45);}
+.goldBadge.hidden{display:none;}
+@keyframes goldShimmer{0%{background-position:150% 0}100%{background-position:-100% 0}}
+@media (prefers-reduced-motion:reduce){.goldBadge{animation:none;}}

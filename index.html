@@ -31,7 +31,7 @@
 </script>
 <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-11-24.1">
+<link rel="stylesheet" href="styles.css?v=2026-11-24.2">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -154,7 +154,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-11-24.1').catch(function (err) {
+        import('./app.js?v=2026-11-24.2').catch(function (err) {
           showBootError('Something went wrong. Check your connection and try again.', 'Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -412,7 +412,7 @@
         <div class="dashCard dashBalance">
           <span class="dashBalanceIcon"><svg class="ic"><use href="#ic-clock"/></svg></span>
           <button type="button" class="dashBalanceBody" id="dashBalanceBtn" aria-label="Credits and add credits">
-            <span class="dashLabel">Credits</span>
+            <span class="dashLabel">Credits<span class="goldBadge hidden" id="dashPremBadge">PREMIUM</span></span>
             <span class="dashMinutes"><span id="dashMinutes">–</span><svg class="ic dashChev"><use href="#ic-chevron"/></svg></span>
             <span class="dashSub" id="dashBalanceSub">remaining</span>
           </button>
@@ -587,6 +587,7 @@
           <input type="file" id="avatarFileInput" accept="image/*" style="display:none;">
         </div>
         <div class="profileName" id="profileEmailDisplay" style="text-align:center; margin-bottom:4px;">Emysa</div>
+        <div style="text-align:center; margin-bottom:6px;"><span class="goldBadge hidden" id="profilePremBadge">PREMIUM</span></div>
         <div class="profileSub">Your account</div>
       </div>
 
@@ -1660,11 +1661,11 @@
     <p class="callDetailAgainStatus" id="callDetailAgainStatus" role="status"></p>
   </div>
 </dialog>
-  <script src="btnLoading.js?v=2026-11-24.1" defer></script>
-  <script src="callWakeLock.js?v=2026-11-24.1" defer></script>
-  <script src="tabpill.js?v=2026-11-24.1" defer></script>
-  <script src="wacalls-media-core.js?v=2026-11-24.1" defer></script>
-  <script src="wacalls-media.js?v=2026-11-24.1" defer></script>
-  <script src="wacalls-call.js?v=2026-11-24.1" defer></script>
+  <script src="btnLoading.js?v=2026-11-24.2" defer></script>
+  <script src="callWakeLock.js?v=2026-11-24.2" defer></script>
+  <script src="tabpill.js?v=2026-11-24.2" defer></script>
+  <script src="wacalls-media-core.js?v=2026-11-24.2" defer></script>
+  <script src="wacalls-media.js?v=2026-11-24.2" defer></script>
+  <script src="wacalls-call.js?v=2026-11-24.2" defer></script>
 </body>
 </html>

@@ -4081,6 +4081,9 @@ function relTimeShort(iso) {
 function renderBalance() {
   $('dashMinutes').textContent = homeBalance ? formatMinutes(homeBalance.remaining) : '–';
   $('dashBalanceSub').textContent = homeBalance?.pending ? 'confirming payment…' : 'remaining';
+  const prem = Boolean(homeBalance?.premium);
+  $('dashPremBadge')?.classList.toggle('hidden', !prem);
+  $('profilePremBadge')?.classList.toggle('hidden', !prem);
   if (typeof renderPremiumEntry === 'function') renderPremiumEntry();
 }
 
