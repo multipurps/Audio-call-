@@ -396,20 +396,21 @@ async function enterApp(session) {
   // user as belonging to Audio Call so the admin's user list can filter to
   // just this app instead of showing every account on the shared project.
   // Best-effort only: this must never block the boot sequence below.
-  try {
-    await supabase.from('profiles').upsert(
-      { user_id: currentUser.id },
-      { onConflict: 'user_id', ignoreDuplicates: true }
-    );
-  } catch (err) {
-    console.error('profile tagging failed (non-fatal):', err);
-  }
+  // Runs before the setup check (a new account needs its row first) but never holds the screen longer than the timeout below.
+  const tagged = Promise.resolve(supabase.from('profiles').upsert(
+    { user_id: currentUser.id },
+    { onConflict: 'user_id', ignoreDuplicates: true }
+  )).catch((err) => console.error('profile tagging failed (non-fatal):', err));
   // No approval step: anyone who signs in gets in. Minutes are a separate matter: a new account has 0
   // until it buys some (see lib/billing.js STARTING_MINUTES), so there is nothing to approve.
+  // The splash stays up while setup state loads (hiding it first left a blank screen on a slow connection).
+  // If that takes too long, open the app: setup state is re-checked on the next open.
+  const step = await Promise.race([
+    tagged.then(() => onboardingStep()).catch(() => null),
+    new Promise((resolve) => setTimeout(() => resolve(null), 5000)),
+  ]);
   $('authBoot').style.display = 'none';
   document.querySelectorAll('.authPanel').forEach((p) => p.classList.remove('active'));
-  // First-run setup: a calling line (required), then name/language/country.
-  const step = await onboardingStep();
   if (step) { showOnboardingStep(step); return; }
   $('pendingBox').style.display = 'none';
   authScreen.classList.add('hidden');
