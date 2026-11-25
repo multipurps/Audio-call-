@@ -1,7 +1,7 @@
 import { guardWebhook } from '../lib/telephony.js';
 import { getServiceClient } from '../lib/supabaseAdmin.js';
 import { maybeGenerateCallSummary } from '../lib/callSession.js';
-import { describeCallEnd } from '../lib/callOutcome.js';
+import { describeCallEnd, isVoicemail } from '../lib/callOutcome.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
@@ -44,18 +44,29 @@ export default async function handler(req, res) {
 
   const update = { status };
   const terminal = ['busy', 'no-answer', 'failed', 'canceled'].includes(CallStatus);
-  if (terminal) {
+  const seconds = Number.parseInt(CallDuration, 10) || 0;
+  // The TwiML step already saved a voicemail or refused outcome. The carrier's final "completed" must not
+  // turn that back into a plain completed call, or the owner is never told what happened.
+  const keepOutcome = CallStatus === 'completed' && ['no_answer', 'failed'].includes(call?.status);
+  const droppedFast = CallStatus === 'completed' && !keepOutcome && call?.status !== 'canceling' && seconds > 0 && seconds < 8;
+  const voicemail = CallStatus === 'completed' && !keepOutcome && isVoicemail(AnsweredBy);
+  const who = (terminal || droppedFast || voicemail) && call?.contact_id
+    ? (await supabase.from('contacts').select('name').eq('id', call.contact_id).maybeSingle()).data?.name
+    : null;
+  if (keepOutcome) {
+    update.status = call.status;
+  } else if (terminal || voicemail) {
     // Real reason + what happened next, from what the carrier reported.
-    const { data: who } = call?.contact_id
-      ? await supabase.from('contacts').select('name').eq('id', call.contact_id).maybeSingle()
-      : { data: null };
     const outcome = describeCallEnd({
-      twilioStatus: CallStatus, sipResponseCode: SipResponseCode, errorCode: ErrorCode,
-      answeredBy: AnsweredBy, name: who?.name || 'them',
+      twilioStatus: voicemail ? 'completed' : CallStatus, sipResponseCode: SipResponseCode, errorCode: ErrorCode,
+      answeredBy: AnsweredBy, name: who || 'them',
       byUser: call?.status === 'canceling',
     });
     update.status = outcome.status;
     if (outcome.summary) update.outcome_summary = outcome.summary;
+  } else if (droppedFast) {
+    // Connected for a few seconds and gone, with no voicemail flag: say exactly that rather than nothing.
+    update.outcome_summary = `The call to ${who || 'them'} connected for ${seconds} second${seconds === 1 ? '' : 's'} and then ended before any conversation. It may have gone to voicemail or dropped. Try again.`;
   }
   if (RecordingUrl) update.recording_url = RecordingUrl;
   if (CallDuration) {
@@ -73,8 +84,8 @@ export default async function handler(req, res) {
   // Calls from chat (including keypad and Emysa callbacks) have a session_id.
   // Legacy calls without a chat session cannot receive a follow-up.
 
-  if (call?.user_id && call?.session_id && ['no_answer', 'completed', 'failed'].includes(status) && status !== call.status) {
-    await postAssistantFollowUp(supabase, call.user_id, call.contact_id, call.session_id, callId, update.status, CallDuration, update.outcome_summary);
+  if (call?.user_id && call?.session_id && ['no_answer', 'completed', 'failed'].includes(update.status) && (update.status !== call.status || keepOutcome)) {
+    await postAssistantFollowUp(supabase, call.user_id, call.contact_id, call.session_id, callId, update.status, CallDuration, update.outcome_summary || (keepOutcome ? call.outcome_summary : undefined));
   }
 
   // Phone calls are now terminal: run the shared summary + memory pass.

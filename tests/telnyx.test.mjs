@@ -210,7 +210,8 @@ test('placeCall through Telnyx: dials from the user\'s own line, stores the Teln
   assert.equal(network.filter((n) => n.url.includes('signalwire.com')).length, 0);
   const row = db.tables.calls[0];
   assert.equal(row.twilio_call_sid, 'v3:live-1');
-  assert.equal(row.status, 'ringing');
+  // Dialing, not ringing: only the carrier's own ringing event may say the callee's phone is ringing.
+  assert.equal(row.status, 'queued');
 });
 
 test('placeCall through Telnyx: a rejected call is marked failed and nothing is left ringing', async () => {

@@ -2798,7 +2798,11 @@ function applyCallStatusUpdate(callRow) {
     // A call that never connected: say the real reason and what happened,
     // and leave it on screen long enough to read, instead of vanishing.
     const never = !callAnsweredAtMs && st !== 'completed';
-    if (never && callEndShownFor !== callRow.id) {
+    // An outcome that is not a normal conversation (voicemail, busy, refused, or a call that connected and
+    // dropped within seconds) is always explained, even when the provider had already reported an answer.
+    const secs = Number(callRow.duration_seconds) || 0;
+    const explained = Boolean(callRow.outcome_summary) && (st !== 'completed' || (secs > 0 && secs < 10));
+    if ((never || explained) && callEndShownFor !== callRow.id) {
       callEndShownFor = callRow.id;
       const reason = callRow.outcome_summary || callSummaryLine(callRow);
       const panel = $('transcriptPanel');
