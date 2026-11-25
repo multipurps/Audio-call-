@@ -4665,8 +4665,8 @@ $('addTimeTerms').addEventListener('click', () => openSheet('sheet-terms'));
 $('addTimePrivacy').addEventListener('click', () => openSheet('sheet-privacy'));
 
 let payWatching = false;
-async function verifyPayment() {
-  const resp = await authedFetch('/api/referrals?action=billing-verify', { method: 'POST' }).catch(() => null);
+async function verifyPayment(abandon = false) {
+  const resp = await authedFetch(`/api/referrals?action=billing-verify${abandon ? '&abandon=1' : ''}`, { method: 'POST' }).catch(() => null);
   if (!resp?.ok) return null;
   const data = await resp.json();
   const before = homeBalance?.remaining;
@@ -4697,15 +4697,22 @@ async function watchPayment() {
   try {
     for (let i = 0; i < 24 && payPending(); i++) {
       if (document.visibilityState === 'visible') {
-        const data = await verifyPayment();
+        const data = await verifyPayment(payLeftPage);
+        payLeftPage = false;
         if (data && !data.pending) break;
       }
       await new Promise((r) => setTimeout(r, 5000));
     }
   } finally { payWatching = false; }
 }
+// Set when the app goes to the background while a payment is open: coming back without a paid checkout means
+// the person left the payment page, so the open purchase is cancelled (see reconcilePurchase).
+let payLeftPage = false;
 function resumePaymentCheck() { if (payPending()) watchPayment(); }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resumePaymentCheck(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && payPending()) payLeftPage = true;
+  if (document.visibilityState === 'visible') resumePaymentCheck();
+});
 window.addEventListener('pageshow', resumePaymentCheck);
 
 $('dashBalanceBtn').addEventListener('click', openAddTime);

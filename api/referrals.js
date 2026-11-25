@@ -272,6 +272,12 @@ async function reconcilePurchase(supabase, purchase, deps) {
     return { credited: 0, state: 'unknown', inProgress: purchaseInProgress({ checkoutClass: 'open', ageMs }) };
   }
   const cls = classifyCheckoutState(checkout?.status);
+  // Left the payment page without paying: cancel it instead of showing "confirming payment". A late payment
+  // is still credited (settlePurchase reopens a cancelled purchase), so nothing paid is ever lost.
+  if (cls === 'open' && ageMs > (deps.abandon ? 10_000 : 5 * 60 * 1000)) {
+    await markTerminal(supabase, purchase, 'cancelled');
+    return { credited: 0, state: 'cancelled', inProgress: false };
+  }
   if (cls === 'paid' || cls === 'expired' || cls === 'cancelled' || cls === 'failed') {
     const settled = await settlePurchase(supabase, purchase, deps, checkout);
     return { credited: settled.credited, planActivated: settled.planActivated || 0, state: cls, inProgress: false, mismatch: settled.mismatch };
@@ -332,7 +338,7 @@ async function billingStatus(req, res, supabase, userId, deps) {
 
 async function verifyPending(req, res, supabase, userId, deps) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const settled = await reconcileUser(supabase, userId, deps);
+  const settled = await reconcileUser(supabase, userId, { ...deps, abandon: req.query?.abandon === '1' });
   const balance = await balanceFor(supabase, userId);
   return res.status(200).json({ ...balance, credited: settled.credited, planActivated: settled.planActivated || 0, pending: settled.inProgress, outcome: settled.outcome, welcomeSessionId: await welcomeSessionFor(supabase, userId) });
 }

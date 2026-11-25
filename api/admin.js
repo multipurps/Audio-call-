@@ -171,7 +171,7 @@ async function setApproval(req, res, supabase) {
   if (typeof monthlyMinuteLimit === 'number') {
     const { error } = await supabase
       .from('user_usage')
-      .upsert({ user_id: targetUserId, monthly_minute_limit: monthlyMinuteLimit, updated_at: new Date().toISOString() });
+      .upsert({ user_id: targetUserId, monthly_minute_limit: monthlyMinuteLimit, credit_expires_at: monthlyMinuteLimit > 0 ? new Date(Date.now() + 30 * 86400000).toISOString() : null, updated_at: new Date().toISOString() });
     if (error) return res.status(500).json({ error: error.message });
   }
   return res.status(200).json({ ok: true });
