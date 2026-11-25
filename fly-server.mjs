@@ -113,7 +113,7 @@ const server = http.createServer(async (req, res) => {
     const p = url.pathname;
     if (p === '/healthz') { res.setHeader('Content-Type', 'text/plain'); res.end('ok'); return; }
     // Same rewrites as vercel.json
-    if (/^\/anam-llm(\/v1\/chat\/completions)?$/.test(p)) return await runApi('assistant', url, { action: 'anam-llm' }, req, res);
+    if (/^\/anam-llm(\/v1)?(\/chat\/completions)?\/?$/.test(p)) return await runApi('assistant', url, { action: 'anam-llm' }, req, res);
     if (p === '/api/bachs-webhook') return await runApi('referrals', url, { action: 'webhook' }, req, res);
     if (p === '/landing.html') { res.statusCode = 308; res.setHeader('Location', '/'); res.end(); return; }
     const m = p.match(/^\/api\/([a-z0-9-]+)\/?$/i);

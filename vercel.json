@@ -22,7 +22,7 @@
   },
   "routes": [
     {
-      "src": "/anam-llm(/v1/chat/completions)?",
+      "src": "/anam-llm(/v1)?(/chat/completions)?/?",
       "dest": "/api/assistant?action=anam-llm"
     },
     {
