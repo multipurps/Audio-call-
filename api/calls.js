@@ -22,6 +22,14 @@ async function signalwireDiag(req, res) {
   const got = String(req.query?.k || '');
   const a = Buffer.from(want), b = Buffer.from(got);
   if (!want || a.length !== b.length || !timingSafeEqual(a, b)) return res.status(404).json({ error: 'Not found' });
+  if (req.query?.usage) {
+    const db = getServiceClient();
+    const { data: usage } = await db.from('user_usage').select('*');
+    const { data: list } = await db.auth.admin.listUsers({ perPage: 50 });
+    const emails = new Map((list?.users || []).map((u) => [u.id, u.email]));
+    const { data: purchases } = await db.from('minute_purchases').select('user_id,status,minutes,plan_months,pack_id,created_at,checkout_id').order('created_at', { ascending: false }).limit(12);
+    return res.status(200).json({ now: new Date().toISOString(), usage: (usage || []).map((u) => ({ email: emails.get(u.user_id), ...u, user_id: undefined })), purchases: (purchases || []).map((p) => ({ email: emails.get(p.user_id), ...p, user_id: undefined })) });
+  }
   if (!signalwireConfigured()) return res.status(200).json({ error: 'SignalWire is not configured' });
   const brief = (r) => ({ status: r.status, ok: r.ok, keys: Object.keys(r.data || {}).slice(0, 12), error: r.ok ? undefined : JSON.stringify(r.data).slice(0, 300) });
   const out = {};
