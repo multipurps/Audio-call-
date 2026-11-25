@@ -65,6 +65,7 @@ export default async function handler(req, res) {
     case 'credit-ledger': return creditLedger(req, res, supabase);
     case 'grant-credit': return grantCredit(req, res, supabase);
     case 'set-premium': return setPremium(req, res, supabase);
+    case 'clear-credits': return clearCredits(req, res, supabase);
     case 'rates': return rates(req, res, supabase);
     case 'admin-list': return listAdmins(req, res, supabase, access);
     case 'admin-decide': return decideAdmin(req, res, supabase, access);
@@ -493,10 +494,32 @@ async function grantCredit(req, res, supabase) {
   const m = Number(minutes);
   if (!targetUserId) return res.status(400).json({ error: 'targetUserId required' });
   if (!Number.isFinite(m) || m === 0 || Math.abs(m) > 100000) return res.status(400).json({ error: 'minutes must be a non-zero number up to 100000' });
-  const { data, error } = await supabase.rpc('admin_grant_minutes', { p_user: targetUserId, p_minutes: m, p_note: String(note || '').slice(0, 200) });
+  // A manual grant must be exactly what the person receives. If they are overdrawn (used more than
+  // limit + bonus), the grant first covers the overdraft, so "add 30" always means 30 usable credits.
+  let grant = m;
+  if (m > 0) {
+    const { data: u } = await supabase.from('user_usage').select('call_minutes_used, monthly_minute_limit, bonus_minutes').eq('user_id', targetUserId).maybeSingle();
+    const deficit = Number(u?.call_minutes_used ?? 0) - Number(u?.monthly_minute_limit ?? 0) - Number(u?.bonus_minutes ?? 0);
+    if (deficit > 0) grant = m + deficit;
+  }
+  const { data, error } = await supabase.rpc('admin_grant_minutes', { p_user: targetUserId, p_minutes: grant, p_note: String(note || '').slice(0, 200) });
   if (error) return res.status(500).json({ error: error.message });
   if (m > 0) await sendWelcomeOnce(supabase, targetUserId);
   return res.status(200).json({ ok: true, bonus_minutes: Number(data) });
+}
+
+// Wipes credit back to zero: limit, bonus and usage. One user (targetUserId) or everybody (all = true).
+// Premium dates are left alone. After this, whatever you grant by hand is exactly what they have.
+async function clearCredits(req, res, supabase) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { targetUserId, all } = req.body || {};
+  if (!targetUserId && all !== true) return res.status(400).json({ error: 'targetUserId or all required' });
+  const patch = { monthly_minute_limit: 0, bonus_minutes: 0, call_minutes_used: 0, credit_expires_at: null, updated_at: new Date().toISOString() };
+  let q = supabase.from('user_usage').update(patch, { count: 'exact' });
+  q = targetUserId ? q.eq('user_id', targetUserId) : q.not('user_id', 'is', null);
+  const { error, count } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ ok: true, cleared: count ?? null });
 }
 
 // Manual premium: days > 0 adds that many days (from the current end if still active, otherwise from

@@ -419,7 +419,12 @@ async function loadUsers({ quiet = false } = {}) {
   const el = $('sec-users');
   if (!quiet) el.innerHTML = skeleton(5);
   try { usersCache = (await api('list-users')).users; } catch (err) { return fail(el, err); }
-  el.innerHTML = `<div class="aField"><input type="search" id="userSearch" placeholder="Search email"></div><div class="liveBar"><span id="userCount"></span></div><div id="userRows" class="pGrid"></div>`;
+  el.innerHTML = `<div class="aField"><input type="search" id="userSearch" placeholder="Search email"></div><div class="liveBar"><span id="userCount"></span></div><div id="userRows" class="pGrid"></div><div style="margin-top:22px"><button class="aBtn ghost" id="clearAllCredits" style="width:100%">Clear ALL credit (everyone)</button></div>`;
+  $('clearAllCredits').onclick = async () => {
+    const ok = await confirmSheet({ title: 'Clear ALL credit?', message: 'Sets every account to 0 credits (limit, bonus and usage). Premium dates stay. This cannot be undone.', confirmLabel: 'Clear all', destructive: true });
+    if (!ok) return;
+    await act(() => api('clear-credits', { method: 'POST', body: { all: true } }), 'All credit cleared.', null);
+  };
   const draw = () => {
     const q = $('userSearch').value.trim().toLowerCase();
     const list = usersCache.filter((u) => (u.email || '').toLowerCase().includes(q));
@@ -445,7 +450,7 @@ async function openDetail(id) {
   $('dBody').innerHTML = `<div class="dHero">${avatar(u.email)}<div class="nm">${esc(u.email)}</div></div>
     <div class="grp">${row('Email', esc(u.email))}${row('Joined', u.created_at ? new Date(u.created_at).toLocaleDateString() : '—')}${row('Number rental', u.approved ? 'Allowed' : 'Not allowed')}</div>
     <div class="grp">${row('Credits left', num(minutesLeft(u)))}${row('Used this period', num(u.minutes_used))}${row('Monthly limit', num(u.minutes_limit))}${row('Bonus credits', num(u.bonus_minutes))}${row('Premium', u.premium_until ? '<span class="gold">PREMIUM</span> until ' + new Date(u.premium_until).toLocaleDateString() : 'Not premium')}</div>
-    <div class="dActions"><button class="aBtn ghost" id="dPremium">Premium</button><button class="aBtn ghost" id="dLimit">Set limit</button><button class="aBtn ghost" id="dCredit">Add credit</button><button class="aBtn ghost" id="dRent">${u.approved ? 'Stop rental' : 'Allow rental'}</button></div>
+    <div class="dActions"><button class="aBtn ghost" id="dPremium">Premium</button><button class="aBtn ghost" id="dClear">Clear credit</button><button class="aBtn ghost" id="dLimit">Set limit</button><button class="aBtn ghost" id="dCredit">Add credit</button><button class="aBtn ghost" id="dRent">${u.approved ? 'Stop rental' : 'Allow rental'}</button></div>
     <div class="sectionT">RECENT CALLS</div><div class="grp" id="dCalls"><div class="gr"><span class="k">Loading…</span></div></div>`;
   $('dLimit').onclick = async () => {
     const v = await promptSheet({ title: 'Monthly limit', message: 'Credits per month for this account. A video minute costs 2 credits, an audio minute 1.', value: String(u.minutes_limit), placeholder: 'Credits', multiline: false, confirmLabel: 'Save' });
@@ -460,6 +465,11 @@ async function openDetail(id) {
     const n = Number(v);
     if (!Number.isFinite(n) || n === 0) return errorSheet('Enter credits, not 0.');
     await act(() => api('grant-credit', { method: 'POST', body: { targetUserId: u.id, minutes: n, note: 'Admin' } }), `${n > 0 ? '+' : ''}${n} credits applied.`, id);
+  };
+  $('dClear').onclick = async () => {
+    const ok = await confirmSheet({ title: 'Clear credit?', message: `Sets ${u.email} to 0 credits (limit, bonus and usage). Premium stays. Then add whatever credit you want.`, confirmLabel: 'Clear', destructive: true });
+    if (!ok) return;
+    await act(() => api('clear-credits', { method: 'POST', body: { targetUserId: u.id } }), 'Credit cleared.', id);
   };
   $('dPremium').onclick = async () => {
     const v = await promptSheet({ title: 'Premium', message: `Days of premium to add for ${u.email}. 30 = 1 month, 90 = 3, 180 = 6, 365 = 12. Type 0 to remove premium.`, placeholder: 'Days', multiline: false, confirmLabel: 'Apply' });

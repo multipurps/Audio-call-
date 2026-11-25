@@ -269,6 +269,11 @@ async function reconcilePurchase(supabase, purchase, deps) {
     // The provider cannot be reached right now. Trust only the clock, so a
     // provider outage can never leave the spinner stuck.
     console.error('purchase reconcile: provider unreachable:', err.message);
+    if (ageMs > (deps.abandon ? 10_000 : 5 * 60 * 1000)) {
+      // Cannot confirm it and it is not recent: stop showing "confirming payment". A late paid webhook still credits.
+      await markTerminal(supabase, purchase, 'cancelled');
+      return { credited: 0, state: 'cancelled', inProgress: false };
+    }
     return { credited: 0, state: 'unknown', inProgress: purchaseInProgress({ checkoutClass: 'open', ageMs }) };
   }
   const cls = classifyCheckoutState(checkout?.status);
