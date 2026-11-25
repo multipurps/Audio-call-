@@ -111,3 +111,16 @@ test('anam-voice: refuses an empty or oversized recording without calling Anam',
   await anamVoiceRoute({ method: 'POST', body: { sample: { data: Buffer.alloc(5 * 1024 * 1024).toString('base64') } } }, big, fakeDb(), ME, { env: { ANAM_API_KEY: KEY }, fetchImpl: async () => { throw new Error('no'); } });
   assert.equal(big.code, 400);
 });
+
+test('anam-llm: a provider refusal reports its real reason, not "empty reply"', async () => {
+  const res = fakeRes();
+  await anamLlmRoute({
+    method: 'POST', headers: { authorization: `Bearer ${anamLlmSecret(ME, KEY)}` },
+    body: { messages: [{ role: 'user', content: 'hello' }] },
+  }, res, fakeDb({ profiles: [{ user_id: ME }], contacts: [] }), {
+    env: { ANAM_API_KEY: KEY },
+    generate: async () => ({ ok: false, status: 404, provider: 'luna', model: 'gpt-6-luna', errorText: 'model not found', content: '' }),
+  });
+  assert.equal(res.code, 502);
+  assert.match(res.body.reason, /luna\/gpt-6-luna HTTP 404: model not found/);
+});
