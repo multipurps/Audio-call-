@@ -159,10 +159,8 @@ test('abandoned payment: an unpaid checkout stops showing progress after the tim
   const f = fixture([purchase({ created_at: agoIso(PURCHASE_PROGRESS_MAX_MS + MIN) })]);
   const r = await api(f, 'billing', { method: 'GET', extra: { getCheckout: provider('OPEN') } });
   assert.equal(r.data.pending, false, 'no stuck "confirming payment"');
-  assert.equal(status(f), 'pending', 'still creditable if they pay late');
-  const late = await api(f, 'billing-verify', { extra: { getCheckout: provider('COMPLETED') } });
-  assert.equal(late.data.credited, 300);
-  assert.equal(late.data.remaining, 348);
+  assert.equal(status(f), 'cancelled', 'closed locally so nothing is stuck; settlePurchase reopens it if they pay late');
+  // A late payment arrives through the webhook, which reopens it: see 'a checkout cancelled locally is still credited'.
 });
 
 test('abandoned before the checkout ever opened: closed after a short grace, never stuck', async () => {

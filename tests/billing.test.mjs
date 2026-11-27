@@ -252,3 +252,34 @@ test('a failing admin alert never costs the buyer their minutes or fails the web
   assert.equal(f.db.tables.minute_purchases[0].status, 'paid');
   assert.equal(f.db.tables.user_usage[0].bonus_minutes, 60, 'the minutes were credited');
 });
+
+// The other tests replace getCheckout with a stub, so they never exercise the real request. This one runs the real
+// code against a fake Bachs that serves ONLY the documented route (GET /v1/checkout-sessions/{id}, as in Bachs'
+// "Retrieve a checkout session" docs) and answers 404 to anything else, exactly like the real API did to the old path.
+test('real Bachs lookup: paid checkout is found on /v1/checkout-sessions/{id} and credits the buyer', async () => {
+  const urls = [];
+  const fetchImpl = async (url, init) => {
+    urls.push(`${init.method} ${url}`);
+    const ok = init.method === 'GET' && url === 'https://sandbox-api.bachs.io/v1/checkout-sessions/chk_1';
+    const body = ok
+      ? { checkout_id: 'chk_1', status: 'completed', amount: '9.00', currency: 'USD', reference: 'emy_1' }
+      : { message: 'not found' };
+    return { ok, status: ok ? 200 : 404, text: async () => JSON.stringify(body) };
+  };
+  const f = fixture({ minute_purchases: [pending()] });
+  const r = await webhook(f, event, {}, { fetchImpl });
+  assert.equal(r.code, 200, JSON.stringify(r.data));
+  assert.equal(r.data.credited, 60);
+  assert.equal(f.db.tables.user_usage[0].bonus_minutes, 60);
+  assert.deepEqual(urls, ['GET https://sandbox-api.bachs.io/v1/checkout-sessions/chk_1']);
+});
+
+test('real Bachs lookup: returning to the app also credits a paid checkout', async () => {
+  const fetchImpl = async (url) => {
+    const ok = url.endsWith('/v1/checkout-sessions/chk_1');
+    return { ok, status: ok ? 200 : 404, text: async () => JSON.stringify(ok ? { status: 'completed', amount: '9.00', currency: 'USD', reference: 'emy_1' } : {}) };
+  };
+  const f = fixture({ minute_purchases: [pending()] });
+  const r = await call(f, { action: 'billing-verify', extra: { fetchImpl } });
+  assert.equal(r.data.credited, 60);
+});

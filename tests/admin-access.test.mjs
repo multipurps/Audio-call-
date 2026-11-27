@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 // A small in-memory Supabase for the admin tables. (tests/helpers.mjs upserts by
 // user_id; admin_access is keyed by email.)
+const deleted = [];
 function fakeSupabase({ users = {}, admin_access = [], push_subscriptions = [], failAccess = false } = {}) {
   const tables = { admin_access: structuredClone(admin_access), push_subscriptions: structuredClone(push_subscriptions) };
   const byId = Object.fromEntries(Object.values(users).map((u) => [u.id, u]));
@@ -41,6 +42,7 @@ function fakeSupabase({ users = {}, admin_access = [], push_subscriptions = [], 
       admin: {
         getUserById: async (id) => ({ data: { user: byId[id] || null }, error: null }),
         listUsers: async () => ({ data: { users: Object.values(users) }, error: null }),
+        deleteUser: async (id) => { deleted.push(id); return { error: null }; },
       },
     },
   };
@@ -310,4 +312,20 @@ test('admin page: investors only get Overview, Usage and Costs, read-only, with 
   assert.match(src, /const ro = myRole !== 'owner'/);
   const api = readFileSync(new URL('../api/admin.js', import.meta.url), 'utf8');
   assert.match(api, /const INVESTOR_ACTIONS = new Set\(\['overview', 'analytics', 'rates'\]\)/);
+});
+
+test('delete-user: only the owner can delete an account, never their own or an admin\'s', async () => {
+  deleted.length = 0;
+  const db = fakeSupabase({ users, admin_access: [{ email: 'investor@example.com', status: 'approved', user_id: 'u-inv' }] });
+  currentDb = db;
+  const post = (token, targetUserId) => call(adminApi, token, 'delete-user', { method: 'POST', body: { targetUserId } });
+  assert.equal((await post('t_investor', 'u-str')).code, 403, 'read-only admin cannot delete');
+  assert.equal((await post('t_stranger', 'u-str')).code, 403);
+  assert.equal((await post('t_owner', 'u-owner')).code, 400, 'not your own account');
+  assert.equal((await post('t_owner', 'u-inv')).code, 400, 'not an admin');
+  assert.equal((await post('t_owner', undefined)).code, 400);
+  assert.deepEqual(deleted, []);
+  const ok = await post('t_owner', 'u-str');
+  assert.equal(ok.code, 200);
+  assert.deepEqual(deleted, ['u-str']);
 });

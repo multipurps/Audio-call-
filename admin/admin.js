@@ -450,7 +450,7 @@ async function openDetail(id) {
   $('dBody').innerHTML = `<div class="dHero">${avatar(u.email)}<div class="nm">${esc(u.email)}</div></div>
     <div class="grp">${row('Email', esc(u.email))}${row('Joined', u.created_at ? new Date(u.created_at).toLocaleDateString() : '—')}${row('Number rental', u.approved ? 'Allowed' : 'Not allowed')}</div>
     <div class="grp">${row('Credits left', num(minutesLeft(u)))}${row('Used this period', num(u.minutes_used))}${row('Monthly limit', num(u.minutes_limit))}${row('Bonus credits', num(u.bonus_minutes))}${row('Premium', u.premium_until ? '<span class="gold">PREMIUM</span> until ' + new Date(u.premium_until).toLocaleDateString() : 'Not premium')}</div>
-    <div class="dActions"><button class="aBtn ghost" id="dPremium">Premium</button><button class="aBtn ghost" id="dClear">Clear credit</button><button class="aBtn ghost" id="dLimit">Set limit</button><button class="aBtn ghost" id="dCredit">Add credit</button><button class="aBtn ghost" id="dRent">${u.approved ? 'Stop rental' : 'Allow rental'}</button></div>
+    <div class="dActions"><button class="aBtn ghost" id="dPremium">Premium</button><button class="aBtn ghost" id="dClear">Clear credit</button><button class="aBtn ghost" id="dLimit">Set limit</button><button class="aBtn ghost" id="dCredit">Add credit</button><button class="aBtn ghost" id="dRent">${u.approved ? 'Stop rental' : 'Allow rental'}</button><button class="aBtn ghost" id="dDelete" style="color:#ff6b6b">Delete user</button></div>
     <div class="sectionT">RECENT CALLS</div><div class="grp" id="dCalls"><div class="gr"><span class="k">Loading…</span></div></div>`;
   $('dLimit').onclick = async () => {
     const v = await promptSheet({ title: 'Monthly limit', message: 'Credits per month for this account. A video minute costs 2 credits, an audio minute 1.', value: String(u.minutes_limit), placeholder: 'Credits', multiline: false, confirmLabel: 'Save' });
@@ -465,6 +465,17 @@ async function openDetail(id) {
     const n = Number(v);
     if (!Number.isFinite(n) || n === 0) return errorSheet('Enter credits, not 0.');
     await act(() => api('grant-credit', { method: 'POST', body: { targetUserId: u.id, minutes: n, note: 'Admin' } }), `${n > 0 ? '+' : ''}${n} credits applied.`, id);
+  };
+  $('dDelete').onclick = async () => {
+    const ok = await confirmSheet({ title: 'Delete this user?', message: `Permanently deletes ${u.email} and their contacts, calls, chats and credits. This cannot be undone.`, confirmLabel: 'Delete user', destructive: true });
+    if (!ok) return;
+    try {
+      await api('delete-user', { method: 'POST', body: { targetUserId: u.id } });
+      closeDetail();
+      usersCache = (await api('list-users')).users;
+      if (current === 'users') loadUsers({ quiet: true });
+      await successSheet('User deleted.');
+    } catch (err) { errorSheet(err.message || 'Could not delete that user.'); }
   };
   $('dClear').onclick = async () => {
     const ok = await confirmSheet({ title: 'Clear credit?', message: `Sets ${u.email} to 0 credits (limit, bonus and usage). Premium stays. Then add whatever credit you want.`, confirmLabel: 'Clear', destructive: true });
