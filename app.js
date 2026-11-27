@@ -289,9 +289,6 @@ $('signupSubmit').addEventListener('click', async () => {
 
 $('loginGoogle').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin + '/index.html' } }));
 $('signupGoogle').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin + '/index.html' } }));
-// Apple sign-in needs the Apple provider enabled in Supabase Auth settings to actually work.
-$('loginApple').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'apple', options: { redirectTo: window.location.origin + '/index.html' } }));
-$('signupApple').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'apple', options: { redirectTo: window.location.origin + '/index.html' } }));
 
 // Sign in with Telegram (OpenID Connect + PKCE). The code is exchanged on the server (api/referrals telegram-login).
 const TG_CLIENT_ID = '9211938401';
