@@ -349,14 +349,19 @@ async function reconcilePurchase(supabase, purchase, deps) {
 async function reconcileUser(supabase, userId, deps) {
   const nowMs = deps.nowMs ?? Date.now();
   const { data: rows } = await supabase
-    .from('minute_purchases').select('*').eq('user_id', userId).eq('status', 'pending').order('created_at', { ascending: false }).limit(5);
+    .from('minute_purchases').select('*').eq('user_id', userId)
+    // Pending ones, plus ones we cancelled in the last day because the person walked away: if they paid late
+    // (a bank transfer, say), the provider says so here and the credit is still given, with or without a webhook.
+    .or(`status.eq.pending,and(status.eq.cancelled,checkout_id.not.is.null,created_at.gte.${new Date(nowMs - 24 * 3600 * 1000).toISOString()})`)
+    .order('created_at', { ascending: false }).limit(6);
   let credited = 0;
   let activated = 0;
   let inProgress = false;
   let outcome = null;
   for (const row of rows || []) {
     try {
-      const r = await reconcilePurchase(supabase, row, deps);
+      const r = row.status === 'cancelled' ? await settlePurchase(supabase, row, deps) : await reconcilePurchase(supabase, row, deps);
+      if (row.status === 'cancelled') { credited += r.credited || 0; activated += r.planActivated || 0; continue; }
       credited += r.credited;
       activated += r.planActivated || 0;
       if (r.inProgress) inProgress = true;
