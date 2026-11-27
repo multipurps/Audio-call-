@@ -30,7 +30,7 @@ import { botReply } from '../lib/telegramLogin.js';
 test('bot answers /start with a button that opens the app', () => {
   const r = botReply({ text: '/start', from: { first_name: 'Ayo' } });
   assert.match(r.text, /Hi Ayo/);
-  assert.equal(r.reply_markup.inline_keyboard[0][0].web_app.url, 'https://audio-call-iota.vercel.app/');
+  assert.equal(r.reply_markup.inline_keyboard[0][0].web_app.url, 'https://audio-call-iota.vercel.app/index.html');
   assert.match(botReply({ text: '/help' }).text, /\/start/);
 });
 
