@@ -2389,15 +2389,18 @@ async function openLiveSwap({ contactName = '', stream = null } = {}) {
   $('videoCallScreen').classList.remove('hidden');
   setVcStatus('Starting…');
   const fail = (title, message) => { closeVideoCall(); showNotice({ kind: 'error', title, message }); };
+  let stage = 'start';
   try {
     const { data: prof } = await supabase.from('profiles').select('live_swap_url').eq('user_id', currentUser.id).maybeSingle();
     const ref = prof?.live_swap_url;
     if (!ref) return fail('Live Swap', 'Add your Live Swap picture first (Profile > Avatar).');
+    stage = 'token';
     const tr = await authedFetch('/api/assistant?action=xmax-token', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'mint' }),
     });
     const tk = await tr.json().catch(() => ({}));
     if (!tr.ok || !tk.temporaryApiKey) return fail('Live Swap', tk.error || 'Xmax could not start.');
+    stage = 'sdk';
     const X = await import('https://esm.sh/@xmaxai/web-sdk@1.0.10');
     const client = new X.XmaxClient(new X.XmaxConfiguration({ apiKey: tk.temporaryApiKey, environment: X.XmaxEnvironment.global }));
     const realtime = client.createRealtimeManager(new X.RealtimeConfiguration({ model: X.RealtimeModel.x2_1_1_preview_us }));
@@ -2429,6 +2432,7 @@ async function openLiveSwap({ contactName = '', stream = null } = {}) {
       videoTrack: flippedTrack,
       videoFormat: new X.RealtimeVideoFormat({ width: 1024, height: 1920, fps: 15 }),
     });
+    stage = 'connect';
     setVcStatus('Opening connection…');
     const remote = await realtime.startGeneration({
       localStream,
@@ -2444,7 +2448,9 @@ async function openLiveSwap({ contactName = '', stream = null } = {}) {
     setVcStatus('Connected', true);
   } catch (e) {
     const cameraDenied = /NotAllowed|Permission|denied/i.test(String(e && (e.name || e.message)));
-    fail('Live Swap', cameraDenied ? 'Allow camera access to use Live Swap.' : plainLiveSwapError(e.message));
+    console.warn('[live-swap] failed at', stage, e);
+    const raw = String((e && e.message) || e || '').replace(/\s+/g, ' ').slice(0, 140);
+    fail('Live Swap', cameraDenied ? 'Allow camera access to use Live Swap.' : `${plainLiveSwapError(e.message)} [${stage}: ${raw || 'no detail'}]`);
   }
 }
 // Stops Live Swap: closes Xmax, revokes its temporary key, and stops the camera.
@@ -7079,24 +7085,54 @@ async function askNotificationsOnInstall() {
 
 
 // ---- Playground: talk to your avatar, or try Live Swap, with no call and nobody dialled. No PiP.
-// It reuses the video call screen (hidden PiP and layout button via data-playground). Capped at 10 minutes.
-let pgTimer = null;
+// It reuses the video call screen (PiP and layout button hidden via data-playground). It costs what a video
+// call costs (2 credits a minute): the server starts the clock, charges the first minute, and bills the
+// elapsed time on every tick. Capped at 10 minutes.
+let pgTimer = null, pgTick = null, pgId = null;
+const pgCall = (body) => authedFetch('/api/assistant?action=playground', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+}).then(async (r) => ({ ok: r.ok, ...(await r.json().catch(() => ({}))) })).catch(() => ({ ok: false, error: 'Could not reach the server.' }));
 function endPlayground() {
   clearTimeout(pgTimer); pgTimer = null;
+  clearInterval(pgTick); pgTick = null;
+  if (pgId) { const id = pgId; pgId = null; pgCall({ op: 'end', id }).then(() => { try { loadBalance(); } catch (_) {} }); }
   if (pgMic) { pgMic.getTracks().forEach((t) => t.stop()); pgMic = null; }
   const el = $('videoCallScreen'); if (el) delete el.dataset.playground;
+  $('pgSayBar')?.classList.add('hidden');
 }
-async function startPlayground(kind) {
+async function startPlayground(kind, brief = '') {
   if (!$('videoCallScreen').classList.contains('hidden')) return;
+  const st = await pgCall({ op: 'start', kind });
+  if (!st.ok || !st.id) {
+    if (st.code === 'no-minutes') { try { openAddTime?.(); } catch (_) {} }
+    return showNotice({ kind: 'error', title: 'Playground', message: st.error || 'Playground could not start.' });
+  }
+  pgId = st.id;
   $('videoCallScreen').dataset.playground = '1';
   pgTimer = setTimeout(() => { closeVideoCall(); showNotice({ kind: 'info', title: 'Playground', message: 'Playground ended after 10 minutes.' }); }, 10 * 60 * 1000);
+  pgTick = setInterval(async () => {
+    if (!pgId) return;
+    const t = await pgCall({ op: 'tick', id: pgId });
+    if (t.ok && t.remaining !== null && t.remaining <= 0) { closeVideoCall(); showNotice({ kind: 'error', title: 'Playground', message: 'You are out of credits. Add credits to keep going.' }); }
+  }, 30000);
   if (kind === 'swap') { await openLiveSwap({ contactName: 'Playground' }); if ($('videoCallScreen').classList.contains('hidden')) endPlayground(); return; }
   try { pgMic = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-  catch (_) { endPlayground(); return showNotice({ kind: 'error', title: 'Playground', message: 'Allow the microphone for this app, then try again.' }); }
+  catch (_) { closeVideoCall(); endPlayground(); return showNotice({ kind: 'error', title: 'Playground', message: 'Allow the microphone for this app, then try again.' }); }
+  const say = brief.trim();
   await openVideoCall({
     contactName: 'My avatar', calleeInput: pgMic, playground: true,
-    brief: 'This is a practice chat with the user themselves, not a real call. Chat naturally and answer what they ask.',
+    brief: 'This is a practice chat with the user themselves, not a real call. Chat naturally and answer what they ask.' + (say ? ` The user told you what to say or do: ${say}` : ''),
   });
+  if ($('videoCallScreen').classList.contains('hidden')) { endPlayground(); return; }
+  $('pgSayBar')?.classList.remove('hidden');
 }
-$('pgAvatarBtn')?.addEventListener('click', () => startPlayground('avatar'));
+$('pgAvatarBtn')?.addEventListener('click', () => { $('pgBrief').value = ''; openSheet('sheet-playground'); });
+$('pgStartBtn')?.addEventListener('click', () => { const b = $('pgBrief').value; closeSheets(); startPlayground('avatar', b); });
 $('pgSwapBtn')?.addEventListener('click', () => startPlayground('swap'));
+$('pgSayBar')?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = $('pgSayInput'); const text = input.value.trim();
+  if (!text) return;
+  try { vcClient?.talk?.(text); } catch (_) {}
+  input.value = '';
+});

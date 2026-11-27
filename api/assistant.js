@@ -5,6 +5,7 @@ import { LANGUAGE_NAMES } from '../lib/callLanguages.js';
 // Languages the transcription model accepts as a pinned language. Igbo is not
 // one of them, so it is left to auto-detect.
 const STT_LANGUAGES = new Set(['en', 'es', 'fr', 'pt', 'de', 'ha', 'yo', 'sw', 'ar', 'hi', 'zh']);
+import { playgroundRoute } from '../lib/playground.js';
 import { minutesLeft, minutesGate, NO_MINUTES_CHAT_REPLY } from '../lib/billing.js';
 import { prepareCall, saveCallPlan, confirmCallPlan, attachCallPlans } from '../lib/callPlans.js';
 import { resolveVoiceChoice, stripSpeechMarkers } from '../lib/voiceChoice.js';
@@ -59,6 +60,7 @@ export default async function handler(req, res) {
   const action = req.query?.action || req.body?.action;
   switch (action) {
     case 'xmax-token': return xmaxTokenRoute(req, res, supabase, userId);
+    case 'playground': return playgroundRoute(req, res, supabase, userId);
     case 'anam-avatars': return anamAvatarsRoute(req, res, supabase, userId);
     case 'anam-voice': return anamVoiceRoute(req, res, supabase, userId);
     case 'anam-avatar': return anamAvatarSelectRoute(req, res, supabase, userId);

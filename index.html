@@ -32,7 +32,7 @@
 </script>
 <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-11-27.5">
+<link rel="stylesheet" href="styles.css?v=2026-11-27.6">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -155,7 +155,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-11-27.5').catch(function (err) {
+        import('./app.js?v=2026-11-27.6').catch(function (err) {
           showBootError('Something went wrong. Check your connection and try again.', 'Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -463,7 +463,7 @@
       </section>
 
       <section class="pgRow" aria-label="Playground">
-        <div class="pgHead"><strong>Playground</strong><span>Try your avatar and Live Swap. No call, no one is dialled.</span></div>
+        <div class="pgHead"><strong>Playground</strong><span>Try your avatar and Live Swap. No call, no one is dialled. Uses 2 credits a minute.</span></div>
         <div class="pgBtns">
           <button type="button" class="pgBtn" id="pgAvatarBtn"><svg class="ic"><use href="#ic-video"/></svg>Talk to my avatar</button>
           <button type="button" class="pgBtn" id="pgSwapBtn"><svg class="ic"><use href="#ic-avatar"/></svg>Try Live Swap</button>
@@ -785,6 +785,10 @@
       <span class="vcResize" id="vcResize" aria-label="Resize your picture"></span>
     </div>
   </div>
+  <form class="pgSay hidden" id="pgSayBar" autocomplete="off">
+    <input type="text" id="pgSayInput" maxlength="400" placeholder="Type what your avatar should say" aria-label="Type what your avatar should say">
+    <button type="submit">Say</button>
+  </form>
   <div class="vcControls">
     <button class="callBtn" id="vcMuteBtn" aria-label="Mute" aria-pressed="false">
       <div class="callBtnCircle"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -1492,6 +1496,19 @@
   </div>
 </div>
 
+<div class="sheetScreen hidden" id="sheet-playground">
+  <div class="sheetHeader">
+    <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <div class="sheetTitle">Talk to my avatar</div>
+  </div>
+  <div class="sheetBody">
+    <div class="sectionLabel">What should your avatar say or do?</div>
+    <textarea id="pgBrief" class="pgBrief" rows="5" maxlength="1500" placeholder="e.g. Pretend you are me calling a landlord about a late repair. Be polite but firm."></textarea>
+    <p class="hint" id="pgCostHint">Playground uses the same credits as a video call: 2 credits a minute. It stops after 10 minutes.</p>
+    <button type="button" class="pgBtn pgGo" id="pgStartBtn">Start</button>
+  </div>
+</div>
+
 <div class="sheetScreen hidden" id="sheet-avatar">
   <div class="sheetHeader">
     <div class="sheetBack" data-close-sheet><svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
@@ -1670,11 +1687,11 @@
     <p class="callDetailAgainStatus" id="callDetailAgainStatus" role="status"></p>
   </div>
 </dialog>
-  <script src="btnLoading.js?v=2026-11-27.5" defer></script>
-  <script src="callWakeLock.js?v=2026-11-27.5" defer></script>
-  <script src="tabpill.js?v=2026-11-27.5" defer></script>
-  <script src="wacalls-media-core.js?v=2026-11-27.5" defer></script>
-  <script src="wacalls-media.js?v=2026-11-27.5" defer></script>
-  <script src="wacalls-call.js?v=2026-11-27.5" defer></script>
+  <script src="btnLoading.js?v=2026-11-27.6" defer></script>
+  <script src="callWakeLock.js?v=2026-11-27.6" defer></script>
+  <script src="tabpill.js?v=2026-11-27.6" defer></script>
+  <script src="wacalls-media-core.js?v=2026-11-27.6" defer></script>
+  <script src="wacalls-media.js?v=2026-11-27.6" defer></script>
+  <script src="wacalls-call.js?v=2026-11-27.6" defer></script>
 </body>
 </html>

@@ -1594,3 +1594,10 @@ body::before{content:""; position:absolute; top:0; left:0; right:0; height:var(-
 .pgBtn .ic{width:18px; height:18px;}
 /* Playground has no picture-in-picture and no layout switch. */
 #videoCallScreen[data-playground="1"] .vcSelfWrap,#videoCallScreen[data-playground="1"] #vcLayoutBtn{display:none !important;}
+
+.pgBrief{width:100%; box-sizing:border-box; border-radius:14px; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.05); color:inherit; font:inherit; padding:12px; resize:vertical;}
+.pgGo{width:100%; margin-top:12px; background:var(--accent,#7c5cff); border:0; color:#fff;}
+.pgSay{position:absolute; left:12px; right:12px; bottom:calc(env(safe-area-inset-bottom) + 130px); z-index:5; display:flex; gap:8px;}
+.pgSay.hidden{display:none;}
+.pgSay input{flex:1; height:42px; border-radius:21px; border:1px solid rgba(255,255,255,.3); background:rgba(0,0,0,.55); color:#fff; padding:0 14px; font:inherit;}
+.pgSay button{height:42px; padding:0 18px; border-radius:21px; border:0; background:#fff; color:#000; font-weight:700;}
