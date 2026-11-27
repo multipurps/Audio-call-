@@ -1,10 +1,10 @@
 import { sendWelcomeOnce, welcomeSessionFor } from '../lib/welcome.js';
-import { telegramConfigured, allowedRedirect, exchangeCode, verifyIdToken, sessionTokenFor } from '../lib/telegramLogin.js';
+import { telegramConfigured, allowedRedirect, exchangeCode, verifyIdToken, sessionTokenFor, handleBotUpdate } from '../lib/telegramLogin.js';
 import { getServiceClient, getAuthedUser } from '../lib/supabaseAdmin.js';
 import {
   getPacks, priceFor, planFor, planList, premiumState, expireFreeCredits, remainingMinutes, createCheckoutSession, getCheckout,
   verifyWebhookSignature, checkoutIdFromEvent, eventType, sameAmount, classifyCheckoutState, purchaseInProgress, PURCHASE_NO_CHECKOUT_GRACE_MS } from '../lib/billing.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { notifyAdminsOfPurchase } from '../lib/adminPush.js';
 
 // Referrals AND minutes billing (Add time, paid through Bachs) live in this one
@@ -56,6 +56,17 @@ export default async function handler(req, res, deps = {}) {
   let body = {};
   try { body = raw.length ? JSON.parse(raw.toString('utf8')) : {}; } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
   req.body = body;
+
+  if (action === 'telegram-webhook') {
+    // Telegram proves it is the sender with the secret token we gave it when the webhook was set.
+    const env = deps.env || process.env;
+    const want = String(env.TELEGRAM_WEBHOOK_SECRET || '');
+    const got = String(req.headers?.['x-telegram-bot-api-secret-token'] || '');
+    const a = Buffer.from(want), b = Buffer.from(got);
+    if (!want || a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'Unauthorized' });
+    try { await (deps.handleBotUpdate || handleBotUpdate)(body, { env, fetchImpl: deps.fetchImpl }); } catch (err) { console.error('telegram bot reply failed:', err.message); }
+    return res.status(200).json({ ok: true });
+  }
 
   if (action === 'telegram-login') {
     // Not signed in yet by definition, so this runs before the auth check below.

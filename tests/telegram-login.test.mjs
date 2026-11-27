@@ -25,3 +25,11 @@ test('rejects wrong audience, issuer, expiry and bad signature', async () => {
   await assert.rejects(verifyIdToken(token(good, other), { env, fetchImpl }));
 });
 test('account address is fixed per Telegram user', () => { assert.equal(telegramEmail('42'), 'tg-42@telegram.example.com'); assert.match(allowedRedirect({}), /index\.html$/); });
+
+import { botReply } from '../lib/telegramLogin.js';
+test('bot answers /start with a button that opens the app', () => {
+  const r = botReply({ text: '/start', from: { first_name: 'Ayo' } });
+  assert.match(r.text, /Hi Ayo/);
+  assert.equal(r.reply_markup.inline_keyboard[0][0].web_app.url, 'https://audio-call-iota.vercel.app/');
+  assert.match(botReply({ text: '/help' }).text, /\/start/);
+});
