@@ -304,6 +304,24 @@ async function startTelegramLogin() {
   window.location.href = `https://oauth.telegram.org/auth?${q}`;
 }
 ['loginTelegram', 'signupTelegram'].forEach((id) => $(id)?.addEventListener('click', startTelegramLogin));
+// Opened inside Telegram as a mini app: Telegram already says who this is, so sign in without a login page.
+(async function telegramMiniAppLogin() {
+  const tg = window.Telegram?.WebApp;
+  if (!tg?.initData) return;
+  try { tg.ready(); tg.expand(); } catch { /* cosmetic */ }
+  ['loginTelegram', 'signupTelegram'].forEach((id) => { const b = $(id); if (b) b.style.display = 'none'; }); // the login page cannot confirm from inside Telegram
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) return;
+    const resp = await fetch('/api/referrals?action=telegram-webapp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData: tg.initData }) });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.token_hash) throw new Error(data.error || 'Telegram sign-in failed.');
+    const { error } = await supabase.auth.verifyOtp({ token_hash: data.token_hash, type: 'magiclink' });
+    if (error) throw error;
+  } catch (err) {
+    const hint = $('loginHint'); if (hint) hint.textContent = err.message || 'Telegram sign-in failed.';
+  }
+})();
 (async function finishTelegramLogin() {
   const p = new URLSearchParams(window.location.search);
   if (!p.get('code') || !p.get('state')) return;

@@ -1,5 +1,5 @@
 import { sendWelcomeOnce, welcomeSessionFor } from '../lib/welcome.js';
-import { telegramConfigured, allowedRedirect, exchangeCode, verifyIdToken, sessionTokenFor, handleBotUpdate, setupBot } from '../lib/telegramLogin.js';
+import { telegramConfigured, allowedRedirect, exchangeCode, verifyIdToken, sessionTokenFor, handleBotUpdate, setupBot, verifyInitData } from '../lib/telegramLogin.js';
 import { getServiceClient, getAuthedUser } from '../lib/supabaseAdmin.js';
 import {
   getPacks, priceFor, planFor, planList, premiumState, expireFreeCredits, remainingMinutes, createCheckoutSession, getCheckout,
@@ -77,6 +77,19 @@ export default async function handler(req, res, deps = {}) {
     if (!want || a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: 'Unauthorized' });
     try { await (deps.handleBotUpdate || handleBotUpdate)(body, { env, fetchImpl: deps.fetchImpl }); } catch (err) { console.error('telegram bot reply failed:', err.message); }
     return res.status(200).json({ ok: true });
+  }
+
+  if (action === 'telegram-webapp') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+    const env = deps.env || process.env;
+    try {
+      const claims = verifyInitData(body.initData, { env });
+      const { tokenHash } = await sessionTokenFor(supabase, claims);
+      return res.status(200).json({ token_hash: tokenHash });
+    } catch (err) {
+      console.error('telegram-webapp login failed:', err.message);
+      return res.status(401).json({ error: 'Telegram sign-in failed. Please try again.' });
+    }
   }
 
   if (action === 'telegram-login') {
