@@ -1,5 +1,5 @@
 import { sendWelcomeOnce, welcomeSessionFor } from '../lib/welcome.js';
-import { telegramConfigured, allowedRedirect, exchangeCode, verifyIdToken, sessionTokenFor, handleBotUpdate } from '../lib/telegramLogin.js';
+import { telegramConfigured, allowedRedirect, exchangeCode, verifyIdToken, sessionTokenFor, handleBotUpdate, setupBot } from '../lib/telegramLogin.js';
 import { getServiceClient, getAuthedUser } from '../lib/supabaseAdmin.js';
 import {
   getPacks, priceFor, planFor, planList, premiumState, expireFreeCredits, remainingMinutes, createCheckoutSession, getCheckout,
@@ -49,6 +49,17 @@ function generateCode() {
 export default async function handler(req, res, deps = {}) {
   const supabase = deps.supabase || getServiceClient();
   const action = req.query?.action;
+
+  if (action === 'telegram-setup') {
+    // Gated by the webhook secret. Re-registers the bot with Telegram; nothing is changed in Emysa.
+    const env = deps.env || process.env;
+    const want = String(env.TELEGRAM_WEBHOOK_SECRET || '');
+    const got = String(req.query?.k || '');
+    const a = Buffer.from(want), b = Buffer.from(got);
+    if (!want || a.length !== b.length || !timingSafeEqual(a, b)) return res.status(404).json({ error: 'Not found' });
+    try { return res.status(200).json(await (deps.setupBot || setupBot)({ env, fetchImpl: deps.fetchImpl })); }
+    catch (err) { return res.status(500).json({ error: err.message }); }
+  }
 
   const raw = await readRawBody(req);
   if (action === 'webhook') return webhook(req, res, supabase, raw, deps);
