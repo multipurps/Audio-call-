@@ -293,6 +293,38 @@ $('signupGoogle').addEventListener('click', () => supabase.auth.signInWithOAuth(
 $('loginApple').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'apple', options: { redirectTo: window.location.origin + '/index.html' } }));
 $('signupApple').addEventListener('click', () => supabase.auth.signInWithOAuth({ provider: 'apple', options: { redirectTo: window.location.origin + '/index.html' } }));
 
+// Sign in with Telegram (OpenID Connect + PKCE). The code is exchanged on the server (api/referrals telegram-login).
+const TG_CLIENT_ID = '9211938401';
+const TG_REDIRECT = window.location.origin + '/index.html';
+const tgRandom = (n) => { const a = new Uint8Array(n); crypto.getRandomValues(a); return btoa(String.fromCharCode(...a)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+async function startTelegramLogin() {
+  const verifier = tgRandom(48);
+  const state = tgRandom(16);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  try { localStorage.setItem('emysa_tg', JSON.stringify({ verifier, state, at: Date.now() })); } catch { /* sign-in cannot continue without it */ }
+  const q = new URLSearchParams({ client_id: TG_CLIENT_ID, redirect_uri: TG_REDIRECT, response_type: 'code', scope: 'openid profile', state, code_challenge: challenge, code_challenge_method: 'S256' });
+  window.location.href = `https://oauth.telegram.org/auth?${q}`;
+}
+['loginTelegram', 'signupTelegram'].forEach((id) => $(id)?.addEventListener('click', startTelegramLogin));
+(async function finishTelegramLogin() {
+  const p = new URLSearchParams(window.location.search);
+  if (!p.get('code') || !p.get('state')) return;
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem('emysa_tg') || 'null'); localStorage.removeItem('emysa_tg'); } catch { /* none */ }
+  if (!saved || saved.state !== p.get('state') || Date.now() - saved.at > 10 * 60 * 1000) return;
+  history.replaceState(null, '', window.location.pathname);
+  try {
+    const resp = await fetch('/api/referrals?action=telegram-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: p.get('code'), verifier: saved.verifier, redirectUri: TG_REDIRECT }) });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.token_hash) throw new Error(data.error || 'Telegram sign-in failed.');
+    const { error } = await supabase.auth.verifyOtp({ token_hash: data.token_hash, type: 'magiclink' });
+    if (error) throw error;
+  } catch (err) {
+    const hint = $('loginHint'); if (hint) hint.textContent = err.message || 'Telegram sign-in failed.';
+  }
+})();
+
 $('signOutBtn').addEventListener('click', () => supabase.auth.signOut());
 $('pendingSignOut').addEventListener('click', () => supabase.auth.signOut());
 $('pendingRecheck').addEventListener('click', () => { if (currentSession) enterApp(currentSession); });

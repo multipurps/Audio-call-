@@ -1,4 +1,5 @@
 import { sendWelcomeOnce, welcomeSessionFor } from '../lib/welcome.js';
+import { telegramConfigured, allowedRedirect, exchangeCode, verifyIdToken, sessionTokenFor } from '../lib/telegramLogin.js';
 import { getServiceClient, getAuthedUser } from '../lib/supabaseAdmin.js';
 import {
   getPacks, priceFor, planFor, planList, premiumState, expireFreeCredits, remainingMinutes, createCheckoutSession, getCheckout,
@@ -55,6 +56,24 @@ export default async function handler(req, res, deps = {}) {
   let body = {};
   try { body = raw.length ? JSON.parse(raw.toString('utf8')) : {}; } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
   req.body = body;
+
+  if (action === 'telegram-login') {
+    // Not signed in yet by definition, so this runs before the auth check below.
+    if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+    const env = deps.env || process.env;
+    if (!telegramConfigured(env)) return res.status(503).json({ error: 'Telegram sign-in is not set up.' });
+    const { code, verifier, redirectUri } = body;
+    if (!code || !verifier || redirectUri !== allowedRedirect(env)) return res.status(400).json({ error: 'Bad sign-in request.' });
+    try {
+      const idToken = await (deps.exchangeCode || exchangeCode)({ code, verifier, redirectUri }, { env, fetchImpl: deps.fetchImpl });
+      const claims = await (deps.verifyIdToken || verifyIdToken)(idToken, { env, fetchImpl: deps.fetchImpl });
+      const { tokenHash } = await sessionTokenFor(supabase, claims);
+      return res.status(200).json({ token_hash: tokenHash });
+    } catch (err) {
+      console.error('telegram-login failed:', err.message);
+      return res.status(401).json({ error: 'Telegram sign-in failed. Please try again.' });
+    }
+  }
 
   if (action === 'billing-cancel') return cancelPurchase(req, res, supabase, deps);
 
