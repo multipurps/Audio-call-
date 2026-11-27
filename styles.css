@@ -1585,3 +1585,12 @@ body::before{content:""; position:absolute; top:0; left:0; right:0; height:var(-
 @media (prefers-reduced-motion:reduce){.goldBadge{animation:none;}}
 
 .gateOnly.hidden{display:none;}
+
+.pgRow{margin:18px 16px 4px; padding:14px; border-radius:18px; background:var(--card,rgba(255,255,255,.06)); border:1px solid rgba(255,255,255,.1);}
+.pgHead strong{display:block; font-size:16px;}
+.pgHead span{display:block; font-size:13px; opacity:.7; margin:2px 0 12px;}
+.pgBtns{display:flex; gap:10px;}
+.pgBtn{flex:1; display:flex; align-items:center; justify-content:center; gap:8px; height:46px; border-radius:14px; border:1px solid rgba(255,255,255,.18); background:transparent; color:inherit; font:inherit; font-weight:600; font-size:14px;}
+.pgBtn .ic{width:18px; height:18px;}
+/* Playground has no picture-in-picture and no layout switch. */
+#videoCallScreen[data-playground="1"] .vcSelfWrap,#videoCallScreen[data-playground="1"] #vcLayoutBtn{display:none !important;}

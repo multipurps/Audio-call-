@@ -2283,6 +2283,7 @@ document.querySelectorAll('[data-method]').forEach((btn) => btn.addEventListener
 }));
 // ---- Video call screen: the Anam avatar speaks on the call; your camera is the PiP (or the other half of
 // the split). Keys never reach the browser: the server mints the session.
+var pgMic = null;
 let vcClient = null, vcSelfStream = null, vcMuted = false, vcSilentCtx = null;
 let vcTranscript = [], vcAvatarAudio = null, flyCall = null;
 function setVcStatus(text, live = false) { const el = $('vcStatus'); if (el) el.textContent = text; $('videoCallScreen').classList.toggle('live', live); }
@@ -2296,6 +2297,7 @@ function setVcLayout(layout) {
 function setVcMuted(muted) {
   vcMuted = muted;
   if (vcSelfStream) vcSelfStream.getAudioTracks().forEach((t) => { t.enabled = !muted; });
+  if (pgMic) pgMic.getAudioTracks().forEach((t) => { t.enabled = !muted; });
   try { muted ? vcClient?.muteInputAudio?.() : vcClient?.unmuteInputAudio?.(); } catch (_) {}
   $('vcMuteBtn').classList.toggle('active', muted);
   $('vcMuteBtn').setAttribute('aria-pressed', String(muted));
@@ -2310,7 +2312,7 @@ function vcShowStage() {
   $('vcPeerPh')?.classList.remove('hidden');
 }
 $('vcMain')?.addEventListener('playing', () => $('vcMainPh')?.classList.add('hidden'));
-async function openVideoCall({ contactName = '', toNumber = '', brief = '', calleeInput = null } = {}) {
+async function openVideoCall({ contactName = '', toNumber = '', brief = '', calleeInput = null, playground = false } = {}) {
   const party = callPartyLabel(contactName, toNumber);
   $('vcName').textContent = party.name;
   $('vcAvatar').textContent = party.initials;
@@ -2346,7 +2348,8 @@ async function openVideoCall({ contactName = '', toNumber = '', brief = '', call
     vcSilentCtx = calleeInput ? null : new AC();
     const silentIn = calleeInput || vcSilentCtx.createMediaStreamDestination().stream;
     await vcClient.streamToVideoElement('vcMain', silentIn);
-    try { vcClient.muteInputAudio(); } catch (_) {}
+    // In the Playground you talk to the avatar yourself, so its input stays open.
+    if (!playground) { try { vcClient.muteInputAudio(); } catch (_) {} }
     setVcStatus('Connected', true);
   } catch (e) {
     fail('Avatar call', e.message || 'The avatar could not start.');
@@ -2459,6 +2462,7 @@ function stopLiveSwap() {
   }).catch(() => {});
 }
 function closeVideoCall() {
+  endPlayground();
   if (flyCall) {
     const f = flyCall; flyCall = null;
     clearTimeout(f.greetTimer);
@@ -7072,3 +7076,27 @@ async function askNotificationsOnInstall() {
     (window.requestIdleCallback || ((f) => setTimeout(f, 3500)))(loadGlow, { timeout: 6000 });
   }
 }
+
+
+// ---- Playground: talk to your avatar, or try Live Swap, with no call and nobody dialled. No PiP.
+// It reuses the video call screen (hidden PiP and layout button via data-playground). Capped at 10 minutes.
+let pgTimer = null;
+function endPlayground() {
+  clearTimeout(pgTimer); pgTimer = null;
+  if (pgMic) { pgMic.getTracks().forEach((t) => t.stop()); pgMic = null; }
+  const el = $('videoCallScreen'); if (el) delete el.dataset.playground;
+}
+async function startPlayground(kind) {
+  if (!$('videoCallScreen').classList.contains('hidden')) return;
+  $('videoCallScreen').dataset.playground = '1';
+  pgTimer = setTimeout(() => { closeVideoCall(); showNotice({ kind: 'info', title: 'Playground', message: 'Playground ended after 10 minutes.' }); }, 10 * 60 * 1000);
+  if (kind === 'swap') { await openLiveSwap({ contactName: 'Playground' }); if ($('videoCallScreen').classList.contains('hidden')) endPlayground(); return; }
+  try { pgMic = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (_) { endPlayground(); return showNotice({ kind: 'error', title: 'Playground', message: 'Allow the microphone for this app, then try again.' }); }
+  await openVideoCall({
+    contactName: 'My avatar', calleeInput: pgMic, playground: true,
+    brief: 'This is a practice chat with the user themselves, not a real call. Chat naturally and answer what they ask.',
+  });
+}
+$('pgAvatarBtn')?.addEventListener('click', () => startPlayground('avatar'));
+$('pgSwapBtn')?.addEventListener('click', () => startPlayground('swap'));

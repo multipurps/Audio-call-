@@ -32,7 +32,7 @@
 </script>
 <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=2026-11-27.4">
+<link rel="stylesheet" href="styles.css?v=2026-11-27.5">
     <script>
       // Wake the sleeping backend services the instant the page opens - before
       // sign-in, before app.js downloads, before any splash screen - so they
@@ -155,7 +155,7 @@
       // has to wait for DOMContentLoaded just like the original tag's
       // (implicit, built-in) deferred timing did.
       function loadApp() {
-        import('./app.js?v=2026-11-27.4').catch(function (err) {
+        import('./app.js?v=2026-11-27.5').catch(function (err) {
           showBootError('Something went wrong. Check your connection and try again.', 'Failed to load app.js: ' + ((err && err.stack) || (err && err.message) || String(err)));
         });
       }
@@ -459,6 +459,14 @@
             <button type="button" class="picRemove hidden" id="picSwapRemove" aria-label="Remove Live Swap picture"><svg class="ic"><use href="#ic-close"/></svg></button>
           </div>
           <div class="picLabel">Live Swap</div>
+        </div>
+      </section>
+
+      <section class="pgRow" aria-label="Playground">
+        <div class="pgHead"><strong>Playground</strong><span>Try your avatar and Live Swap. No call, no one is dialled.</span></div>
+        <div class="pgBtns">
+          <button type="button" class="pgBtn" id="pgAvatarBtn"><svg class="ic"><use href="#ic-video"/></svg>Talk to my avatar</button>
+          <button type="button" class="pgBtn" id="pgSwapBtn"><svg class="ic"><use href="#ic-avatar"/></svg>Try Live Swap</button>
         </div>
       </section>
 
@@ -1662,11 +1670,11 @@
     <p class="callDetailAgainStatus" id="callDetailAgainStatus" role="status"></p>
   </div>
 </dialog>
-  <script src="btnLoading.js?v=2026-11-27.4" defer></script>
-  <script src="callWakeLock.js?v=2026-11-27.4" defer></script>
-  <script src="tabpill.js?v=2026-11-27.4" defer></script>
-  <script src="wacalls-media-core.js?v=2026-11-27.4" defer></script>
-  <script src="wacalls-media.js?v=2026-11-27.4" defer></script>
-  <script src="wacalls-call.js?v=2026-11-27.4" defer></script>
+  <script src="btnLoading.js?v=2026-11-27.5" defer></script>
+  <script src="callWakeLock.js?v=2026-11-27.5" defer></script>
+  <script src="tabpill.js?v=2026-11-27.5" defer></script>
+  <script src="wacalls-media-core.js?v=2026-11-27.5" defer></script>
+  <script src="wacalls-media.js?v=2026-11-27.5" defer></script>
+  <script src="wacalls-call.js?v=2026-11-27.5" defer></script>
 </body>
 </html>
