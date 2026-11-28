@@ -6,6 +6,7 @@ import { readVapid, classifyPushFailure, summarizeFailures } from '../lib/vapid.
 import { getServiceClient, getAdminAccess, normEmail, maskEmail } from '../lib/supabaseAdmin.js';
 import { AI_ACTIONS, handleAiAction } from '../lib/aiBehaviorAdmin.js';
 import { keysStatus, keysSave } from '../lib/secrets.js';
+import { phoneCheck } from '../lib/phoneCheck.js';
 import { STARTING_MINUTES, premiumState } from '../lib/billing.js';
 
 // Every admin-only action lives here behind ?action=..., instead of one
@@ -20,7 +21,7 @@ import { STARTING_MINUTES, premiumState } from '../lib/billing.js';
 //          they may call only INVESTOR_ACTIONS below (revenue overview, usage and cost figures).
 //          Everything else (users, credits, AI behavior, Call Emysa, content, push, admin management)
 //          is refused here, whatever the admin page shows.
-const OWNER_ONLY = new Set(['admin-list', 'admin-decide', 'keys-status', 'keys-save', 'delete-user']);
+const OWNER_ONLY = new Set(['admin-list', 'admin-decide', 'keys-status', 'keys-save', 'delete-user', 'phone-check']);
 const INVESTOR_ACTIONS = new Set(['overview', 'analytics', 'rates']);
 
 export default async function handler(req, res) {
@@ -67,6 +68,10 @@ export default async function handler(req, res) {
     case 'set-premium': return setPremium(req, res, supabase);
     case 'clear-credits': return clearCredits(req, res, supabase);
     case 'delete-user': return deleteUser(req, res, supabase, access);
+    case 'phone-check': {
+      const { data: rows } = await supabase.from('phone_lines').select('phone_number').limit(50);
+      return res.status(200).json(await phoneCheck({ appLines: [...new Set((rows || []).map((r) => r.phone_number).filter(Boolean))] }));
+    }
     case 'rates': return rates(req, res, supabase);
     case 'admin-list': return listAdmins(req, res, supabase, access);
     case 'admin-decide': return decideAdmin(req, res, supabase, access);

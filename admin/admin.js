@@ -586,6 +586,15 @@ async function loadKeys() {
         } catch (err) { hint.textContent = err.message; }
       };
     });
+    el.insertAdjacentHTML('beforeend', `<div class="aCard"><div class="aHint" style="margin:0 0 12px;">Phone check: asks SignalWire directly about the account, the calling numbers and the last calls it handled.</div>
+      <button class="aBtn" id="phoneCheckBtn">Run phone check</button><pre id="phoneCheckOut" style="white-space:pre-wrap;font-size:12px;margin-top:12px;"></pre></div>`);
+    $('phoneCheckBtn').onclick = async () => {
+      const out = $('phoneCheckOut'); out.textContent = 'Checking…';
+      try {
+        const r = await api('phone-check');
+        out.textContent = (r.problems?.length ? 'PROBLEMS\n- ' + r.problems.join('\n- ') + '\n\n' : 'No problems found in the setup.\n\n') + JSON.stringify({ ...r, problems: undefined }, null, 2);
+      } catch (err) { out.textContent = err.message; }
+    };
   } catch (err) { fail(el, err); }
 }
 
