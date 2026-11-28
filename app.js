@@ -2378,6 +2378,13 @@ function plainLiveSwapError(message = '') {
   }
   return m;
 }
+// The exact words from Xmax: SDK error code, Xmax API code, HTTP status and message. Shown on screen so a failure is never a guess.
+function xmaxDetail(e) {
+  if (!e) return 'no detail';
+  const bits = [e.code, e.apiCode != null ? `api ${e.apiCode}` : '', e.httpStatus ? `http ${e.httpStatus}` : ''].filter(Boolean).join(' ');
+  const msg = String(e.message || e).replace(/\s+/g, ' ').slice(0, 300);
+  return bits ? `${bits}: ${msg}` : msg;
+}
 async function openLiveSwap({ contactName = '', stream = null } = {}) {
   const granted = stream || await askLivePermissions();
   if (!granted) return showNotice({ kind: 'error', title: 'Live video', message: LIVE_PERMISSION_MSG });
@@ -2405,6 +2412,16 @@ async function openLiveSwap({ contactName = '', stream = null } = {}) {
     const client = new X.XmaxClient(new X.XmaxConfiguration({ apiKey: tk.temporaryApiKey, environment: X.XmaxEnvironment.global }));
     const realtime = client.createRealtimeManager(new X.RealtimeConfiguration({ model: X.RealtimeModel.x2_1_1_preview_us }));
     vcXmax = { realtime, tk: tk.temporaryApiKey, timer: null, cam: null, camVid: null, canvasTrack: null };
+    // Xmax does not throw when generation fails after it starts. It reports it here, with the real reason.
+    const thisRealtime = realtime;
+    await realtime.setStateListener((st) => {
+      console.info('[live-swap] state', st.connectionState, st.reason && st.reason.kind);
+      if (vcXmax && vcXmax.realtime === thisRealtime && st.reason && st.reason.kind === 'failure') {
+        const detail = xmaxDetail(st.reason.error);
+        console.warn('[live-swap] Xmax failure', detail);
+        fail('Live Swap', `Live Swap stopped. ${detail}`);
+      }
+    });
     // Camera only. Flipped left/right through a canvas, so the output keeps the true left/right.
     const cam = granted;
     vcXmax.cam = cam;
@@ -2449,8 +2466,8 @@ async function openLiveSwap({ contactName = '', stream = null } = {}) {
   } catch (e) {
     const cameraDenied = /NotAllowed|Permission|denied/i.test(String(e && (e.name || e.message)));
     console.warn('[live-swap] failed at', stage, e);
-    const raw = String((e && e.message) || e || '').replace(/\s+/g, ' ').slice(0, 140);
-    fail('Live Swap', cameraDenied ? 'Allow camera access to use Live Swap.' : `${plainLiveSwapError(e.message)} [${stage}: ${raw || 'no detail'}]`);
+    const raw = xmaxDetail(e);
+    fail('Live Swap', cameraDenied ? 'Allow camera access to use Live Swap.' : `${plainLiveSwapError(e && e.message)} [${stage}: ${raw}]`);
   }
 }
 // Stops Live Swap: closes Xmax, revokes its temporary key, and stops the camera.
