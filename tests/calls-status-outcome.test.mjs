@@ -43,9 +43,9 @@ test('a late ringing callback cannot reopen a finished call', async () => {
 
 test('a no-answer call keeps the carrier\'s own report in the message', async () => {
   const db = database(seed('ringing', { created_at: new Date(Date.now() - 26000).toISOString() }));
-  await post(db, 'k1', { CallStatus: 'no-answer', SipResponseCode: '480' });
+  await post(db, 'k1', { CallStatus: 'no-answer', SipResponseCode: '408' });
   const row = db.tables.calls[0];
   assert.equal(row.status, 'no_answer');
   assert.match(row.outcome_summary, /Zeez's phone rang but nobody picked up/);
-  assert.match(row.outcome_summary, /Carrier report: no-answer, SIP 480, 2\d s after dialing\./);
+  assert.match(row.outcome_summary, /Carrier report: no-answer, SIP 408, 2\ds after dialing\./);
 });
