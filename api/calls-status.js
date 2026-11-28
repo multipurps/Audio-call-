@@ -30,7 +30,7 @@ export default async function handler(req, res) {
   };
   const status = statusMap[CallStatus] || CallStatus;
 
-  const { data: call } = await supabase.from('calls').select('user_id, contact_id, session_id, status, outcome_summary').eq('id', callId).maybeSingle();
+  const { data: call } = await supabase.from('calls').select('user_id, contact_id, session_id, status, outcome_summary, created_at').eq('id', callId).maybeSingle();
 
   // The outcome was already decided when the call was answered (voicemail, fax). The carrier's final `completed`
   // is just the hang-up we did ourselves: keep that outcome, and tell the chat once.
@@ -42,6 +42,8 @@ export default async function handler(req, res) {
     return res.status(200).send('ok');
   }
 
+  // Keep the carrier's own words in the logs, whatever we decide from them.
+  console.info(`[calls-status] call=${callId} ${JSON.stringify({ CallStatus, SipResponseCode, ErrorCode, AnsweredBy, CallDuration })}`);
   const update = { status };
   const terminal = ['busy', 'no-answer', 'failed', 'canceled'].includes(CallStatus);
   const seconds = Number.parseInt(CallDuration, 10) || 0;
@@ -63,7 +65,10 @@ export default async function handler(req, res) {
       byUser: call?.status === 'canceling',
     });
     update.status = outcome.status;
-    if (outcome.summary) update.outcome_summary = outcome.summary;
+    // The carrier's own report, so a failure is never just our reading of it.
+    const rang = call?.created_at ? Math.max(0, Math.round((Date.now() - new Date(call.created_at).getTime()) / 1000)) : null;
+    const report = `Carrier report: ${voicemail ? 'voicemail' : CallStatus}${SipResponseCode ? `, SIP ${SipResponseCode}` : ''}${ErrorCode ? `, code ${ErrorCode}` : ''}${rang != null ? `, ${rang}s after dialing` : ''}.`;
+    if (outcome.summary) update.outcome_summary = `${outcome.summary} ${report}`;
   } else if (droppedFast) {
     // Connected for a few seconds and gone, with no voicemail flag: say exactly that rather than nothing.
     update.outcome_summary = `The call to ${who || 'them'} connected for ${seconds} second${seconds === 1 ? '' : 's'} and then ended before any conversation. It may have gone to voicemail or dropped. Try again.`;

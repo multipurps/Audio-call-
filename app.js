@@ -2914,7 +2914,7 @@ function applyCallStatusUpdate(callRow) {
         note.textContent = reason;
         panel.appendChild(note);
         panel.scrollTop = panel.scrollHeight;
-        setTimeout(() => closeCallScreen(), 6000);
+        // Stays until the person closes it: a failure reason that disappears on its own cannot be read.
         return;
       }
     }
