@@ -955,7 +955,7 @@ async function resumeActiveCallIfAny() {
   const urlCallId = new URLSearchParams(window.location.search).get('callId');
   if (urlCallId) {
     const deepLinked = (calls || []).find((c) => c.id === urlCallId);
-    if (deepLinked) {
+    if (deepLinked && deepLinked.platform !== 'playground') {
       if (['queued', 'ringing', 'in_progress', 'in-progress'].includes(deepLinked.status)) {
         trackActiveCall(deepLinked.id, deepLinked.to_number, deepLinked.contact_name);
         openCallScreen(deepLinked.id, deepLinked.to_number, deepLinked.contact_name);
@@ -964,7 +964,7 @@ async function resumeActiveCallIfAny() {
       openCallDetail(deepLinked, deepLinked.contact_name || deepLinked.to_number, !!deepLinked.contact_name);
     }
   }
-  const live = (calls || []).find((c) => ['queued', 'ringing', 'in_progress', 'in-progress'].includes(c.status));
+  const live = (calls || []).find((c) => c.platform !== 'playground' && ['queued', 'ringing', 'in_progress', 'in-progress'].includes(c.status));
   if (live) {
     trackActiveCall(live.id, live.to_number, live.contact_name);
     openCallScreen(live.id, live.to_number, live.contact_name);
@@ -975,6 +975,7 @@ async function resumeActiveCallIfAny() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'calls', filter: `user_id=eq.${currentUser.id}` }, (payload) => {
         const c = payload?.new;
         if (videoCallOnScreen()) return; // the WhatsApp video call writes its own row: it must not open the audio screen
+        if (c && c.platform === 'playground') return; // the Playground is video: its billing row never opens the audio screen
         if (c && ['queued', 'ringing', 'in_progress', 'in-progress'].includes(c.status)) {
           trackActiveCall(c.id, c.to_number, c.contact_name);
           if ($('callScreen').classList.contains('hidden') && !assistantCallOpen) {
@@ -2359,6 +2360,9 @@ async function openVideoCall({ contactName = '', toNumber = '', brief = '', call
 // the reference. No briefing and no microphone. The output fills the call screen. It is shown only on your
 // screen until WhatsApp video (phase 2) carries it to the callee.
 let vcXmax = null; // { realtime, timer, cam, camVid, tk }
+let liveAttempt = 0; // each openLiveSwap run; a run that was replaced by a retry must stay silent
+let liveOwned = null; // camera+mic stream Live Swap asked for itself: released on every exit, even before Xmax starts
+const releaseLiveOwned = () => { if (liveOwned) { try { liveOwned.getTracks().forEach((t) => t.stop()); } catch (_) {} liveOwned = null; } };
 // Camera and microphone are asked for BEFORE any call screen opens, so the permission prompt never
 // appears on top of a half-open call. Null when the person says no.
 const LIVE_CAM = { facingMode: 'user', width: { ideal: 1024 }, height: { ideal: 1920 }, frameRate: { ideal: 15, max: 15 } };
@@ -2381,13 +2385,19 @@ function plainLiveSwapError(message = '') {
 // The exact words from Xmax: SDK error code, Xmax API code, HTTP status and message. Shown on screen so a failure is never a guess.
 function xmaxDetail(e) {
   if (!e) return 'no detail';
+  if (xmaxNoModel(e)) return 'Xmax has no Live Swap model available for this account (Xmax error 46008, "no available model under the current model type"). Ask Xmax to enable the x2.1.1-preview model for your key.';
   const bits = [e.code, e.apiCode != null ? `api ${e.apiCode}` : '', e.httpStatus ? `http ${e.httpStatus}` : ''].filter(Boolean).join(' ');
   const msg = String(e.message || e).replace(/\s+/g, ' ').slice(0, 300);
   return bits ? `${bits}: ${msg}` : msg;
 }
-async function openLiveSwap({ contactName = '', stream = null } = {}) {
+const XMAX_MODELS = ['x2_1_1_preview_us', 'x2_1_1_preview_cn'];
+// Xmax api code 46008 is "no model available under the current model type" (the Chinese text it sends back).
+const xmaxNoModel = (e) => Boolean(e && (e.apiCode === 46008 || /\b46008\b/.test(String(e.message || ''))));
+async function openLiveSwap({ contactName = '', stream = null, owned = null, modelIdx = 0 } = {}) {
   const granted = stream || await askLivePermissions();
   if (!granted) return showNotice({ kind: 'error', title: 'Live video', message: LIVE_PERMISSION_MSG });
+  const attempt = ++liveAttempt;
+  if (!stream) liveOwned = granted; else if (owned) liveOwned = owned;
   const party = callPartyLabel(contactName, '');
   $('vcName').textContent = party.name;
   $('vcAvatar').textContent = party.initials;
@@ -2396,6 +2406,16 @@ async function openLiveSwap({ contactName = '', stream = null } = {}) {
   $('videoCallScreen').classList.remove('hidden');
   setVcStatus('Starting…');
   const fail = (title, message) => { closeVideoCall(); showNotice({ kind: 'error', title, message }); };
+  // Xmax has no model of this type for the account: try the other model once before giving up.
+  const tryNextModel = () => {
+    if (modelIdx + 1 >= XMAX_MODELS.length) return false;
+    console.warn('[live-swap] no model for', XMAX_MODELS[modelIdx], '- trying', XMAX_MODELS[modelIdx + 1]);
+    const keepOwned = liveOwned; liveOwned = null; // stopLiveSwap must not release what the retry still needs
+    if (vcXmax) vcXmax.cam = null;
+    stopLiveSwap();
+    openLiveSwap({ contactName, stream: granted, owned: keepOwned, modelIdx: modelIdx + 1 }).catch(() => {});
+    return true;
+  };
   let stage = 'start';
   try {
     const { data: prof } = await supabase.from('profiles').select('live_swap_url').eq('user_id', currentUser.id).maybeSingle();
@@ -2410,13 +2430,14 @@ async function openLiveSwap({ contactName = '', stream = null } = {}) {
     stage = 'sdk';
     const X = await import('https://esm.sh/@xmaxai/web-sdk@1.0.10');
     const client = new X.XmaxClient(new X.XmaxConfiguration({ apiKey: tk.temporaryApiKey, environment: X.XmaxEnvironment.global }));
-    const realtime = client.createRealtimeManager(new X.RealtimeConfiguration({ model: X.RealtimeModel.x2_1_1_preview_us }));
+    const realtime = client.createRealtimeManager(new X.RealtimeConfiguration({ model: X.RealtimeModel[XMAX_MODELS[modelIdx]] }));
     vcXmax = { realtime, tk: tk.temporaryApiKey, timer: null, cam: null, camVid: null, canvasTrack: null };
     // Xmax does not throw when generation fails after it starts. It reports it here, with the real reason.
     const thisRealtime = realtime;
     await realtime.setStateListener((st) => {
       console.info('[live-swap] state', st.connectionState, st.reason && st.reason.kind);
-      if (vcXmax && vcXmax.realtime === thisRealtime && st.reason && st.reason.kind === 'failure') {
+      if (attempt === liveAttempt && vcXmax && vcXmax.realtime === thisRealtime && st.reason && st.reason.kind === 'failure') {
+        if (xmaxNoModel(st.reason.error) && tryNextModel()) return;
         const detail = xmaxDetail(st.reason.error);
         console.warn('[live-swap] Xmax failure', detail);
         fail('Live Swap', `Live Swap stopped. ${detail}`);
@@ -2465,15 +2486,19 @@ async function openLiveSwap({ contactName = '', stream = null } = {}) {
     setVcStatus('Connected', true);
   } catch (e) {
     const cameraDenied = /NotAllowed|Permission|denied/i.test(String(e && (e.name || e.message)));
+    if (attempt !== liveAttempt) return; // replaced by a retry
     console.warn('[live-swap] failed at', stage, e);
+    if (xmaxNoModel(e) && tryNextModel()) return;
     const raw = xmaxDetail(e);
     fail('Live Swap', cameraDenied ? 'Allow camera access to use Live Swap.' : `${plainLiveSwapError(e && e.message)} [${stage}: ${raw}]`);
   }
 }
 // Stops Live Swap: closes Xmax, revokes its temporary key, and stops the camera.
 function stopLiveSwap() {
-  if (!vcXmax) return;
+  liveAttempt++; // anything still starting must stay silent now
+  if (!vcXmax) { releaseLiveOwned(); return; }
   const x = vcXmax; vcXmax = null;
+  releaseLiveOwned();
   if (x.timer) clearInterval(x.timer);
   try { x.realtime && x.realtime.close(); } catch (_) {}
   // Release everything the live path started: the flipped canvas feed, the hidden camera element, and the camera.
