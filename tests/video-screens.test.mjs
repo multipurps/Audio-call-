@@ -17,8 +17,9 @@ test('Live Swap releases the camera and microphone it asked for, even when Xmax 
   assert.match(app.slice(app.indexOf('function closeVideoCall()')), /stopLiveSwap\(\);/);
 });
 
-test('Xmax error 46008 is explained in English and retried once with the other model', () => {
+test('Xmax errors 46008 and 46002 are explained in English; no retry on the cn model', () => {
   assert.match(app, /46008/);
-  assert.match(app, /XMAX_MODELS = \['x2_1_1_preview_us', 'x2_1_1_preview_cn'\]/);
+  assert.match(app, /46002/);
+  assert.match(app, /XMAX_MODELS = \['x2_1_1_preview_us'\];/);
   assert.match(app, /xmaxNoModel\(e\) && tryNextModel\(\)/);
 });

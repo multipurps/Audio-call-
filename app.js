@@ -2385,12 +2385,14 @@ function plainLiveSwapError(message = '') {
 // The exact words from Xmax: SDK error code, Xmax API code, HTTP status and message. Shown on screen so a failure is never a guess.
 function xmaxDetail(e) {
   if (!e) return 'no detail';
+  if (e && (e.apiCode === 46002 || /\b46002\b/.test(String(e.message || '')))) return 'Xmax rejected the API key (Xmax error 46002, "invalid user API Key"). The key saved for this app needs to be checked against your Xmax account.';
   if (xmaxNoModel(e)) return 'Xmax says no Live Swap model is available right now (Xmax error 46008: "no available model under the current model type"). The cause is on the Xmax side, so please send them that code.';
   const bits = [e.code, e.apiCode != null ? `api ${e.apiCode}` : '', e.httpStatus ? `http ${e.httpStatus}` : ''].filter(Boolean).join(' ');
   const msg = String(e.message || e).replace(/\s+/g, ' ').slice(0, 300);
   return bits ? `${bits}: ${msg}` : msg;
 }
-const XMAX_MODELS = ['x2_1_1_preview_us', 'x2_1_1_preview_cn'];
+// Only the US model: the cn model answered "invalid API key" (46002) for a working global key, so a retry on it only hid the real error.
+const XMAX_MODELS = ['x2_1_1_preview_us'];
 // Xmax api code 46008 is "no model available under the current model type" (the Chinese text it sends back).
 const xmaxNoModel = (e) => Boolean(e && (e.apiCode === 46008 || /\b46008\b/.test(String(e.message || ''))));
 async function openLiveSwap({ contactName = '', stream = null, owned = null, modelIdx = 0 } = {}) {
