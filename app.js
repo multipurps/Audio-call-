@@ -2385,7 +2385,7 @@ function plainLiveSwapError(message = '') {
 // The exact words from Xmax: SDK error code, Xmax API code, HTTP status and message. Shown on screen so a failure is never a guess.
 function xmaxDetail(e) {
   if (!e) return 'no detail';
-  if (xmaxNoModel(e)) return 'Xmax has no Live Swap model available for this account (Xmax error 46008, "no available model under the current model type"). Ask Xmax to enable the x2.1.1-preview model for your key.';
+  if (xmaxNoModel(e)) return 'Xmax says no Live Swap model is available right now (Xmax error 46008: "no available model under the current model type"). The cause is on the Xmax side, so please send them that code.';
   const bits = [e.code, e.apiCode != null ? `api ${e.apiCode}` : '', e.httpStatus ? `http ${e.httpStatus}` : ''].filter(Boolean).join(' ');
   const msg = String(e.message || e).replace(/\s+/g, ' ').slice(0, 300);
   return bits ? `${bits}: ${msg}` : msg;
